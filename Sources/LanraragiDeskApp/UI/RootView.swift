@@ -127,6 +127,9 @@ struct RootView: View {
                     Button("Cancel", role: .destructive) {
                         appModel.indexing.cancel()
                     }
+                    Button("Reset Index", role: .destructive) {
+                        appModel.indexing.resetIndexFiles()
+                    }
                 }
             }
 

@@ -98,5 +98,28 @@ final class IndexingViewModel: ObservableObject {
         status = .idle
     }
 
+    func resetIndexFiles() {
+        cancel()
+        store = nil
+
+        let db = Self.indexDBURL()
+        let fm = FileManager.default
+        let candidates = [
+            db,
+            db.appendingPathExtension("wal"),
+            db.appendingPathExtension("shm"),
+        ]
+
+        do {
+            for url in candidates {
+                if fm.fileExists(atPath: url.path) {
+                    try fm.removeItem(at: url)
+                }
+            }
+        } catch {
+            status = .failed("Reset failed: \(error)")
+        }
+    }
+
     private static func indexDBURL() -> URL { AppPaths.indexDBURL() }
 }
