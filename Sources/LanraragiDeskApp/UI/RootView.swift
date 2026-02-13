@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import LanraragiKit
 
@@ -174,7 +175,7 @@ struct RootView: View {
             statusBlock
 
             DisclosureGroup("Advanced") {
-                advancedOptions
+                advancedOptions(profile: profile)
                     .padding(.top, 8)
             }
             .font(.callout)
@@ -214,7 +215,7 @@ struct RootView: View {
         }
     }
 
-    private var advancedOptions: some View {
+    private func advancedOptions(profile: Profile) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Match Strictness")
                 .font(.caption)
@@ -232,6 +233,22 @@ struct RootView: View {
 
             Toggle("Also match exact same cover image", isOn: $appModel.duplicates.includeExactChecksum)
                 .font(.callout)
+
+            Divider()
+
+            Text("“Not a match” is saved locally and hides that pair in future scans.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Button("Clear “Not a match” decisions", role: .destructive) {
+                appModel.duplicates.clearNotDuplicateDecisions(profile: profile)
+            }
+            .font(.callout)
+
+            Button("Show index database in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([AppPaths.indexDBURL()])
+            }
+            .font(.callout)
         }
     }
 

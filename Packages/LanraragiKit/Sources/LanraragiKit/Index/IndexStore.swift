@@ -52,6 +52,7 @@ public final class IndexStore: @unchecked Sendable {
     private var stmtSelectScanFingerprints: OpaquePointer?
     private var stmtSelectNotDuplicates: OpaquePointer?
     private var stmtInsertNotDuplicate: OpaquePointer?
+    private var stmtDeleteNotDuplicates: OpaquePointer?
 
     public init(configuration: Configuration) throws {
         self.config = configuration
@@ -125,6 +126,10 @@ public final class IndexStore: @unchecked Sendable {
             VALUES(?, ?, ?, ?)
             ON CONFLICT(profile_id, arcid_a, arcid_b) DO NOTHING;
             """)
+
+            stmtDeleteNotDuplicates = try Self.prepare(opened, sql: """
+            DELETE FROM not_duplicates WHERE profile_id = ?;
+            """)
         }
     }
 
@@ -139,6 +144,7 @@ public final class IndexStore: @unchecked Sendable {
                 stmtSelectScanFingerprints,
                 stmtSelectNotDuplicates,
                 stmtInsertNotDuplicate,
+                stmtDeleteNotDuplicates,
             ].forEach { stmt in
                 if let stmt {
                     sqlite3_finalize(stmt)
@@ -158,6 +164,7 @@ public final class IndexStore: @unchecked Sendable {
             stmtSelectScanFingerprints = nil
             stmtSelectNotDuplicates = nil
             stmtInsertNotDuplicate = nil
+            stmtDeleteNotDuplicates = nil
         }
     }
 
@@ -365,6 +372,17 @@ public final class IndexStore: @unchecked Sendable {
             sqlite3_bind_int64(stmtInsertNotDuplicate, 4, now)
 
             try stepDone(stmtInsertNotDuplicate, db: db)
+        }
+    }
+
+    public func clearNotDuplicatePairs(profileID: UUID) throws {
+        try queue.sync {
+            guard let db, let stmtDeleteNotDuplicates else { throw IndexStoreError.notOpen }
+            sqlite3_reset(stmtDeleteNotDuplicates)
+            sqlite3_clear_bindings(stmtDeleteNotDuplicates)
+
+            try bindText(stmtDeleteNotDuplicates, index: 1, value: profileID.uuidString)
+            try stepDone(stmtDeleteNotDuplicates, db: db)
         }
     }
 

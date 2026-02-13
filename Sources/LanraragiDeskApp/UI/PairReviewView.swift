@@ -45,7 +45,7 @@ struct PairReviewView: View {
 
             HSplitView {
                 pairList
-                    .frame(minWidth: 240, idealWidth: 290, maxWidth: 360)
+                    .frame(minWidth: 128, idealWidth: 140, maxWidth: 160)
 
                 pairDetail
                     .frame(minWidth: 520)
@@ -125,45 +125,68 @@ struct PairReviewView: View {
     }
 
     private var pairList: some View {
-        List(selection: $selection) {
-            if matchFilter == .both || matchFilter == .exact {
-                Section("Exact cover") {
+        ScrollView(.vertical) {
+            LazyVStack(alignment: .center, spacing: 6) {
+                if matchFilter == .both || matchFilter == .exact {
+                    sectionHeader("Exact")
                     ForEach(exactPairs, id: \.self) { p in
-                        PairRowView(
-                            profile: profile,
-                            pair: p,
-                            thumbnails: thumbnails,
-                            markNotDuplicate: { pair in
-                                let next = nextPair(after: pair)
-                                markNotDuplicate(pair)
-                                selection = next
-                            }
-                        )
-                        .tag(p)
+                        pairRow(p)
                     }
                 }
-            }
 
-            if matchFilter == .both || matchFilter == .similar {
-                Section("Similar cover") {
+                if matchFilter == .both || matchFilter == .similar {
+                    sectionHeader("Similar")
+                        .padding(.top, 4)
                     ForEach(similarPairs, id: \.self) { p in
-                        PairRowView(
-                            profile: profile,
-                            pair: p,
-                            thumbnails: thumbnails,
-                            markNotDuplicate: { pair in
-                                let next = nextPair(after: pair)
-                                markNotDuplicate(pair)
-                                selection = next
-                            }
-                        )
-                        .tag(p)
+                        pairRow(p)
                     }
                 }
             }
+            .padding(8)
         }
+        .scrollIndicators(.visible)
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    @ViewBuilder
+    private func sectionHeader(_ title: String) -> some View {
+        HStack {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(.quaternary.opacity(0.45))
+                .clipShape(Capsule())
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private func pairRow(_ p: DuplicateScanResult.Pair) -> some View {
+        PairRowView(
+            profile: profile,
+            pair: p,
+            thumbnails: thumbnails,
+            markNotDuplicate: { pair in
+                let next = nextPair(after: pair)
+                markNotDuplicate(pair)
+                selection = next
+            }
+        )
+        .padding(.vertical, 2)
+        .background {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(selection == p ? Color.accentColor.opacity(0.18) : Color.clear)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(selection == p ? Color.accentColor.opacity(0.35) : Color.clear, lineWidth: 1)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { selection = p }
     }
 
     private func orderedPairsForNavigation() -> [DuplicateScanResult.Pair] {
@@ -253,8 +276,8 @@ private struct PairRowView: View {
             CoverThumb(profile: profile, arcid: pair.arcidA, thumbnails: thumbnails)
             CoverThumb(profile: profile, arcid: pair.arcidB, thumbnails: thumbnails)
         }
+        .frame(maxWidth: .infinity, alignment: .center)
         .padding(.vertical, 8)
-        .padding(.leading, 8)
         .overlay(alignment: .leading) {
             RoundedRectangle(cornerRadius: 4, style: .continuous)
                 .fill(reasonColor.opacity(0.9))
@@ -401,7 +424,7 @@ private struct PairCompareView: View {
 
     private var detailsCollapsed: Bool {
         // `minY` becomes negative as you scroll down.
-        pagesScrollMinY < -60
+        pagesScrollMinY < -24
     }
 
     private var topBar: some View {
@@ -412,6 +435,7 @@ private struct PairCompareView: View {
                     arcid: pair.arcidA,
                     meta: metaA,
                     thumbnails: thumbnails,
+                    collapsed: detailsCollapsed,
                     onDelete: { confirmDeleteArcid = pair.arcidA }
                 )
 
@@ -423,7 +447,7 @@ private struct PairCompareView: View {
                     goNext()
                 }
                 .buttonStyle(.borderedProminent)
-                .padding(.top, 16)
+                .controlSize(detailsCollapsed ? .small : .regular)
 
                 Divider()
                     .padding(.vertical, 6)
@@ -433,6 +457,7 @@ private struct PairCompareView: View {
                     arcid: pair.arcidB,
                     meta: metaB,
                     thumbnails: thumbnails,
+                    collapsed: detailsCollapsed,
                     onDelete: { confirmDeleteArcid = pair.arcidB }
                 )
             }
@@ -441,7 +466,7 @@ private struct PairCompareView: View {
                 ArchiveCompareDetails(metaA: metaA, metaB: metaB)
             }
         }
-        .padding(12)
+        .padding(detailsCollapsed ? 6 : 10)
         .background(.quaternary.opacity(0.35))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
@@ -565,43 +590,48 @@ private struct ArchiveSideHeader: View {
     let arcid: String
     let meta: ArchiveMetadata?
     let thumbnails: ThumbnailLoader
+    let collapsed: Bool
     let onDelete: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .top, spacing: 10) {
             CoverThumb(profile: profile, arcid: arcid, thumbnails: thumbnails)
                 .frame(width: 64, height: 82)
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: collapsed ? 4 : 6) {
                 Text(displayTitle)
                     .font(.headline)
-                    .lineLimit(2)
+                    .lineLimit(collapsed ? 1 : 2)
 
-                HStack(spacing: 8) {
-                    if let pages = meta?.pagecount {
-                        Text("\(pages) pages")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                if !collapsed {
+                    HStack(spacing: 8) {
+                        if let pages = meta?.pagecount {
+                            Text("\(pages) pages")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
 
-                    if let ext = meta?.fileExtension, !ext.isEmpty {
-                        Text(ext.uppercased())
-                            .font(.caption2)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(.quaternary.opacity(0.55))
-                            .clipShape(Capsule())
+                        if let ext = meta?.fileExtension, !ext.isEmpty {
+                            Text(ext.uppercased())
+                                .font(.caption2)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(.quaternary.opacity(0.55))
+                                .clipShape(Capsule())
+                        }
                     }
                 }
-
-                Button(role: .destructive) { onDelete() } label: {
-                    Label("Delete", systemImage: "trash")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
             }
 
             Spacer(minLength: 0)
+
+            Button(role: .destructive) { onDelete() } label: {
+                Image(systemName: "trash")
+                    .imageScale(.medium)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(collapsed ? .mini : .small)
+            .help("Delete this archive from LANraragi")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -617,18 +647,20 @@ private struct ArchiveCompareDetails: View {
     let metaB: ArchiveMetadata?
 
     var body: some View {
-        Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 8) {
-            diffRow("Category", a: metaA?.category, b: metaB?.category)
+        VStack(alignment: .leading, spacing: 10) {
+            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 8) {
             diffRow("Pages", a: metaA?.pagecount.map(String.init), b: metaB?.pagecount.map(String.init))
             diffRow("Extension", a: metaA?.fileExtension, b: metaB?.fileExtension)
             diffRow("Filename", a: metaA?.filename, b: metaB?.filename, lineLimit: 2)
-            diffRow("Tags", a: metaA?.tags, b: metaB?.tags, lineLimit: 2)
             diffRow("Summary", a: metaA?.summary, b: metaB?.summary, lineLimit: 2)
             diffRow("New", a: metaA?.isnew.map { $0 ? "Yes" : "No" }, b: metaB?.isnew.map { $0 ? "Yes" : "No" })
             diffRow("Progress", a: metaA?.progress.map(String.init), b: metaB?.progress.map(String.init))
             diffRow("Last Read", a: metaA?.lastreadtime.map(String.init), b: metaB?.lastreadtime.map(String.init))
+            }
+            .font(.caption)
+
+            TagGroupCompareView(tagsA: metaA?.tags, tagsB: metaB?.tags)
         }
-        .font(.caption)
         .padding(.top, 2)
     }
 
@@ -659,6 +691,171 @@ private struct ArchiveCompareDetails: View {
                 .background(different ? Color.yellow.opacity(0.14) : Color.clear)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
+    }
+}
+
+private struct TagGroupCompareView: View {
+    let tagsA: String?
+    let tagsB: String?
+
+    var body: some View {
+        let rows = TagCompareGrouper.rows(tagsA: tagsA, tagsB: tagsB, maxGroups: 4, maxTagsPerGroup: 12)
+        if rows.isEmpty {
+            return AnyView(EmptyView())
+        }
+
+        return AnyView(
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Tags")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                ScrollView(.vertical) {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(rows, id: \.key) { r in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(r.title)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+
+                                HStack(alignment: .top, spacing: 10) {
+                                    TagChipWrap(
+                                        tags: r.leftTags,
+                                        highlight: r.leftOnly
+                                    )
+                                    Divider()
+                                    TagChipWrap(
+                                        tags: r.rightTags,
+                                        highlight: r.rightOnly
+                                    )
+                                }
+                            }
+                            .padding(6)
+                            .background(r.isDifferent ? Color.yellow.opacity(0.08) : Color.clear)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+                    }
+                }
+                .frame(maxHeight: 96)
+            }
+        )
+    }
+}
+
+private struct TagChipWrap: View {
+    let tags: [String]
+    let highlight: Set<String>
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 84), spacing: 6)], alignment: .leading, spacing: 6) {
+            ForEach(tags, id: \.self) { t in
+                let style: AnyShapeStyle = highlight.contains(t)
+                    ? AnyShapeStyle(Color.yellow.opacity(0.18))
+                    : AnyShapeStyle(.quaternary.opacity(0.55))
+                Text(t)
+                    .font(.caption2)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background {
+                        Capsule()
+                            .fill(style)
+                    }
+            }
+        }
+    }
+}
+
+private enum TagCompareGrouper {
+    struct Row {
+        let key: String
+        let title: String
+        let leftTags: [String]
+        let rightTags: [String]
+        let leftOnly: Set<String>
+        let rightOnly: Set<String>
+
+        var isDifferent: Bool { !leftOnly.isEmpty || !rightOnly.isEmpty }
+    }
+
+    static func rows(tagsA: String?, tagsB: String?, maxGroups: Int, maxTagsPerGroup: Int) -> [Row] {
+        let a = parse(tagsA)
+        let b = parse(tagsB)
+        if a.isEmpty, b.isEmpty { return [] }
+
+        let priority: [String] = ["language", "artist", "parody", "character", "group", "female", "male", "tag", "other"]
+        func titleFor(_ key: String) -> String {
+            switch key {
+            case "language": return "Language"
+            case "artist": return "Artist"
+            case "female": return "Female"
+            case "male": return "Male"
+            case "parody": return "Parody"
+            case "character": return "Character"
+            case "group": return "Group"
+            case "tag": return "Tags"
+            case "uploader": return "Uploader"
+            case "other": return "Other"
+            default:
+                return key.prefix(1).uppercased() + key.dropFirst()
+            }
+        }
+
+        let keys = Set(a.keys).union(b.keys)
+        var ordered = Array(keys)
+        ordered.sort { k1, k2 in
+            let i1 = priority.firstIndex(of: k1) ?? Int.max
+            let i2 = priority.firstIndex(of: k2) ?? Int.max
+            if i1 != i2 { return i1 < i2 }
+            return k1 < k2
+        }
+
+        var out: [Row] = []
+        out.reserveCapacity(min(maxGroups, ordered.count))
+
+        for k in ordered {
+            let left = Array(a[k] ?? []).sorted()
+            let right = Array(b[k] ?? []).sorted()
+            if left.isEmpty, right.isEmpty { continue }
+
+            let leftSet = Set(left)
+            let rightSet = Set(right)
+            let leftOnly = leftSet.subtracting(rightSet)
+            let rightOnly = rightSet.subtracting(leftSet)
+
+            out.append(.init(
+                key: k,
+                title: titleFor(k),
+                leftTags: Array(left.prefix(maxTagsPerGroup)),
+                rightTags: Array(right.prefix(maxTagsPerGroup)),
+                leftOnly: leftOnly,
+                rightOnly: rightOnly
+            ))
+
+            if out.count >= maxGroups { break }
+        }
+
+        return out
+    }
+
+    private static func parse(_ raw: String?) -> [String: Set<String>] {
+        let parts = (raw ?? "")
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if parts.isEmpty { return [:] }
+
+        var buckets: [String: Set<String>] = [:]
+        for t in parts {
+            let p = t.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+            if p.count == 2 {
+                let key = String(p[0]).lowercased()
+                let value = String(p[1])
+                buckets[key, default: []].insert(value)
+            } else {
+                buckets["other", default: []].insert(t)
+            }
+        }
+        return buckets
     }
 }
 

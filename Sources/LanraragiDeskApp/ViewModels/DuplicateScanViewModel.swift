@@ -151,6 +151,16 @@ final class DuplicateScanViewModel: ObservableObject {
         }
     }
 
+    func clearNotDuplicateDecisions(profile: Profile) {
+        do {
+            let store = try IndexStore(configuration: .init(url: AppPaths.indexDBURL()))
+            try store.clearNotDuplicatePairs(profileID: profile.id)
+        } catch {
+            status = .failed("Failed to clear exclusions: \(error)")
+            return
+        }
+    }
+
     func deleteArchive(profile: Profile, arcid: String) async throws {
         let account = "apiKey.\(profile.id.uuidString)"
         let apiKeyString = try KeychainService.getString(account: account)
