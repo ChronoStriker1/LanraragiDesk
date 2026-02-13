@@ -26,6 +26,7 @@ final class DuplicateScanViewModel: ObservableObject {
     @Published var strictness: Strictness = .balanced
 
     let thumbnails = ThumbnailLoader()
+    let archives = ArchiveLoader()
 
     private var task: Task<Void, Never>?
     private var runID: UUID?
@@ -126,6 +127,27 @@ final class DuplicateScanViewModel: ObservableObject {
                     status = .failed(String(describing: error))
                 }
             }
+        }
+    }
+
+    func markNotDuplicate(profile: Profile, pair: DuplicateScanResult.Pair) {
+        // Persist immediately so future scans won't show this again.
+        do {
+            let store = try IndexStore(configuration: .init(url: AppPaths.indexDBURL()))
+            try store.addNotDuplicatePair(profileID: profile.id, arcidA: pair.arcidA, arcidB: pair.arcidB)
+        } catch {
+            status = .failed("Failed to save exclusion: \(error)")
+            return
+        }
+
+        // Update the in-memory result to keep the UI responsive.
+        if var r = result {
+            r.pairs.removeAll { p in
+                (p.arcidA == pair.arcidA && p.arcidB == pair.arcidB) ||
+                (p.arcidA == pair.arcidB && p.arcidB == pair.arcidA)
+            }
+            result = r
+            resultRevision &+= 1
         }
     }
 

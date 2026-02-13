@@ -54,11 +54,56 @@ public struct DuplicateScanStats: Sendable, Equatable {
 }
 
 public struct DuplicateScanResult: Sendable {
+    public struct Pair: Sendable, Hashable {
+        public enum Reason: Int, Sendable, Hashable {
+            case exactCover = 0
+            case similarCover = 1
+        }
+
+        public var arcidA: String
+        public var arcidB: String
+        public var reason: Reason
+
+        // Only populated for .similarCover.
+        public var dHashDistance: Int?
+        public var aHashDistance: Int?
+
+        public init(
+            arcidA: String,
+            arcidB: String,
+            reason: Reason,
+            dHashDistance: Int? = nil,
+            aHashDistance: Int? = nil
+        ) {
+            if arcidA <= arcidB {
+                self.arcidA = arcidA
+                self.arcidB = arcidB
+            } else {
+                self.arcidA = arcidB
+                self.arcidB = arcidA
+            }
+            self.reason = reason
+            self.dHashDistance = dHashDistance
+            self.aHashDistance = aHashDistance
+        }
+
+        public var score: Int {
+            switch reason {
+            case .exactCover:
+                return 0
+            case .similarCover:
+                return (dHashDistance ?? 99) + (aHashDistance ?? 99)
+            }
+        }
+    }
+
     public var groups: [[String]]
+    public var pairs: [Pair]
     public var stats: DuplicateScanStats
 
-    public init(groups: [[String]], stats: DuplicateScanStats) {
+    public init(groups: [[String]], pairs: [Pair], stats: DuplicateScanStats) {
         self.groups = groups
+        self.pairs = pairs
         self.stats = stats
     }
 }
@@ -74,6 +119,7 @@ public enum DuplicateFinder {
         if fingerprints.isEmpty {
             return DuplicateScanResult(
                 groups: [],
+                pairs: [],
                 stats: .init(
                     archives: 0,
                     exactGroups: 0,
@@ -101,31 +147,36 @@ public enum DuplicateFinder {
         }
 
         var dsu = DSU(count: n)
+        var pairs: [DuplicateScanResult.Pair] = []
+        pairs.reserveCapacity(min(50_000, n))
 
         var exactGroupCount = 0
         if config.includeExactChecksum {
             // Union identical thumbnail checksums.
-            var byChecksum: [Data: Int] = [:]
-            byChecksum.reserveCapacity(n)
+            var byChecksum: [Data: [Int]] = [:]
+            byChecksum.reserveCapacity(n / 2)
 
             for (i, fp) in fingerprints.enumerated() {
-                if let j = byChecksum[fp.checksumSHA256] {
-                    let key = pairKey(i, j)
-                    if excludedNotDupKeys.contains(key) { continue }
-                    dsu.union(i, j)
-                } else {
-                    byChecksum[fp.checksumSHA256] = i
-                }
+                byChecksum[fp.checksumSHA256, default: []].append(i)
             }
 
-            // Stats: count checksum groups > 1.
-            // This is approximate (based on first-seen map). Recount accurately:
-            var counts: [Data: Int] = [:]
-            counts.reserveCapacity(byChecksum.count)
-            for fp in fingerprints {
-                counts[fp.checksumSHA256, default: 0] += 1
+            for (_, idxs) in byChecksum {
+                if idxs.count < 2 { continue }
+                exactGroupCount += 1
+
+                // Generate a "star" set of pairs (anchor + others) to avoid O(k^2) pair explosions.
+                let anchor = idxs[0]
+                for p in idxs.dropFirst() {
+                    let key = pairKey(anchor, p)
+                    if excludedNotDupKeys.contains(key) { continue }
+                    dsu.union(anchor, p)
+                    pairs.append(.init(
+                        arcidA: fingerprints[anchor].arcid,
+                        arcidB: fingerprints[p].arcid,
+                        reason: .exactCover
+                    ))
+                }
             }
-            exactGroupCount = counts.values.reduce(into: 0) { acc, c in if c > 1 { acc += 1 } }
         }
 
         var skippedBuckets = 0
@@ -186,6 +237,13 @@ public enum DuplicateFinder {
 
                         approximateEdges += 1
                         dsu.union(ia, ib)
+                        pairs.append(.init(
+                            arcidA: a.arcid,
+                            arcidB: fingerprints[ib].arcid,
+                            reason: .similarCover,
+                            dHashDistance: dDist,
+                            aHashDistance: aDist
+                        ))
                     }
                 }
             }
@@ -222,7 +280,27 @@ public enum DuplicateFinder {
             durationSeconds: duration
         )
 
-        return DuplicateScanResult(groups: groups, stats: stats)
+        // Make it easy to "review the best matches first".
+        pairs.sort { a, b in
+            if a.score != b.score { return a.score < b.score }
+            if a.reason != b.reason { return a.reason.rawValue < b.reason.rawValue }
+            if a.arcidA != b.arcidA { return a.arcidA < b.arcidA }
+            return a.arcidB < b.arcidB
+        }
+
+        // Remove duplicates (can happen if exact + approximate both hit).
+        var uniqPairs: [DuplicateScanResult.Pair] = []
+        uniqPairs.reserveCapacity(pairs.count)
+        var seenPairKeys = Set<String>()
+        seenPairKeys.reserveCapacity(pairs.count)
+        for p in pairs {
+            let key = "\(p.arcidA)|\(p.arcidB)"
+            if seenPairKeys.insert(key).inserted {
+                uniqPairs.append(p)
+            }
+        }
+
+        return DuplicateScanResult(groups: groups, pairs: uniqPairs, stats: stats)
     }
 
     private static func hamming(_ a: UInt64, _ b: UInt64) -> Int {
@@ -268,4 +346,3 @@ private struct DSU {
         }
     }
 }
-

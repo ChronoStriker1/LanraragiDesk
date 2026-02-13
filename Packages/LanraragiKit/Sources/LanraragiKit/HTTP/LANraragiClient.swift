@@ -38,6 +38,55 @@ public final class LANraragiClient: @unchecked Sendable {
         try await getJSON(path: "/api/info")
     }
 
+    public func getArchiveMetadata(arcid: String) async throws -> ArchiveMetadata {
+        try await getJSON(path: "/api/archives/\(arcid)/metadata")
+    }
+
+    public func getArchiveFiles(arcid: String) async throws -> ArchiveFilesResponse {
+        try await getJSON(path: "/api/archives/\(arcid)/files")
+    }
+
+    public func fetchBytes(url: URL) async throws -> Data {
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        applyDefaultHeaders(to: &req)
+
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await session.data(for: req)
+        } catch {
+            throw LANraragiError.transport(error)
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw LANraragiError.invalidResponse
+        }
+        if http.statusCode == 401 {
+            throw LANraragiError.unauthorized
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw LANraragiError.httpStatus(http.statusCode, body: data)
+        }
+        return data
+    }
+
+    public func makeAbsoluteURL(from possiblyRelative: String) throws -> URL {
+        var s = possiblyRelative
+        if s.hasPrefix("./") {
+            s.removeFirst(2)
+        }
+        // Some docs/examples show `page&path=...` where `?` should be used.
+        if s.contains("/page&path=") {
+            s = s.replacingOccurrences(of: "/page&path=", with: "/page?path=")
+        }
+
+        if let url = URL(string: s), url.scheme != nil {
+            return url
+        }
+
+        return try makeURL(path: s.hasPrefix("/") ? s : "/" + s)
+    }
+
     public func search(
         start: Int,
         filter: String = "",

@@ -82,7 +82,15 @@ struct RootView: View {
     @ViewBuilder
     private func reviewTab(profile: Profile) -> some View {
         if let result = appModel.duplicates.result {
-            ReviewView(profile: profile, result: result, thumbnails: appModel.duplicates.thumbnails)
+            PairReviewView(
+                profile: profile,
+                result: result,
+                thumbnails: appModel.duplicates.thumbnails,
+                archives: appModel.duplicates.archives,
+                markNotDuplicate: { pair in
+                    appModel.duplicates.markNotDuplicate(profile: profile, pair: pair)
+                }
+            )
         } else {
             ContentUnavailableView(
                 "No Results Yet",

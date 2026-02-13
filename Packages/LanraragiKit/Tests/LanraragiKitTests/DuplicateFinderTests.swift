@@ -18,6 +18,9 @@ final class DuplicateFinderTests: XCTestCase {
         XCTAssertEqual(result.groups.count, 1)
         XCTAssertEqual(Set(result.groups[0]), Set(["a", "b"]))
         XCTAssertEqual(result.stats.exactGroups, 1)
+        XCTAssertEqual(result.pairs.count, 1)
+        XCTAssertEqual(Set([result.pairs[0].arcidA, result.pairs[0].arcidB]), Set(["a", "b"]))
+        XCTAssertEqual(result.pairs[0].reason, .exactCover)
     }
 
     func testNotDuplicatesExcludesExactUnion() async throws {
@@ -35,6 +38,7 @@ final class DuplicateFinderTests: XCTestCase {
         )
 
         XCTAssertEqual(result.groups.count, 0)
+        XCTAssertEqual(result.pairs.count, 0)
     }
 
     func testApproximateUnionWithThresholds() async throws {
@@ -57,6 +61,7 @@ final class DuplicateFinderTests: XCTestCase {
         XCTAssertEqual(result.groups.count, 1)
         XCTAssertEqual(Set(result.groups[0]), Set(["a", "b"]))
         XCTAssertEqual(result.stats.approximateEdges, 1)
+        XCTAssertEqual(result.pairs.count, 1)
+        XCTAssertEqual(result.pairs[0].reason, .similarCover)
     }
 }
-
