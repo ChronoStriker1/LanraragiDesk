@@ -363,8 +363,7 @@ private struct PairCompareView: View {
                 arcidA: pair.arcidA,
                 arcidB: pair.arcidB,
                 thumbnails: thumbnails,
-                archives: archives
-                ,
+                archives: archives,
                 onDeleteLeft: { confirmDeleteArcid = pair.arcidA },
                 onDeleteRight: { confirmDeleteArcid = pair.arcidB },
                 onNotAMatch: {
@@ -372,6 +371,7 @@ private struct PairCompareView: View {
                     goNext()
                 }
             )
+            .frame(height: 220)
 
             syncedPageCompare
         }
@@ -463,12 +463,6 @@ private struct MetadataCompareBlock: View {
             HStack(alignment: .top, spacing: 12) {
                 ArchiveInfoColumn(meta: metaA)
                     .frame(maxWidth: .infinity, alignment: .leading)
-
-                Button("Not a match") { onNotAMatch() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.regular)
-                    .padding(.top, 8)
-
                 ArchiveInfoColumn(meta: metaB)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -494,49 +488,54 @@ private struct MetadataCompareBlock: View {
 
     private var headerRow: some View {
         HStack(alignment: .top, spacing: 12) {
-            HStack(spacing: 8) {
-                CoverThumb(profile: profile, arcid: arcidA, thumbnails: thumbnails)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(metaA?.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? metaA!.title! : "Untitled")
-                        .font(.headline)
-                        .lineLimit(2)
-                    Text(arcidA)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                }
+            sideHeader(
+                arcid: arcidA,
+                title: metaA?.title,
+                onDelete: onDeleteLeft
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-                Button(role: .destructive) { onDeleteLeft() } label: {
+            Button("Not a match") { onNotAMatch() }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+                .padding(.top, 10)
+
+            sideHeader(
+                arcid: arcidB,
+                title: metaB?.title,
+                onDelete: onDeleteRight
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func sideHeader(
+        arcid: String,
+        title: String?,
+        onDelete: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: 8) {
+            ZStack(alignment: .topTrailing) {
+                CoverThumb(profile: profile, arcid: arcid, thumbnails: thumbnails)
+
+                Button(role: .destructive) { onDelete() } label: {
                     Image(systemName: "trash")
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.small)
+                .controlSize(.mini)
                 .help("Delete this archive")
-                .padding(.leading, 4)
+                .padding(4)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
 
-            HStack(spacing: 8) {
-                CoverThumb(profile: profile, arcid: arcidB, thumbnails: thumbnails)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(metaB?.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? metaB!.title! : "Untitled")
-                        .font(.headline)
-                        .lineLimit(2)
-                    Text(arcidB)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                }
-
-                Button(role: .destructive) { onDeleteRight() } label: {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help("Delete this archive")
-                .padding(.leading, 4)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? title! : "Untitled")
+                    .font(.headline)
+                    .lineLimit(2)
+                Text(arcid)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
