@@ -14,11 +14,36 @@ final class IndexingViewModel: ObservableObject {
 
     private var task: Task<Void, Never>?
     private var store: IndexStore?
+    private var runID: UUID?
 
     func start(profile: Profile) {
         guard task == nil else { return }
 
+        let rid = UUID()
+        runID = rid
+        status = .running(.init(
+            phase: .starting,
+            startOffset: 0,
+            total: 0,
+            seen: 0,
+            queued: 0,
+            completed: 0,
+            indexed: 0,
+            skipped: 0,
+            failed: 0,
+            currentArcid: nil
+        ))
+
         task = Task {
+            defer {
+                Task { @MainActor in
+                    if self.runID == rid {
+                        self.task = nil
+                        self.runID = nil
+                    }
+                }
+            }
+
             do {
                 let store = try IndexStore(configuration: .init(url: Self.indexDBURL()))
                 self.store = store
@@ -44,34 +69,33 @@ final class IndexingViewModel: ObservableObject {
                     config: IndexerConfig(),
                     progress: { [weak self] p in
                         Task { @MainActor in
+                            guard let self, self.runID == rid else { return }
                             switch p.phase {
                             case .completed:
-                                self?.status = .completed(p)
+                                self.status = .completed(p)
                             default:
-                                self?.status = .running(p)
+                                self.status = .running(p)
                             }
                         }
                     }
                 )
 
-                if Task.isCancelled {
-                    return
-                }
             } catch {
                 if Task.isCancelled {
                     return
                 }
-                status = .failed(String(describing: error))
+                if runID == rid {
+                    status = .failed(String(describing: error))
+                }
             }
-
-            task = nil
         }
     }
 
     func cancel() {
         task?.cancel()
         task = nil
-                status = .idle
+        runID = nil
+        status = .idle
     }
 
     private static func indexDBURL() -> URL { AppPaths.indexDBURL() }

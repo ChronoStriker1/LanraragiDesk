@@ -1,14 +1,37 @@
+import Combine
 import Foundation
 import LanraragiKit
 
 @MainActor
 final class AppModel: ObservableObject {
-    @Published var profileStore = ProfileStore()
+    let profileStore: ProfileStore
     @Published var selectedProfileID: Profile.ID?
 
     @Published var connectionStatus: ConnectionStatus = .idle
-    @Published var indexing = IndexingViewModel()
-    @Published var duplicates = DuplicateScanViewModel()
+    let indexing: IndexingViewModel
+    var duplicates: DuplicateScanViewModel
+
+    private var cancellables: Set<AnyCancellable> = []
+
+    init() {
+        self.profileStore = ProfileStore()
+        self.indexing = IndexingViewModel()
+        self.duplicates = DuplicateScanViewModel()
+
+        // SwiftUI doesn't automatically observe nested ObservableObjects through a parent EnvironmentObject.
+        // Forward child changes so views reading `appModel.profileStore...` / `appModel.indexing...` update.
+        profileStore.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+
+        indexing.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+
+        duplicates.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+    }
 
     enum ConnectionStatus: Equatable {
         case idle

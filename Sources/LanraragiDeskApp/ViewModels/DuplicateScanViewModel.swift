@@ -24,14 +24,27 @@ final class DuplicateScanViewModel: ObservableObject {
     let thumbnails = ThumbnailLoader()
 
     private var task: Task<Void, Never>?
+    private var runID: UUID?
 
     func start(profile: Profile) {
         guard task == nil else { return }
+
+        let rid = UUID()
+        runID = rid
 
         status = .running("Opening index…")
         result = nil
 
         task = Task {
+            defer {
+                Task { @MainActor in
+                    if self.runID == rid {
+                        self.task = nil
+                        self.runID = nil
+                    }
+                }
+            }
+
             do {
                 let store = try IndexStore(configuration: .init(url: AppPaths.indexDBURL()))
 
@@ -57,22 +70,23 @@ final class DuplicateScanViewModel: ObservableObject {
                 )
 
                 if Task.isCancelled { return }
+                if runID != rid { return }
                 result = res
                 status = .completed(res.stats)
                 showingResults = true
             } catch {
                 if Task.isCancelled { return }
-                status = .failed(String(describing: error))
+                if runID == rid {
+                    status = .failed(String(describing: error))
+                }
             }
-
-            task = nil
         }
     }
 
     func cancel() {
         task?.cancel()
         task = nil
+        runID = nil
         status = .idle
     }
 }
-
