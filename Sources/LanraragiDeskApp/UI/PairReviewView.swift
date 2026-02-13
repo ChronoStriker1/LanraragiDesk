@@ -433,6 +433,8 @@ private struct PairCompareView: View {
         .padding(detailsCollapsed ? 6 : 10)
         .background(.quaternary.opacity(0.35))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        // Prevent this header block from stretching vertically and creating empty space.
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -664,35 +666,32 @@ private struct TagGroupCompareView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
-                ScrollView(.vertical) {
-                    LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(rows, id: \.key) { r in
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(r.title)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(rows, id: \.key) { r in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(r.title)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
 
-                                HStack(alignment: .top, spacing: 10) {
-                                    TagChipWrap(
-                                        tags: r.leftTags,
-                                        highlight: r.leftOnly
-                                    )
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    Divider()
-                                    TagChipWrap(
-                                        tags: r.rightTags,
-                                        highlight: r.rightOnly
-                                    )
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                }
+                            HStack(alignment: .top, spacing: 10) {
+                                TagChipWrap(
+                                    tags: r.leftTags,
+                                    highlight: r.leftOnly
+                                )
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                Divider()
+                                TagChipWrap(
+                                    tags: r.rightTags,
+                                    highlight: r.rightOnly
+                                )
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
-                            .padding(6)
-                            .background(r.isDifferent ? Color.yellow.opacity(0.08) : Color.clear)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
+                        .padding(6)
+                        .background(r.isDifferent ? Color.yellow.opacity(0.08) : Color.clear)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                 }
-                .frame(maxHeight: 180)
             }
         )
     }

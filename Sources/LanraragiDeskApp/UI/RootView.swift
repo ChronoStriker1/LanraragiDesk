@@ -8,11 +8,11 @@ struct RootView: View {
     @State private var editingProfile: Profile?
     @State private var showingSetup = false
     @State private var tab: Tab = .scan
+    @State private var showNotMatchesPanel: Bool = false
 
     enum Tab: Hashable {
         case scan
         case review
-        case notMatch
     }
 
     var body: some View {
@@ -83,11 +83,6 @@ struct RootView: View {
             reviewTab(profile: profile)
                 .tag(Tab.review)
                 .tabItem { Label("Review", systemImage: "square.stack.3d.up") }
-
-            NotMatchesView(profile: profile)
-                .environmentObject(appModel)
-                .tag(Tab.notMatch)
-                .tabItem { Label("Not a match", systemImage: "nosign") }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -245,6 +240,20 @@ struct RootView: View {
             Text("“Not a match” is saved locally and hides that pair in future scans.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            Button(showNotMatchesPanel ? "Hide “Not a match” list" : "Show “Not a match” list") {
+                showNotMatchesPanel.toggle()
+                if showNotMatchesPanel {
+                    Task { await appModel.duplicates.loadNotDuplicatePairs(profile: profile) }
+                }
+            }
+            .font(.callout)
+
+            if showNotMatchesPanel {
+                NotMatchesView(profile: profile, embedded: true)
+                    .environmentObject(appModel)
+                    .frame(maxWidth: .infinity)
+            }
 
             Button("Clear “Not a match” decisions", role: .destructive) {
                 appModel.duplicates.clearNotDuplicateDecisions(profile: profile)

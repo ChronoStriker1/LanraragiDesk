@@ -4,15 +4,25 @@ import LanraragiKit
 
 struct NotMatchesView: View {
     let profile: Profile
+    let embedded: Bool
 
     @EnvironmentObject private var appModel: AppModel
 
     @State private var query: String = ""
     @State private var confirmRemove: IndexStore.NotDuplicatePair?
 
+    init(profile: Profile, embedded: Bool = false) {
+        self.profile = profile
+        self.embedded = embedded
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            header
+            if !embedded {
+                header
+            } else {
+                embeddedHeader
+            }
 
             if filteredPairs.isEmpty {
                 ContentUnavailableView(
@@ -20,9 +30,7 @@ struct NotMatchesView: View {
                     systemImage: "nosign",
                     description: Text("Pairs you mark as “Not a match” appear here. Removing one allows it to show up in future scans again.")
                 )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(.thinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .frame(maxWidth: .infinity, minHeight: embedded ? 120 : 240)
             } else {
                 ScrollView(.vertical) {
                     LazyVStack(alignment: .center, spacing: 8) {
@@ -38,12 +46,15 @@ struct NotMatchesView: View {
                     .padding(12)
                 }
                 .scrollIndicators(.visible)
-                .background(.thinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .frame(maxHeight: embedded ? 320 : .infinity)
             }
         }
-        .task(id: profile.id) {
-            await appModel.duplicates.loadNotDuplicatePairs(profile: profile)
+        .padding(embedded ? 10 : 0)
+        .background {
+            if embedded {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(.thinMaterial)
+            }
         }
         .confirmationDialog(
             "Remove “Not a match”?",
@@ -100,6 +111,24 @@ struct NotMatchesView: View {
         .padding(14)
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var embeddedHeader: some View {
+        HStack(spacing: 10) {
+            Text("\(appModel.duplicates.notMatches.count) excluded pairs")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Spacer(minLength: 0)
+
+            TextField("Search…", text: $query)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 220)
+
+            Button("Refresh") {
+                Task { await appModel.duplicates.loadNotDuplicatePairs(profile: profile) }
+            }
+        }
     }
 }
 
