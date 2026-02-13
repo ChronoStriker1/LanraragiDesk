@@ -70,7 +70,11 @@ struct RootView: View {
 
     private func tabs(profile: Profile) -> some View {
         TabView(selection: $tab) {
-            runCard(profile: profile)
+            VStack(alignment: .leading, spacing: 0) {
+                runCard(profile: profile)
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .tag(Tab.scan)
                 .tabItem { Label("Scan", systemImage: "magnifyingglass") }
 

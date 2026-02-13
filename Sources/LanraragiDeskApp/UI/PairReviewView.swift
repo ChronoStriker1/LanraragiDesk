@@ -16,9 +16,22 @@ struct PairReviewView: View {
 
     @State private var selection: DuplicateScanResult.Pair?
     @State private var query: String = ""
-    @State private var filterExact: Bool = true
-    @State private var filterSimilar: Bool = true
+    @State private var matchFilter: MatchFilter = .both
     @State private var errorText: String?
+
+    private enum MatchFilter: String, CaseIterable, Hashable {
+        case both
+        case exact
+        case similar
+
+        var title: String {
+            switch self {
+            case .both: return "Both"
+            case .exact: return "Exact"
+            case .similar: return "Similar"
+            }
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -39,8 +52,7 @@ struct PairReviewView: View {
             }
         }
         .onChange(of: query) { _, _ in selection = nil }
-        .onChange(of: filterExact) { _, _ in selection = nil }
-        .onChange(of: filterSimilar) { _, _ in selection = nil }
+        .onChange(of: matchFilter) { _, _ in selection = nil }
         .onChange(of: filteredPairs) { _, new in
             // If the underlying result changes (delete / not-a-match), clear invalid selections.
             if let sel = selection, !new.contains(sel) {
@@ -63,20 +75,24 @@ struct PairReviewView: View {
             Spacer()
 
             HStack(spacing: 10) {
-                Toggle("Exact", isOn: $filterExact)
-                    .toggleStyle(.switch)
-                    .font(.caption)
-                Toggle("Similar", isOn: $filterSimilar)
-                    .toggleStyle(.switch)
-                    .font(.caption)
+                Picker("Match filter", selection: $matchFilter) {
+                    ForEach(MatchFilter.allCases, id: \.self) { f in
+                        Text(f.title).tag(f)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 220)
 
                 TextField("Search ID…", text: $query)
                     .textFieldStyle(.roundedBorder)
-                    .frame(width: 260)
+                    .frame(width: 240)
 
-                Toggle("Hover preview", isOn: $hoverPagePreview)
-                    .toggleStyle(.switch)
-                    .font(.caption)
+                Menu {
+                    Toggle("Hover page preview", isOn: $hoverPagePreview)
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .menuStyle(.borderlessButton)
             }
         }
         .padding(14)
@@ -87,8 +103,14 @@ struct PairReviewView: View {
     private var filteredPairs: [DuplicateScanResult.Pair] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         return result.pairs.filter { p in
-            if p.reason == .exactCover, !filterExact { return false }
-            if p.reason == .similarCover, !filterSimilar { return false }
+            switch matchFilter {
+            case .both:
+                break
+            case .exact:
+                if p.reason != .exactCover { return false }
+            case .similar:
+                if p.reason != .similarCover { return false }
+            }
             if q.isEmpty { return true }
             return p.arcidA.localizedCaseInsensitiveContains(q) || p.arcidB.localizedCaseInsensitiveContains(q)
         }
@@ -104,14 +126,13 @@ struct PairReviewView: View {
 
     private var pairList: some View {
         List(selection: $selection) {
-            if filterExact {
+            if matchFilter == .both || matchFilter == .exact {
                 Section("Exact cover") {
                     ForEach(exactPairs, id: \.self) { p in
                         PairRowView(
                             profile: profile,
                             pair: p,
                             thumbnails: thumbnails,
-                            archives: archives,
                             markNotDuplicate: { pair in
                                 let next = nextPair(after: pair)
                                 markNotDuplicate(pair)
@@ -123,14 +144,13 @@ struct PairReviewView: View {
                 }
             }
 
-            if filterSimilar {
+            if matchFilter == .both || matchFilter == .similar {
                 Section("Similar cover") {
                     ForEach(similarPairs, id: \.self) { p in
                         PairRowView(
                             profile: profile,
                             pair: p,
                             thumbnails: thumbnails,
-                            archives: archives,
                             markNotDuplicate: { pair in
                                 let next = nextPair(after: pair)
                                 markNotDuplicate(pair)
@@ -148,8 +168,8 @@ struct PairReviewView: View {
 
     private func orderedPairsForNavigation() -> [DuplicateScanResult.Pair] {
         var out: [DuplicateScanResult.Pair] = []
-        if filterExact { out.append(contentsOf: exactPairs) }
-        if filterSimilar { out.append(contentsOf: similarPairs) }
+        if matchFilter == .both || matchFilter == .exact { out.append(contentsOf: exactPairs) }
+        if matchFilter == .both || matchFilter == .similar { out.append(contentsOf: similarPairs) }
         return out
     }
 
@@ -226,11 +246,7 @@ private struct PairRowView: View {
     let profile: Profile
     let pair: DuplicateScanResult.Pair
     let thumbnails: ThumbnailLoader
-    let archives: ArchiveLoader
     let markNotDuplicate: (DuplicateScanResult.Pair) -> Void
-
-    @State private var titleA: String?
-    @State private var titleB: String?
 
     var body: some View {
         HStack(spacing: 10) {
@@ -240,10 +256,9 @@ private struct PairRowView: View {
             }
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(titleLine)
+                Text(label)
                     .font(.headline)
-                    .lineLimit(2)
-                Text(subtitle)
+                Text(detail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -255,39 +270,25 @@ private struct PairRowView: View {
         .contextMenu {
             Button("Not a match") { markNotDuplicate(pair) }
         }
-        .task(id: "\(pair.arcidA)|\(pair.arcidB)") {
-            titleA = nil
-            titleB = nil
-            do {
-                async let a = archives.metadata(profile: profile, arcid: pair.arcidA)
-                async let b = archives.metadata(profile: profile, arcid: pair.arcidB)
-                let (ma, mb) = try await (a, b)
-                titleA = ma.title?.trimmingCharacters(in: .whitespacesAndNewlines)
-                titleB = mb.title?.trimmingCharacters(in: .whitespacesAndNewlines)
-            } catch {
-                // Keep the row usable even if titles fail to load.
-            }
-        }
     }
 
-    private var titleLine: String {
-        let left = (titleA?.isEmpty == false) ? titleA! : "Untitled"
-        let right = (titleB?.isEmpty == false) ? titleB! : "Untitled"
-        if titleA == nil || titleB == nil {
-            return "Loading titles…"
-        }
-        if left == right {
-            return left
-        }
-        return "\(left) ↔ \(right)"
-    }
-
-    private var subtitle: String {
+    private var label: String {
         switch pair.reason {
         case .exactCover:
             return "Exact cover"
         case .similarCover:
             return "Similar cover"
+        }
+    }
+
+    private var detail: String {
+        switch pair.reason {
+        case .exactCover:
+            return "Likely identical cover image"
+        case .similarCover:
+            let d = pair.dHashDistance.map(String.init) ?? "?"
+            let a = pair.aHashDistance.map(String.init) ?? "?"
+            return "Distance: d=\(d), a=\(a)"
         }
     }
 }
@@ -353,27 +354,22 @@ private struct PairCompareView: View {
     let goNext: () -> Void
 
     @State private var confirmDeleteArcid: String?
+    @State private var metaA: ArchiveMetadata?
+    @State private var metaB: ArchiveMetadata?
+    @State private var showingDetailsA: Bool = false
+    @State private var showingDetailsB: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            compareHeader
+            topBar
 
-            MetadataCompareBlock(
+            SyncedPagesGridView(
                 profile: profile,
                 arcidA: pair.arcidA,
                 arcidB: pair.arcidB,
-                thumbnails: thumbnails,
-                archives: archives,
-                onDeleteLeft: { confirmDeleteArcid = pair.arcidA },
-                onDeleteRight: { confirmDeleteArcid = pair.arcidB },
-                onNotAMatch: {
-                    markNotDuplicate(pair)
-                    goNext()
-                }
+                archives: archives
             )
-            .frame(height: 220)
-
-            syncedPageCompare
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -405,195 +401,60 @@ private struct PairCompareView: View {
         } message: {
             Text("This removes the archive from LANraragi. This cannot be undone.")
         }
-    }
-
-    private var compareHeader: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Compare")
-                    .font(.headline)
-                Text(matchKindText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        .task(id: "\(pair.arcidA)|\(pair.arcidB)") {
+            metaA = nil
+            metaB = nil
+            do {
+                async let a = archives.metadata(profile: profile, arcid: pair.arcidA)
+                async let b = archives.metadata(profile: profile, arcid: pair.arcidB)
+                metaA = try await a
+                metaB = try await b
+            } catch {
+                // Ignore; the compare UI still works with IDs only.
             }
-            Spacer()
-        }
-        .padding(.bottom, 2)
-    }
-
-    private var matchKindText: String {
-        switch pair.reason {
-        case .exactCover:
-            return "Exact cover match"
-        case .similarCover:
-            return "Similar cover match"
         }
     }
 
-    private var syncedPageCompare: some View {
-        SyncedPagesView(profile: profile, arcidA: pair.arcidA, arcidB: pair.arcidB, archives: archives)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
-private struct MetadataCompareBlock: View {
-    let profile: Profile
-    let arcidA: String
-    let arcidB: String
-    let thumbnails: ThumbnailLoader
-    let archives: ArchiveLoader
-    let onDeleteLeft: () -> Void
-    let onDeleteRight: () -> Void
-    let onNotAMatch: () -> Void
-
-    @State private var metaA: ArchiveMetadata?
-    @State private var metaB: ArchiveMetadata?
-    @State private var err: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            headerRow
-
-            if let err {
-                Text(err)
-                    .font(.caption2)
-                    .foregroundStyle(.red)
+    private var topBar: some View {
+        HStack(alignment: .top, spacing: 14) {
+            ArchiveSideHeader(
+                profile: profile,
+                arcid: pair.arcidA,
+                meta: metaA,
+                thumbnails: thumbnails,
+                onDelete: { confirmDeleteArcid = pair.arcidA },
+                onDetails: { showingDetailsA = true }
+            )
+            .popover(isPresented: $showingDetailsA) {
+                ArchiveDetailsPopover(arcid: pair.arcidA, meta: metaA)
+                    .frame(width: 420, height: 520)
+                    .padding(14)
             }
 
-            HStack(alignment: .top, spacing: 12) {
-                ArchiveInfoColumn(meta: metaA)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                ArchiveInfoColumn(meta: metaB)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            Button("Not a match") {
+                markNotDuplicate(pair)
+                goNext()
+            }
+            .buttonStyle(.borderedProminent)
+            .padding(.top, 18)
+
+            ArchiveSideHeader(
+                profile: profile,
+                arcid: pair.arcidB,
+                meta: metaB,
+                thumbnails: thumbnails,
+                onDelete: { confirmDeleteArcid = pair.arcidB },
+                onDetails: { showingDetailsB = true }
+            )
+            .popover(isPresented: $showingDetailsB) {
+                ArchiveDetailsPopover(arcid: pair.arcidB, meta: metaB)
+                    .frame(width: 420, height: 520)
+                    .padding(14)
             }
         }
         .padding(12)
         .background(.quaternary.opacity(0.35))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .task(id: "\(arcidA)|\(arcidB)") {
-            metaA = nil
-            metaB = nil
-            err = nil
-
-            do {
-                async let a = archives.metadata(profile: profile, arcid: arcidA)
-                async let b = archives.metadata(profile: profile, arcid: arcidB)
-                metaA = try await a
-                metaB = try await b
-            } catch {
-                err = "Metadata failed to load: \(error)"
-            }
-        }
-    }
-
-    private var headerRow: some View {
-        HStack(alignment: .top, spacing: 12) {
-            sideHeader(
-                arcid: arcidA,
-                title: metaA?.title,
-                onDelete: onDeleteLeft
-            )
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Button("Not a match") { onNotAMatch() }
-                .buttonStyle(.bordered)
-                .controlSize(.regular)
-                .padding(.top, 10)
-
-            sideHeader(
-                arcid: arcidB,
-                title: metaB?.title,
-                onDelete: onDeleteRight
-            )
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private func sideHeader(
-        arcid: String,
-        title: String?,
-        onDelete: @escaping () -> Void
-    ) -> some View {
-        HStack(spacing: 8) {
-            ZStack(alignment: .topTrailing) {
-                CoverThumb(profile: profile, arcid: arcid, thumbnails: thumbnails)
-
-                Button(role: .destructive) { onDelete() } label: {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.mini)
-                .help("Delete this archive")
-                .padding(4)
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? title! : "Untitled")
-                    .font(.headline)
-                    .lineLimit(2)
-                Text(arcid)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-            }
-        }
-    }
-}
-
-private struct ArchiveInfoColumn: View {
-    let meta: ArchiveMetadata?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                InfoChip(label: "Category", value: meta?.category)
-                InfoChip(label: "Pages", value: meta?.pagecount.map(String.init))
-                InfoChip(label: "Ext", value: meta?.fileExtension)
-            }
-
-            if let summary = meta?.summary?.trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Summary")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Text(summary)
-                        .font(.caption)
-                        .lineLimit(4)
-                        .textSelection(.enabled)
-                }
-                .padding(10)
-                .background(.thinMaterial.opacity(0.25))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-
-            TagGroupsView(tags: meta?.tags)
-        }
-        .font(.caption)
-    }
-}
-
-private struct InfoChip: View {
-    let label: String
-    let value: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Text(displayValue)
-                .font(.caption)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(.thinMaterial.opacity(0.25))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    private var displayValue: String {
-        let v = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return v.isEmpty ? "—" : v
     }
 }
 
@@ -710,7 +571,139 @@ private enum TagGrouper {
     }
 }
 
-private struct SyncedPagesView: View {
+private struct ArchiveSideHeader: View {
+    let profile: Profile
+    let arcid: String
+    let meta: ArchiveMetadata?
+    let thumbnails: ThumbnailLoader
+    let onDelete: () -> Void
+    let onDetails: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ZStack(alignment: .topTrailing) {
+                CoverThumb(profile: profile, arcid: arcid, thumbnails: thumbnails)
+                    .frame(width: 64, height: 82)
+
+                Button(role: .destructive) { onDelete() } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .help("Delete this archive")
+                .padding(4)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(displayTitle)
+                    .font(.headline)
+                    .lineLimit(2)
+
+                HStack(spacing: 8) {
+                    if let pages = meta?.pagecount {
+                        Text("\(pages) pages")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let ext = meta?.fileExtension, !ext.isEmpty {
+                        Text(ext.uppercased())
+                            .font(.caption2)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.quaternary.opacity(0.55))
+                            .clipShape(Capsule())
+                    }
+                }
+
+                Button("Details") { onDetails() }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var displayTitle: String {
+        let t = meta?.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return t.isEmpty ? "Untitled" : t
+    }
+}
+
+private struct ArchiveDetailsPopover: View {
+    let arcid: String
+    let meta: ArchiveMetadata?
+
+    var body: some View {
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(meta?.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? meta!.title! : "Untitled")
+                    .font(.title3)
+                    .bold()
+                    .textSelection(.enabled)
+
+                KeyValueGrid(rows: [
+                    ("ID", arcid),
+                    ("Category", meta?.category),
+                    ("Pages", meta?.pagecount.map(String.init)),
+                    ("Filename", meta?.filename),
+                    ("Extension", meta?.fileExtension),
+                    ("New", meta?.isnew.map { $0 ? "Yes" : "No" }),
+                    ("Progress", meta?.progress.map(String.init)),
+                    ("Last Read", meta?.lastreadtime.map(String.init)),
+                ])
+
+                if let summary = meta?.summary?.trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Summary")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(summary)
+                            .font(.callout)
+                            .textSelection(.enabled)
+                    }
+                    .padding(12)
+                    .background(.thinMaterial.opacity(0.3))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+
+                TagGroupsView(tags: meta?.tags)
+            }
+        }
+    }
+}
+
+private struct KeyValueGrid: View {
+    let rows: [(String, String?)]
+
+    var body: some View {
+        Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 8) {
+            ForEach(rows.indices, id: \.self) { idx in
+                let (k, v) = rows[idx]
+                if let v = v?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty {
+                    GridRow {
+                        Text(k)
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                            .frame(width: 90, alignment: .leading)
+                        Text(v)
+                            .font(.callout)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(.thinMaterial.opacity(0.3))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+private struct SyncedPagesGridView: View {
     let profile: Profile
     let arcidA: String
     let arcidB: String
@@ -734,19 +727,42 @@ private struct SyncedPagesView: View {
                         .foregroundStyle(.secondary)
                 }
             } else {
-                ScrollView(.vertical) {
-                    LazyVStack(alignment: .leading, spacing: 14) {
-                        ForEach(0..<max(pagesA.count, pagesB.count), id: \.self) { idx in
-                            PageCompareRow(
-                                profile: profile,
-                                idx: idx,
-                                urlA: idx < pagesA.count ? pagesA[idx] : nil,
-                                urlB: idx < pagesB.count ? pagesB[idx] : nil,
-                                archives: archives
-                            )
+                GeometryReader { geo in
+                    let spacing: CGFloat = 10
+                    let sideWidth = max(240, (geo.size.width - spacing) / 2.0)
+                    let minTile: CGFloat = 140
+                    let cols = max(2, min(6, Int(sideWidth / minTile)))
+                    let tileWidth = (sideWidth - CGFloat(cols - 1) * 8) / CGFloat(cols)
+                    let tileHeight = min(240, max(140, tileWidth * 1.35))
+
+                    ScrollView(.vertical) {
+                        LazyVStack(alignment: .leading, spacing: 12) {
+                            ForEach(stride(from: 0, to: max(pagesA.count, pagesB.count), by: cols).map { $0 }, id: \.self) { start in
+                                HStack(alignment: .top, spacing: spacing) {
+                                    PageGridSide(
+                                        profile: profile,
+                                        pages: pagesA,
+                                        startIndex: start,
+                                        count: cols,
+                                        tileHeight: tileHeight,
+                                        archives: archives
+                                    )
+                                    .frame(width: sideWidth)
+
+                                    PageGridSide(
+                                        profile: profile,
+                                        pages: pagesB,
+                                        startIndex: start,
+                                        count: cols,
+                                        tileHeight: tileHeight,
+                                        archives: archives
+                                    )
+                                    .frame(width: sideWidth)
+                                }
+                            }
                         }
+                        .padding(.vertical, 10)
                     }
-                    .padding(.vertical, 8)
                 }
             }
         }
@@ -766,30 +782,39 @@ private struct SyncedPagesView: View {
     }
 }
 
-private struct PageCompareRow: View {
+private struct PageGridSide: View {
     let profile: Profile
-    let idx: Int
-    let urlA: URL?
-    let urlB: URL?
+    let pages: [URL]
+    let startIndex: Int
+    let count: Int
+    let tileHeight: CGFloat
     let archives: ArchiveLoader
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Page \(idx + 1)")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-            HStack(alignment: .top, spacing: 12) {
-                PageImageTile(profile: profile, url: urlA, archives: archives)
-                PageImageTile(profile: profile, url: urlB, archives: archives)
+        LazyVGrid(
+            columns: Array(repeating: GridItem(.flexible(), spacing: 8, alignment: .top), count: count),
+            alignment: .leading,
+            spacing: 8
+        ) {
+            ForEach(0..<count, id: \.self) { offset in
+                let idx = startIndex + offset
+                PageThumbTile(
+                    profile: profile,
+                    pageIndex: idx,
+                    url: (idx < pages.count) ? pages[idx] : nil,
+                    tileHeight: tileHeight,
+                    archives: archives
+                )
             }
         }
     }
 }
 
-private struct PageImageTile: View {
+private struct PageThumbTile: View {
     let profile: Profile
+    let pageIndex: Int
     let url: URL?
+    let tileHeight: CGFloat
     let archives: ArchiveLoader
 
     @AppStorage("review.hoverPagePreview") private var hoverPreviewEnabled: Bool = true
@@ -822,9 +847,21 @@ private struct PageImageTile: View {
             } else {
                 ProgressView()
             }
+
+            if url != nil {
+                Text("\(pageIndex + 1)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(.thinMaterial)
+                    .clipShape(Capsule())
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(6)
+            }
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 230)
+        .frame(height: tileHeight)
         .onHover { inside in
             guard hoverPreviewEnabled else { return }
             hovering = inside && (url != nil) && (image != nil)
