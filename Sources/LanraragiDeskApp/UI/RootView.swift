@@ -51,7 +51,9 @@ struct RootView: View {
     private var content: some View {
         if let profile = appModel.selectedProfile {
             VStack(alignment: .leading, spacing: 18) {
-                header(profile: profile)
+                if tab == .scan {
+                    header(profile: profile)
+                }
                 tabs(profile: profile)
                 Spacer()
             }

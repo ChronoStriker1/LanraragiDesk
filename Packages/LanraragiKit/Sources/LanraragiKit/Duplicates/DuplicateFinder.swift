@@ -235,6 +235,11 @@ public enum DuplicateFinder {
                         let aDist = hamming(a.aHashCenter90, fingerprints[ib].aHashCenter90)
                         if aDist > config.aHashThreshold { continue }
 
+                        // If these two already match exactly, don't also show them as "similar".
+                        if config.includeExactChecksum, a.checksumSHA256 == fingerprints[ib].checksumSHA256 {
+                            continue
+                        }
+
                         approximateEdges += 1
                         dsu.union(ia, ib)
                         pairs.append(.init(

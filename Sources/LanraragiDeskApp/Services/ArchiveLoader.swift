@@ -151,11 +151,12 @@ actor ArchiveLoader {
 
 private actor AsyncLimiter {
     private let limit: Int
-    private var active: Int = 0
+    private var available: Int
     private var waiters: [CheckedContinuation<Void, Never>] = []
 
     init(limit: Int) {
         self.limit = max(1, limit)
+        self.available = self.limit
     }
 
     func withPermit<T: Sendable>(_ op: @Sendable () async throws -> T) async throws -> T {
@@ -165,23 +166,22 @@ private actor AsyncLimiter {
     }
 
     private func acquire() async {
-        if active < limit {
-            active += 1
+        if available > 0 {
+            available -= 1
             return
         }
 
         await withCheckedContinuation { cont in
             waiters.append(cont)
         }
-        active += 1
+        // Permit is transferred directly from `release()` via resuming this continuation.
     }
 
     private func release() {
         if !waiters.isEmpty {
-            let cont = waiters.removeFirst()
-            cont.resume()
+            waiters.removeFirst().resume()
             return
         }
-        active -= 1
+        available = min(limit, available + 1)
     }
 }
