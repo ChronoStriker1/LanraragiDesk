@@ -9,14 +9,22 @@ struct PairReviewView: View {
     let archives: ArchiveLoader
 
     let markNotDuplicate: (DuplicateScanResult.Pair) -> Void
+    let deleteArchive: (String) async throws -> Void
 
-    @State private var selection: Int = 0
+    @State private var selection: Int?
     @State private var query: String = ""
     @State private var filterExact: Bool = true
     @State private var filterSimilar: Bool = true
+    @State private var errorText: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if let errorText {
+                Text(errorText)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 4)
+            }
             header
 
             HSplitView {
@@ -27,9 +35,9 @@ struct PairReviewView: View {
                     .frame(minWidth: 520)
             }
         }
-        .onChange(of: query) { _, _ in selection = 0 }
-        .onChange(of: filterExact) { _, _ in selection = 0 }
-        .onChange(of: filterSimilar) { _, _ in selection = 0 }
+        .onChange(of: query) { _, _ in selection = nil }
+        .onChange(of: filterExact) { _, _ in selection = nil }
+        .onChange(of: filterSimilar) { _, _ in selection = nil }
     }
 
     private var header: some View {
@@ -76,7 +84,12 @@ struct PairReviewView: View {
     private var pairList: some View {
         List(filteredPairs.indices, id: \.self, selection: $selection) { idx in
             let p = filteredPairs[idx]
-            PairRowView(profile: profile, pair: p, thumbnails: thumbnails)
+            PairRowView(
+                profile: profile,
+                pair: p,
+                thumbnails: thumbnails,
+                markNotDuplicate: markNotDuplicate
+            )
                 .tag(idx)
         }
         .background(.thinMaterial)
@@ -98,6 +111,19 @@ struct PairReviewView: View {
             )
         }
 
+        guard let selection else {
+            return AnyView(
+                ContentUnavailableView(
+                    "Select a pair",
+                    systemImage: "rectangle.and.hand.point.up.left",
+                    description: Text("Pick a match on the left to compare side-by-side.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(.thinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            )
+        }
+
         let idx = min(max(0, selection), pairs.count - 1)
         let p = pairs[idx]
         return AnyView(
@@ -106,7 +132,18 @@ struct PairReviewView: View {
                 pair: p,
                 thumbnails: thumbnails,
                 archives: archives,
-                markNotDuplicate: markNotDuplicate
+                markNotDuplicate: markNotDuplicate,
+                deleteArchive: deleteArchive,
+                reportError: { msg in
+                    errorText = msg
+                },
+                goBack: { self.selection = nil },
+                goNext: {
+                    self.selection = min(pairs.count - 1, idx + 1)
+                },
+                goPrev: {
+                    self.selection = max(0, idx - 1)
+                }
             )
         )
     }
@@ -116,6 +153,7 @@ private struct PairRowView: View {
     let profile: Profile
     let pair: DuplicateScanResult.Pair
     let thumbnails: ThumbnailLoader
+    let markNotDuplicate: (DuplicateScanResult.Pair) -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -139,6 +177,8 @@ private struct PairRowView: View {
         .contextMenu {
             Button("Copy Arcid A") { copy(pair.arcidA) }
             Button("Copy Arcid B") { copy(pair.arcidB) }
+            Divider()
+            Button("Mark As Not A Match") { markNotDuplicate(pair) }
         }
     }
 
@@ -215,31 +255,53 @@ private struct PairCompareView: View {
     let thumbnails: ThumbnailLoader
     let archives: ArchiveLoader
     let markNotDuplicate: (DuplicateScanResult.Pair) -> Void
+    let deleteArchive: (String) async throws -> Void
+    let reportError: (String) -> Void
+    let goBack: () -> Void
+    let goNext: () -> Void
+    let goPrev: () -> Void
+
+    @State private var confirmDeleteArcid: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             actions
 
             HSplitView {
-                ArchiveColumn(
-                    profile: profile,
-                    arcid: pair.arcidA,
-                    thumbnails: thumbnails,
-                    archives: archives
-                )
-
-                ArchiveColumn(
-                    profile: profile,
-                    arcid: pair.arcidB,
-                    thumbnails: thumbnails,
-                    archives: archives
-                )
+                ArchiveColumn(profile: profile, arcid: pair.arcidA, thumbnails: thumbnails, archives: archives)
+                ArchiveColumn(profile: profile, arcid: pair.arcidB, thumbnails: thumbnails, archives: archives)
             }
+
+            Divider()
+
+            syncedPageCompare
         }
         .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .confirmationDialog(
+            "Delete Archive?",
+            isPresented: Binding(
+                get: { confirmDeleteArcid != nil },
+                set: { if !$0 { confirmDeleteArcid = nil } }
+            )
+        ) {
+            if let arcid = confirmDeleteArcid {
+                Button("Delete \(arcid)", role: .destructive) {
+                    Task {
+                        do {
+                            try await deleteArchive(arcid)
+                        } catch {
+                            reportError("Delete failed: \(error)")
+                        }
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the archive from LANraragi. This cannot be undone.")
+        }
     }
 
     private var actions: some View {
@@ -254,9 +316,14 @@ private struct PairCompareView: View {
 
             Spacer()
 
-            Button("Not A Duplicate") {
-                markNotDuplicate(pair)
-            }
+            Button("Back") { goBack() }
+            Button("Prev") { goPrev() }
+            Button("Next") { goNext() }
+
+            Button("Not A Match") { markNotDuplicate(pair) }
+
+            Button("Delete Left", role: .destructive) { confirmDeleteArcid = pair.arcidA }
+            Button("Delete Right", role: .destructive) { confirmDeleteArcid = pair.arcidB }
 
             Button("Copy Both Arcids") {
                 let s = "\(pair.arcidA)\n\(pair.arcidB)"
@@ -276,6 +343,11 @@ private struct PairCompareView: View {
             return "Similar cover (d=\(d), a=\(a))"
         }
     }
+
+    private var syncedPageCompare: some View {
+        SyncedPagesView(profile: profile, arcidA: pair.arcidA, arcidB: pair.arcidB, archives: archives)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
 }
 
 private struct ArchiveColumn: View {
@@ -285,9 +357,9 @@ private struct ArchiveColumn: View {
     let archives: ArchiveLoader
 
     @State private var meta: ArchiveMetadata?
-    @State private var pages: [URL] = []
     @State private var metaError: String?
-    @State private var pagesError: String?
+    @State private var rawMeta: String?
+    @State private var rawMetaError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -295,37 +367,39 @@ private struct ArchiveColumn: View {
 
             Divider()
 
-            if let pagesError {
-                Text("Pages error: \(pagesError)")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                Spacer()
-            } else if pages.isEmpty {
-                HStack(spacing: 10) {
-                    ProgressView()
-                    Text("Loading pages…")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            } else {
-                ScrollView(.vertical) {
-                    LazyVStack(alignment: .leading, spacing: 12) {
-                        ForEach(Array(pages.enumerated()), id: \.offset) { idx, url in
-                            PageImageTile(profile: profile, idx: idx, url: url, archives: archives)
-                        }
+            // Pages are shown in a synced compare scroller below.
+            Text(metaLineSecondary)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            DisclosureGroup("All metadata") {
+                if let rawMetaError {
+                    Text(rawMetaError)
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                } else if let rawMeta {
+                    Text(rawMeta)
+                        .font(.caption2)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    HStack(spacing: 10) {
+                        ProgressView().scaleEffect(0.7)
+                        Text("Loading…")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
-                    .padding(.vertical, 8)
                 }
             }
+            .font(.caption2)
         }
         .padding(10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task(id: arcid) {
             meta = nil
-            pages = []
             metaError = nil
-            pagesError = nil
+            rawMeta = nil
+            rawMetaError = nil
 
             do {
                 meta = try await archives.metadata(profile: profile, arcid: arcid)
@@ -334,9 +408,9 @@ private struct ArchiveColumn: View {
             }
 
             do {
-                pages = try await archives.pageURLs(profile: profile, arcid: arcid)
+                rawMeta = try await archives.metadataPrettyJSON(profile: profile, arcid: arcid)
             } catch {
-                pagesError = String(describing: error)
+                rawMetaError = String(describing: error)
             }
         }
     }
@@ -375,49 +449,138 @@ private struct ArchiveColumn: View {
         var parts: [String] = []
         if let c = meta?.category, !c.isEmpty { parts.append("Category: \(c)") }
         if let p = meta?.pagecount { parts.append("Pages: \(p)") }
+        if let f = meta?.filename, !f.isEmpty { parts.append("File: \(f)") }
+        if let e = meta?.fileExtension, !e.isEmpty { parts.append("Ext: \(e)") }
         if let t = meta?.tags, !t.isEmpty { parts.append("Tags: \(t)") }
         if parts.isEmpty { return "Loading info…" }
         return parts.joined(separator: "  •  ")
+    }
+
+    private var metaLineSecondary: String {
+        if metaError != nil {
+            return "Metadata failed to load."
+        }
+        if let s = meta?.summary, !s.isEmpty {
+            return s
+        }
+        return ""
+    }
+}
+
+private struct SyncedPagesView: View {
+    let profile: Profile
+    let arcidA: String
+    let arcidB: String
+    let archives: ArchiveLoader
+
+    @State private var pagesA: [URL] = []
+    @State private var pagesB: [URL] = []
+    @State private var errorText: String?
+
+    var body: some View {
+        Group {
+            if let errorText {
+                Text("Pages error: \(errorText)")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            } else if pagesA.isEmpty || pagesB.isEmpty {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Loading pages…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                ScrollView(.vertical) {
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        ForEach(0..<max(pagesA.count, pagesB.count), id: \.self) { idx in
+                            PageCompareRow(
+                                profile: profile,
+                                idx: idx,
+                                urlA: idx < pagesA.count ? pagesA[idx] : nil,
+                                urlB: idx < pagesB.count ? pagesB[idx] : nil,
+                                archives: archives
+                            )
+                        }
+                    }
+                    .padding(.vertical, 8)
+                }
+            }
+        }
+        .task(id: "\(arcidA)|\(arcidB)") {
+            pagesA = []
+            pagesB = []
+            errorText = nil
+            do {
+                async let a = archives.pageURLs(profile: profile, arcid: arcidA)
+                async let b = archives.pageURLs(profile: profile, arcid: arcidB)
+                pagesA = try await a
+                pagesB = try await b
+            } catch {
+                errorText = String(describing: error)
+            }
+        }
+    }
+}
+
+private struct PageCompareRow: View {
+    let profile: Profile
+    let idx: Int
+    let urlA: URL?
+    let urlB: URL?
+    let archives: ArchiveLoader
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Page \(idx + 1)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            HStack(alignment: .top, spacing: 12) {
+                PageImageTile(profile: profile, url: urlA, archives: archives)
+                PageImageTile(profile: profile, url: urlB, archives: archives)
+            }
+        }
     }
 }
 
 private struct PageImageTile: View {
     let profile: Profile
-    let idx: Int
-    let url: URL
+    let url: URL?
     let archives: ArchiveLoader
 
     @State private var image: NSImage?
     @State private var errorText: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Page \(idx + 1)")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+        ZStack {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(.quaternary)
 
-            ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(.quaternary)
-
-                if let image {
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .padding(6)
-                } else if let errorText {
-                    Text(errorText)
-                        .font(.caption2)
-                        .foregroundStyle(.red)
-                        .padding(8)
-                } else {
-                    ProgressView()
-                }
+            if url == nil {
+                Text("Missing")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(8)
+            } else if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(6)
+            } else if let errorText {
+                Text(errorText)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+                    .padding(8)
+            } else {
+                ProgressView()
             }
         }
+        .frame(maxWidth: .infinity)
         .task(id: url) {
             image = nil
             errorText = nil
+            guard let url else { return }
             do {
                 let bytes = try await archives.bytes(profile: profile, url: url)
                 let img = await MainActor.run { NSImage(data: bytes) }
@@ -432,4 +595,3 @@ private struct PageImageTile: View {
         }
     }
 }
-

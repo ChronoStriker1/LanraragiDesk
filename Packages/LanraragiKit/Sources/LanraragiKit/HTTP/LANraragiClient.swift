@@ -42,8 +42,60 @@ public final class LANraragiClient: @unchecked Sendable {
         try await getJSON(path: "/api/archives/\(arcid)/metadata")
     }
 
+    public func getArchiveMetadataRaw(arcid: String) async throws -> Data {
+        let url = try makeURL(path: "/api/archives/\(arcid)/metadata")
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        applyDefaultHeaders(to: &req)
+
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await session.data(for: req)
+        } catch {
+            throw LANraragiError.transport(error)
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw LANraragiError.invalidResponse
+        }
+
+        if http.statusCode == 401 {
+            throw LANraragiError.unauthorized
+        }
+
+        guard (200...299).contains(http.statusCode) else {
+            throw LANraragiError.httpStatus(http.statusCode, body: data)
+        }
+
+        return data
+    }
+
     public func getArchiveFiles(arcid: String) async throws -> ArchiveFilesResponse {
         try await getJSON(path: "/api/archives/\(arcid)/files")
+    }
+
+    public func deleteArchive(arcid: String) async throws {
+        let url = try makeURL(path: "/api/archives/\(arcid)")
+        var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+        applyDefaultHeaders(to: &req)
+
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await session.data(for: req)
+        } catch {
+            throw LANraragiError.transport(error)
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw LANraragiError.invalidResponse
+        }
+        if http.statusCode == 401 {
+            throw LANraragiError.unauthorized
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw LANraragiError.httpStatus(http.statusCode, body: data)
+        }
     }
 
     public func fetchBytes(url: URL) async throws -> Data {

@@ -89,6 +89,9 @@ struct RootView: View {
                 archives: appModel.duplicates.archives,
                 markNotDuplicate: { pair in
                     appModel.duplicates.markNotDuplicate(profile: profile, pair: pair)
+                },
+                deleteArchive: { arcid in
+                    try await appModel.duplicates.deleteArchive(profile: profile, arcid: arcid)
                 }
             )
         } else {

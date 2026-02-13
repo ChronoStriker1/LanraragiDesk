@@ -13,11 +13,16 @@ actor ArchiveLoader {
     private var metaCache: [String: ArchiveMetadata] = [:]
     private var metaInflight: [String: Task<ArchiveMetadata, Error>] = [:]
 
+    private var metaRawCache: [String: String] = [:]
+    private var metaRawInflight: [String: Task<String, Error>] = [:]
+
     private var pagesCache: [String: [URL]] = [:]
     private var pagesInflight: [String: Task<[URL], Error>] = [:]
 
     private let bytesCache = NSCache<NSString, NSData>()
     private var bytesInflight: [String: Task<Data, Error>] = [:]
+
+    private let maxCachedBytes = 8 * 1024 * 1024
 
     init() {
         bytesCache.totalCostLimit = 512 * 1024 * 1024 // ~512MB
@@ -40,6 +45,35 @@ actor ArchiveLoader {
         let m = try await task.value
         metaCache[arcid] = m
         return m
+    }
+
+    func metadataPrettyJSON(profile: Profile, arcid: String) async throws -> String {
+        if let s = metaRawCache[arcid] { return s }
+        if let t = metaRawInflight[arcid] { return try await t.value }
+
+        let task = Task<String, Error> {
+            try await limiter.withPermit {
+                let client = try await makeClient(profile: profile)
+                let data = try await client.getArchiveMetadataRaw(arcid: arcid)
+
+                guard
+                    let obj = try? JSONSerialization.jsonObject(with: data),
+                    let pretty = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]),
+                    let str = String(data: pretty, encoding: .utf8)
+                else {
+                    return String(decoding: data, as: UTF8.self)
+                }
+
+                return str
+            }
+        }
+
+        metaRawInflight[arcid] = task
+        defer { metaRawInflight[arcid] = nil }
+
+        let s = try await task.value
+        metaRawCache[arcid] = s
+        return s
     }
 
     func pageURLs(profile: Profile, arcid: String) async throws -> [URL] {
@@ -87,7 +121,9 @@ actor ArchiveLoader {
         defer { bytesInflight[inflightKey] = nil }
 
         let data = try await task.value
-        bytesCache.setObject(data as NSData, forKey: key, cost: data.count)
+        if data.count <= maxCachedBytes {
+            bytesCache.setObject(data as NSData, forKey: key, cost: data.count)
+        }
         return data
     }
 
@@ -149,4 +185,3 @@ private actor AsyncLimiter {
         active -= 1
     }
 }
-

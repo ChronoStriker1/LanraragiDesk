@@ -151,6 +151,28 @@ final class DuplicateScanViewModel: ObservableObject {
         }
     }
 
+    func deleteArchive(profile: Profile, arcid: String) async throws {
+        let account = "apiKey.\(profile.id.uuidString)"
+        let apiKeyString = try KeychainService.getString(account: account)
+        let apiKey = apiKeyString.map { LANraragiAPIKey($0) }
+
+        let client = LANraragiClient(configuration: .init(
+            baseURL: profile.baseURL,
+            apiKey: apiKey,
+            acceptLanguage: profile.language,
+            maxConnectionsPerHost: 4
+        ))
+
+        try await client.deleteArchive(arcid: arcid)
+
+        if var r = result {
+            r.pairs.removeAll { $0.arcidA == arcid || $0.arcidB == arcid }
+            r.groups.removeAll { $0.contains(arcid) }
+            result = r
+            resultRevision &+= 1
+        }
+    }
+
     func cancel() {
         task?.cancel()
         task = nil
