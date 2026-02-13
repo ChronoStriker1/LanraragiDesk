@@ -8,7 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		357E6825CEFEFA8EA5B45966 /* LanraragiDeskApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF5978E02C65E10E0EEF7643 /* LanraragiDeskApp.swift */; };
-		372976659C89CFFD4C01C865 /* DuplicateResultsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0E4A8FE5ABC2D8943126E75 /* DuplicateResultsView.swift */; };
+		3A3789342798AE8BEFA8182C /* ReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8BD9CC8EB9AC85F61625F2B /* ReviewView.swift */; };
 		462D167127B78592933CCE35 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64DB4339053B57ED7A535ED8 /* AppModel.swift */; };
 		5113E07D4F781D2AA690F2D9 /* DuplicateScanViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54B3E61F93FAE6A29E18E911 /* DuplicateScanViewModel.swift */; };
 		6B35F39BF0AD26CD55A13641 /* ThumbnailLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 459B7EE09D6D1F08753A893C /* ThumbnailLoader.swift */; };
@@ -33,8 +33,8 @@
 		93C3DC7516031BE8557B0B91 /* IndexingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IndexingViewModel.swift; sourceTree = "<group>"; };
 		99CBA245A79722298EB8ADD5 /* AppPaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPaths.swift; sourceTree = "<group>"; };
 		B86D008FE0E3FC57FBA6B31A /* Profile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Profile.swift; sourceTree = "<group>"; };
+		C8BD9CC8EB9AC85F61625F2B /* ReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewView.swift; sourceTree = "<group>"; };
 		D0705B9BBB876D1BB705AA53 /* ProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileStore.swift; sourceTree = "<group>"; };
-		D0E4A8FE5ABC2D8943126E75 /* DuplicateResultsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuplicateResultsView.swift; sourceTree = "<group>"; };
 		D3A8A1896B87FF041125DD84 /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
 		F4D929F9A0F9C6B65C283387 /* LanraragiKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = LanraragiKit; path = Packages/LanraragiKit; sourceTree = SOURCE_ROOT; };
 		FF5978E02C65E10E0EEF7643 /* LanraragiDeskApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanraragiDeskApp.swift; sourceTree = "<group>"; };
@@ -103,8 +103,8 @@
 		CAC542863F7A8848563F6057 /* UI */ = {
 			isa = PBXGroup;
 			children = (
-				D0E4A8FE5ABC2D8943126E75 /* DuplicateResultsView.swift */,
 				53E76144EA3A608FC23C8A94 /* ProfileEditorView.swift */,
+				C8BD9CC8EB9AC85F61625F2B /* ReviewView.swift */,
 				358F4E9A6F34DDEB4C2966B1 /* RootView.swift */,
 			);
 			path = UI;
@@ -198,7 +198,6 @@
 			files = (
 				462D167127B78592933CCE35 /* AppModel.swift in Sources */,
 				6FACD0CFFB200075847A6B9C /* AppPaths.swift in Sources */,
-				372976659C89CFFD4C01C865 /* DuplicateResultsView.swift in Sources */,
 				5113E07D4F781D2AA690F2D9 /* DuplicateScanViewModel.swift in Sources */,
 				7542369653C2D01A55CA1E70 /* IndexingViewModel.swift in Sources */,
 				DDDB37F2CDB1F904FAFF1F3C /* KeychainService.swift in Sources */,
@@ -206,6 +205,7 @@
 				E53EB607E67003100933762A /* Profile.swift in Sources */,
 				DE9EFC3A45B2EDD7BBEEF9A0 /* ProfileEditorView.swift in Sources */,
 				F71E979E397E14D574791B80 /* ProfileStore.swift in Sources */,
+				3A3789342798AE8BEFA8182C /* ReviewView.swift in Sources */,
 				FA5BDE6D31A4CC65C617F51F /* RootView.swift in Sources */,
 				6B35F39BF0AD26CD55A13641 /* ThumbnailLoader.swift in Sources */,
 			);

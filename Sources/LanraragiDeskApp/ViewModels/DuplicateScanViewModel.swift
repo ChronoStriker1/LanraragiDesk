@@ -18,7 +18,7 @@ final class DuplicateScanViewModel: ObservableObject {
 
     @Published private(set) var status: Status = .idle
     @Published private(set) var result: DuplicateScanResult?
-    @Published var showingResults: Bool = false
+    @Published private(set) var resultRevision: Int = 0
 
     // Tuning knobs
     @Published var includeExactChecksum: Bool = true
@@ -119,7 +119,7 @@ final class DuplicateScanViewModel: ObservableObject {
                 if runID != rid { return }
                 result = res
                 status = .completed(res.stats)
-                showingResults = true
+                resultRevision &+= 1
             } catch {
                 if Task.isCancelled { return }
                 if runID == rid {

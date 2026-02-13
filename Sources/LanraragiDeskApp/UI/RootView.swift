@@ -6,6 +6,12 @@ struct RootView: View {
 
     @State private var editingProfile: Profile?
     @State private var showingSetup = false
+    @State private var tab: Tab = .scan
+
+    enum Tab: Hashable {
+        case scan
+        case review
+    }
 
     var body: some View {
         ZStack {
@@ -35,13 +41,9 @@ struct RootView: View {
         .sheet(isPresented: $showingSetup) {
             ProfileEditorView(mode: .add)
         }
-        .sheet(isPresented: $appModel.duplicates.showingResults) {
-            if let profile = appModel.selectedProfile, let result = appModel.duplicates.result {
-                DuplicateResultsView(profile: profile, result: result, thumbnails: appModel.duplicates.thumbnails)
-            } else {
-                ContentUnavailableView("No Results", systemImage: "square.stack.3d.up.slash")
-                    .frame(minWidth: 640, minHeight: 480)
-            }
+        .onChange(of: appModel.duplicates.resultRevision) { _, _ in
+            // Auto-focus the review UI after a scan completes.
+            tab = .review
         }
     }
 
@@ -50,7 +52,7 @@ struct RootView: View {
         if let profile = appModel.selectedProfile {
             VStack(alignment: .leading, spacing: 18) {
                 header(profile: profile)
-                runCard(profile: profile)
+                tabs(profile: profile)
                 Spacer()
             }
             .frame(minWidth: 900, minHeight: 620, alignment: .topLeading)
@@ -61,6 +63,35 @@ struct RootView: View {
                 description: Text("Set your server address and API key to start finding duplicates.")
             )
             .frame(minWidth: 700, minHeight: 520)
+        }
+    }
+
+    private func tabs(profile: Profile) -> some View {
+        TabView(selection: $tab) {
+            runCard(profile: profile)
+                .tag(Tab.scan)
+                .tabItem { Label("Scan", systemImage: "magnifyingglass") }
+
+            reviewTab(profile: profile)
+                .tag(Tab.review)
+                .tabItem { Label("Review", systemImage: "square.stack.3d.up") }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private func reviewTab(profile: Profile) -> some View {
+        if let result = appModel.duplicates.result {
+            ReviewView(profile: profile, result: result, thumbnails: appModel.duplicates.thumbnails)
+        } else {
+            ContentUnavailableView(
+                "No Results Yet",
+                systemImage: "square.stack.3d.up.slash",
+                description: Text("Run a scan to see duplicate groups here.")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(.thinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         }
     }
 
@@ -150,18 +181,18 @@ struct RootView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
-        case .completed(let stats):
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Found \(appModel.duplicates.result?.groups.count ?? 0) duplicate groups.")
+            case .completed(let stats):
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Found \(appModel.duplicates.result?.groups.count ?? 0) duplicate groups.")
+                        .font(.callout)
+                    Text("Scanned \(stats.archives) archives in \(String(format: "%.1fs", stats.durationSeconds)).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Go To Review") { tab = .review }
+                }
+            case .failed(let msg):
+                Text("Failed: \(msg)")
                     .font(.callout)
-                Text("Scanned \(stats.archives) archives in \(String(format: "%.1fs", stats.durationSeconds)).")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Button("Open Results") { appModel.duplicates.showingResults = true }
-            }
-        case .failed(let msg):
-            Text("Failed: \(msg)")
-                .font(.callout)
                 .foregroundStyle(.red)
         }
     }
@@ -225,4 +256,3 @@ struct RootView: View {
         .font(.caption)
     }
 }
-
