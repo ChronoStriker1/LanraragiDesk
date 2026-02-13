@@ -178,7 +178,7 @@ private struct PairRowView: View {
             Button("Copy Arcid A") { copy(pair.arcidA) }
             Button("Copy Arcid B") { copy(pair.arcidB) }
             Divider()
-            Button("Mark As Not A Match") { markNotDuplicate(pair) }
+            Button("Mark Different (Not A Match)") { markNotDuplicate(pair) }
         }
     }
 
@@ -267,12 +267,14 @@ private struct PairCompareView: View {
         VStack(alignment: .leading, spacing: 12) {
             actions
 
-            HSplitView {
-                ArchiveColumn(profile: profile, arcid: pair.arcidA, thumbnails: thumbnails, archives: archives)
-                ArchiveColumn(profile: profile, arcid: pair.arcidB, thumbnails: thumbnails, archives: archives)
-            }
-
-            Divider()
+            MetadataCompareBlock(
+                profile: profile,
+                arcidA: pair.arcidA,
+                arcidB: pair.arcidB,
+                thumbnails: thumbnails,
+                archives: archives
+            )
+            .frame(height: 240)
 
             syncedPageCompare
         }
@@ -292,6 +294,10 @@ private struct PairCompareView: View {
                     Task {
                         do {
                             try await deleteArchive(arcid)
+                            await MainActor.run {
+                                // Move forward after destructive actions; the deleted archive is removed from the results list.
+                                goNext()
+                            }
                         } catch {
                             reportError("Delete failed: \(error)")
                         }
@@ -320,7 +326,7 @@ private struct PairCompareView: View {
             Button("Prev") { goPrev() }
             Button("Next") { goNext() }
 
-            Button("Not A Match") { markNotDuplicate(pair) }
+            Button("Mark Different") { markNotDuplicate(pair) }
 
             Button("Delete Left", role: .destructive) { confirmDeleteArcid = pair.arcidA }
             Button("Delete Right", role: .destructive) { confirmDeleteArcid = pair.arcidB }
@@ -350,120 +356,135 @@ private struct PairCompareView: View {
     }
 }
 
-private struct ArchiveColumn: View {
+private struct MetadataCompareBlock: View {
     let profile: Profile
-    let arcid: String
+    let arcidA: String
+    let arcidB: String
     let thumbnails: ThumbnailLoader
     let archives: ArchiveLoader
 
-    @State private var meta: ArchiveMetadata?
-    @State private var metaError: String?
-    @State private var rawMeta: String?
-    @State private var rawMetaError: String?
+    @State private var metaA: ArchiveMetadata?
+    @State private var metaB: ArchiveMetadata?
+    @State private var rawA: String?
+    @State private var rawB: String?
+    @State private var err: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            header
+            HStack(alignment: .top, spacing: 12) {
+                HStack(spacing: 8) {
+                    CoverThumb(profile: profile, arcid: arcidA, thumbnails: thumbnails)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(metaA?.title?.isEmpty == false ? metaA!.title! : arcidA)
+                            .font(.headline)
+                            .lineLimit(2)
+                        Text(arcidA)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            Divider()
+                HStack(spacing: 8) {
+                    CoverThumb(profile: profile, arcid: arcidB, thumbnails: thumbnails)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(metaB?.title?.isEmpty == false ? metaB!.title! : arcidB)
+                            .font(.headline)
+                            .lineLimit(2)
+                        Text(arcidB)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
-            // Pages are shown in a synced compare scroller below.
-            Text(metaLineSecondary)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            if let err {
+                Text(err)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+            }
 
-            DisclosureGroup("All metadata") {
-                if let rawMetaError {
-                    Text(rawMetaError)
-                        .font(.caption2)
-                        .foregroundStyle(.red)
-                } else if let rawMeta {
-                    Text(rawMeta)
+            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
+                row("Category", valueA: metaA?.category, valueB: metaB?.category)
+                row("Pages", valueA: metaA?.pagecount.map(String.init), valueB: metaB?.pagecount.map(String.init))
+                row("Filename", valueA: metaA?.filename, valueB: metaB?.filename)
+                row("Extension", valueA: metaA?.fileExtension, valueB: metaB?.fileExtension)
+                row("New", valueA: metaA?.isnew.map { $0 ? "Yes" : "No" }, valueB: metaB?.isnew.map { $0 ? "Yes" : "No" })
+                row("Progress", valueA: metaA?.progress.map(String.init), valueB: metaB?.progress.map(String.init))
+                row("Last Read", valueA: metaA?.lastreadtime.map(String.init), valueB: metaB?.lastreadtime.map(String.init))
+                row("Tags", valueA: metaA?.tags, valueB: metaB?.tags, lineLimit: 2)
+                row("Summary", valueA: metaA?.summary, valueB: metaB?.summary, lineLimit: 3)
+            }
+            .font(.caption)
+
+            HStack(spacing: 12) {
+                DisclosureGroup("Raw A") {
+                    Text(rawA ?? "Loading…")
                         .font(.caption2)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    HStack(spacing: 10) {
-                        ProgressView().scaleEffect(0.7)
-                        Text("Loading…")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
+                }
+                DisclosureGroup("Raw B") {
+                    Text(rawB ?? "Loading…")
+                        .font(.caption2)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .font(.caption2)
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .task(id: arcid) {
-            meta = nil
-            metaError = nil
-            rawMeta = nil
-            rawMetaError = nil
+        .padding(12)
+        .background(.quaternary.opacity(0.35))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .task(id: "\(arcidA)|\(arcidB)") {
+            metaA = nil
+            metaB = nil
+            rawA = nil
+            rawB = nil
+            err = nil
 
             do {
-                meta = try await archives.metadata(profile: profile, arcid: arcid)
+                async let a = archives.metadata(profile: profile, arcid: arcidA)
+                async let b = archives.metadata(profile: profile, arcid: arcidB)
+                metaA = try await a
+                metaB = try await b
             } catch {
-                metaError = String(describing: error)
+                err = "Metadata failed to load: \(error)"
             }
 
-            do {
-                rawMeta = try await archives.metadataPrettyJSON(profile: profile, arcid: arcid)
-            } catch {
-                rawMetaError = String(describing: error)
-            }
+            do { rawA = try await archives.metadataPrettyJSON(profile: profile, arcid: arcidA) } catch {}
+            do { rawB = try await archives.metadataPrettyJSON(profile: profile, arcid: arcidB) } catch {}
         }
     }
 
-    private var header: some View {
-        HStack(alignment: .top, spacing: 10) {
-            CoverThumb(profile: profile, arcid: arcid, thumbnails: thumbnails)
+    @ViewBuilder
+    private func row(_ label: String, valueA: String?, valueB: String?, lineLimit: Int = 1) -> some View {
+        let a = (valueA?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? valueA! : "—"
+        let b = (valueB?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? valueB! : "—"
+        let diff = a != b && a != "—" && b != "—"
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(meta?.title?.isEmpty == false ? meta!.title! : arcid)
-                    .font(.headline)
-                    .lineLimit(2)
+        GridRow {
+            Text(label)
+                .foregroundStyle(.secondary)
+                .frame(width: 90, alignment: .leading)
 
-                if let metaError {
-                    Text("Info error: \(metaError)")
-                        .font(.caption2)
-                        .foregroundStyle(.red)
-                } else {
-                    Text(metaLine)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
+            Text(a)
+                .lineLimit(lineLimit)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 2)
+                .background(diff ? Color.yellow.opacity(0.12) : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
 
-                Text(arcid)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-            }
-
-            Spacer()
+            Text(b)
+                .lineLimit(lineLimit)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 2)
+                .background(diff ? Color.yellow.opacity(0.12) : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
-    }
-
-    private var metaLine: String {
-        var parts: [String] = []
-        if let c = meta?.category, !c.isEmpty { parts.append("Category: \(c)") }
-        if let p = meta?.pagecount { parts.append("Pages: \(p)") }
-        if let f = meta?.filename, !f.isEmpty { parts.append("File: \(f)") }
-        if let e = meta?.fileExtension, !e.isEmpty { parts.append("Ext: \(e)") }
-        if let t = meta?.tags, !t.isEmpty { parts.append("Tags: \(t)") }
-        if parts.isEmpty { return "Loading info…" }
-        return parts.joined(separator: "  •  ")
-    }
-
-    private var metaLineSecondary: String {
-        if metaError != nil {
-            return "Metadata failed to load."
-        }
-        if let s = meta?.summary, !s.isEmpty {
-            return s
-        }
-        return ""
     }
 }
 
