@@ -1,0 +1,29 @@
+name: LanraragiDesk
+options:
+  bundleIdPrefix: us.cstriker
+  deploymentTarget:
+    macOS: '14.0'
+settings:
+  base:
+    SWIFT_VERSION: '6.0'
+    CLANG_WARN_DOCUMENTATION_COMMENTS: 'YES'
+    GCC_TREAT_WARNINGS_AS_ERRORS: 'YES'
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: 'YES'
+packages:
+  LanraragiKit:
+    path: Packages/LanraragiKit
+
+targets:
+  LanraragiDesk:
+    type: application
+    platform: macOS
+    deploymentTarget: '14.0'
+    sources:
+      - path: Sources/LanraragiDeskApp
+    info:
+      path: Sources/LanraragiDeskApp/Resources/Info.plist
+    dependencies:
+      - package: LanraragiKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: us.cstriker.lanraragidesk
