@@ -10,7 +10,7 @@ public struct IndexerConfig: Sendable {
         concurrency: Int = 6,
         resumeFromLastStart: Bool = true,
         skipExisting: Bool = true,
-        noFallbackThumbnails: Bool = true
+        noFallbackThumbnails: Bool = false
     ) {
         self.concurrency = max(1, concurrency)
         self.resumeFromLastStart = resumeFromLastStart
@@ -129,6 +129,8 @@ public struct FingerprintIndexer {
                                 let now = Int64(Date().timeIntervalSince1970)
 
                                 for (kind, crop, hash) in fp.records {
+                                    // Store checksum once per archive to keep the DB smaller.
+                                    let checksum = (kind == .dHash && crop == .full) ? fp.checksumSHA256 : Data()
                                     try store.upsertFingerprint(.init(
                                         profileID: profileID,
                                         arcid: arcid,
@@ -136,7 +138,7 @@ public struct FingerprintIndexer {
                                         crop: crop,
                                         hash64: hash,
                                         aspectRatio: fp.aspectRatio,
-                                        thumbChecksum: fp.checksumSHA256,
+                                        thumbChecksum: checksum,
                                         updatedAt: now
                                     ))
                                 }

@@ -8,8 +8,8 @@ final class AppModel: ObservableObject {
     @Published var selectedProfileID: Profile.ID?
 
     @Published var connectionStatus: ConnectionStatus = .idle
-    let indexing: IndexingViewModel
-    var duplicates: DuplicateScanViewModel
+    @Published var indexing: IndexingViewModel
+    @Published var duplicates: DuplicateScanViewModel
 
     private var cancellables: Set<AnyCancellable> = []
 

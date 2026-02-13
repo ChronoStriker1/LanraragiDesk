@@ -441,10 +441,9 @@ public final class IndexStore: @unchecked Sendable {
         ON fingerprints(profile_id, kind, crop, hash64);
         """)
 
-        try exec(db, """
-        CREATE INDEX IF NOT EXISTS idx_fingerprints_profile_checksum
-        ON fingerprints(profile_id, thumb_checksum);
-        """)
+        // We keep checksums in the fingerprints table for compatibility, but we do not index them:
+        // most rows store an empty BLOB to keep storage down, and checksum grouping is done in-memory.
+        try exec(db, "DROP INDEX IF EXISTS idx_fingerprints_profile_checksum;")
     }
 
     private static func exec(_ db: OpaquePointer, _ sql: String) throws {

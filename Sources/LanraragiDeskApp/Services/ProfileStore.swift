@@ -22,13 +22,22 @@ final class ProfileStore: ObservableObject {
         } catch {
             profiles = []
         }
+
+        // This app is single-profile by design: keep only the first.
+        if profiles.count > 1 {
+            profiles = [profiles[0]]
+            save()
+        }
     }
 
     func upsert(_ profile: Profile) {
         if let idx = profiles.firstIndex(where: { $0.id == profile.id }) {
             profiles[idx] = profile
+        } else if profiles.isEmpty {
+            profiles = [profile]
         } else {
-            profiles.append(profile)
+            // Replace existing profile.
+            profiles[0] = profile
         }
         save()
     }

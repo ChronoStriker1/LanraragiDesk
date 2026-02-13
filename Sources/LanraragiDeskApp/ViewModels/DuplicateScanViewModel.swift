@@ -3,6 +3,12 @@ import LanraragiKit
 
 @MainActor
 final class DuplicateScanViewModel: ObservableObject {
+    enum Strictness: Int, Sendable {
+        case strict = 0
+        case balanced = 1
+        case loose = 2
+    }
+
     enum Status {
         case idle
         case running(String)
@@ -17,9 +23,7 @@ final class DuplicateScanViewModel: ObservableObject {
     // Tuning knobs
     @Published var includeExactChecksum: Bool = true
     @Published var includeApproximate: Bool = true
-    @Published var dHashThreshold: Int = 6
-    @Published var aHashThreshold: Int = 6
-    @Published var bucketMaxSize: Int = 64
+    @Published var strictness: Strictness = .balanced
 
     let thumbnails = ThumbnailLoader()
 
@@ -32,7 +36,7 @@ final class DuplicateScanViewModel: ObservableObject {
         let rid = UUID()
         runID = rid
 
-        status = .running("Opening index…")
+        status = .running("Preparing local index…")
         result = nil
 
         task = Task {
@@ -48,13 +52,55 @@ final class DuplicateScanViewModel: ObservableObject {
             do {
                 let store = try IndexStore(configuration: .init(url: AppPaths.indexDBURL()))
 
+                // Always run the indexer first. If the index is already complete, this should be quick.
+                status = .running("Updating index (this can take a while on first run)…")
+
+                let account = "apiKey.\(profile.id.uuidString)"
+                let apiKeyString = try KeychainService.getString(account: account)
+                let apiKey = apiKeyString.map { LANraragiAPIKey($0) }
+
+                let client = LANraragiClient(configuration: .init(
+                    baseURL: profile.baseURL,
+                    apiKey: apiKey,
+                    acceptLanguage: profile.language,
+                    maxConnectionsPerHost: 8
+                ))
+
+                let indexer = FingerprintIndexer()
+                try await indexer.run(
+                    profileID: profile.id,
+                    client: client,
+                    store: store,
+                    baseURL: profile.baseURL,
+                    language: profile.language,
+                    config: IndexerConfig(concurrency: 4, resumeFromLastStart: true, skipExisting: true, noFallbackThumbnails: false),
+                    progress: { [weak self] p in
+                        Task { @MainActor in
+                            guard let self, self.runID == rid else { return }
+                            let total = max(1, p.total)
+                            let processed = min(total, p.startOffset + p.seen)
+                            let text = "Indexing covers: \(processed)/\(total) (\(p.failed) failed)"
+                            self.status = .running(text)
+                        }
+                    }
+                )
+
                 status = .running("Loading fingerprints…")
                 let fps = try store.loadScanFingerprints(profileID: profile.id)
 
                 status = .running("Loading exclusions…")
                 let notDup = try store.loadNotDuplicatePairs(profileID: profile.id)
 
-                status = .running("Scanning…")
+                status = .running("Scanning for duplicates…")
+
+                let (dHashThreshold, aHashThreshold, bucketMaxSize): (Int, Int, Int) = {
+                    switch strictness {
+                    case .strict: return (4, 4, 48)
+                    case .balanced: return (6, 6, 64)
+                    case .loose: return (9, 9, 96)
+                    }
+                }()
+
                 let cfg = DuplicateScanConfig(
                     includeExactChecksum: includeExactChecksum,
                     includeApproximate: includeApproximate,

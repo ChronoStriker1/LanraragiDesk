@@ -4,22 +4,35 @@ import LanraragiKit
 struct RootView: View {
     @EnvironmentObject private var appModel: AppModel
 
-    @State private var showingAddProfile = false
     @State private var editingProfile: Profile?
+    @State private var showingSetup = false
 
     var body: some View {
-        NavigationSplitView {
-            sidebar
-        } detail: {
-            detail
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(nsColor: .windowBackgroundColor),
+                    Color(nsColor: .windowBackgroundColor).opacity(0.85),
+                    Color(nsColor: .controlBackgroundColor).opacity(0.8),
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            content
+                .padding(24)
         }
         .onAppear {
             appModel.selectFirstIfNeeded()
+            if appModel.selectedProfile == nil {
+                showingSetup = true
+            }
         }
         .sheet(item: $editingProfile) { profile in
             ProfileEditorView(mode: .edit(profile))
         }
-        .sheet(isPresented: $showingAddProfile) {
+        .sheet(isPresented: $showingSetup) {
             ProfileEditorView(mode: .add)
         }
         .sheet(isPresented: $appModel.duplicates.showingResults) {
@@ -32,226 +45,145 @@ struct RootView: View {
         }
     }
 
-    private var sidebar: some View {
-        VStack(spacing: 12) {
-            List(selection: $appModel.selectedProfileID) {
-                Section("Profiles") {
-                    ForEach(appModel.profileStore.profiles) { profile in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(profile.name).font(.headline)
-                            Text(profile.baseURL.absoluteString)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .contextMenu {
-                            Button("Edit") { editingProfile = profile }
-                            Button("Delete", role: .destructive) {
-                                try? KeychainService.delete(account: "apiKey.\(profile.id.uuidString)")
-                                appModel.profileStore.delete(profile)
-                                appModel.selectedProfileID = appModel.profileStore.profiles.first?.id
-                            }
-                        }
-                        .tag(profile.id)
-                    }
-                }
-            }
-
-            HStack {
-                Button("Add Profile") { showingAddProfile = true }
+    @ViewBuilder
+    private var content: some View {
+        if let profile = appModel.selectedProfile {
+            VStack(alignment: .leading, spacing: 18) {
+                header(profile: profile)
+                runCard(profile: profile)
                 Spacer()
-                if let profile = appModel.selectedProfile {
-                    Button("Edit") { editingProfile = profile }
-                }
             }
-            .padding([.horizontal, .bottom])
+            .frame(minWidth: 900, minHeight: 620, alignment: .topLeading)
+        } else {
+            ContentUnavailableView(
+                "Connect To LANraragi",
+                systemImage: "server.rack",
+                description: Text("Set your server address and API key to start finding duplicates.")
+            )
+            .frame(minWidth: 700, minHeight: 520)
         }
     }
 
-    private var detail: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            if let profile = appModel.selectedProfile {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(profile.name).font(.largeTitle).bold()
-                    Text(profile.baseURL.absoluteString).foregroundStyle(.secondary)
+    private func header(profile: Profile) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("LanraragiDesk")
+                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                Text(profile.baseURL.absoluteString)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            HStack(spacing: 10) {
+                Button(appModel.connectionStatus == .testing ? "Testing…" : "Test Connection") {
+                    Task { await appModel.testConnection() }
                 }
+                .disabled(appModel.connectionStatus == .testing)
 
-                HStack(spacing: 12) {
-                    Button {
-                        Task { await appModel.testConnection() }
-                    } label: {
-                        Text(appModel.connectionStatus == .testing ? "Testing…" : "Test Connection")
-                    }
-                    .disabled(appModel.connectionStatus == .testing)
+                connectionPill
 
-                    connectionPill
-
-                    Spacer()
+                Button("Connection…") {
+                    editingProfile = profile
                 }
+            }
+        }
+        .padding(18)
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
 
-                Divider()
-
-                Text("Deduplicator")
+    private func runCard(profile: Profile) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Find Duplicate Archives")
                     .font(.title2)
                     .bold()
-
-                indexingCard(profile: profile)
-                duplicatesCard(profile: profile)
-
-                Spacer()
-            } else {
-                ContentUnavailableView(
-                    "No Profile",
-                    systemImage: "server.rack",
-                    description: Text("Add a LANraragi profile to begin.")
-                )
-            }
-        }
-        .padding(24)
-    }
-
-    private func indexingCard(profile: Profile) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Fingerprint Index")
-                        .font(.headline)
-                    Text("Builds a local cover fingerprint database so later duplicate scans don’t do O(n²) comparisons.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                HStack(spacing: 10) {
-                    Button("Start Index") {
-                        appModel.indexing.start(profile: profile)
-                    }
-                    Button("Cancel", role: .destructive) {
-                        appModel.indexing.cancel()
-                    }
-                    Button("Reset Index", role: .destructive) {
-                        appModel.indexing.resetIndexFiles()
-                    }
-                }
-            }
-
-            switch appModel.indexing.status {
-            case .idle:
-                Text("Ready.")
-                    .font(.caption)
+                Text("Click scan. The app will update its local index if needed, then show you likely duplicates to review and delete manually.")
+                    .font(.callout)
                     .foregroundStyle(.secondary)
-            case .running(let p):
-                progressView(p)
-            case .completed(let p):
-                progressView(p)
-            case .failed(let msg):
-                Text("Failed: \(msg)")
-                    .font(.caption)
-                    .foregroundStyle(.red)
             }
-        }
-        .padding(16)
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
 
-    private func duplicatesCard(profile: Profile) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Duplicate Scan")
-                        .font(.headline)
-                    Text("Finds likely duplicates using exact checksum matches and optional approximate cover hashing.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-
-                HStack(spacing: 10) {
-                    Button("Scan") {
-                        appModel.duplicates.start(profile: profile)
-                    }
-                    Button("Cancel", role: .destructive) {
-                        appModel.duplicates.cancel()
-                    }
-                }
-            }
+            Divider()
 
             HStack(spacing: 12) {
-                Toggle("Exact", isOn: $appModel.duplicates.includeExactChecksum)
-                Toggle("Approx", isOn: $appModel.duplicates.includeApproximate)
-
-                Stepper("dHash ≤ \(appModel.duplicates.dHashThreshold)", value: $appModel.duplicates.dHashThreshold, in: 0...32)
-                Stepper("aHash ≤ \(appModel.duplicates.aHashThreshold)", value: $appModel.duplicates.aHashThreshold, in: 0...32)
-                Stepper("Max bucket \(appModel.duplicates.bucketMaxSize)", value: $appModel.duplicates.bucketMaxSize, in: 8...512, step: 8)
-            }
-            .font(.caption)
-
-            switch appModel.duplicates.status {
-            case .idle:
-                Text("Ready.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            case .running(let msg):
-                HStack(spacing: 10) {
-                    ProgressView()
-                    Text(msg)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                Button {
+                    appModel.duplicates.start(profile: profile)
+                } label: {
+                    Text("Scan For Duplicates")
+                        .frame(minWidth: 180)
                 }
-            case .completed(let stats):
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Groups: \(appModel.duplicates.result?.groups.count ?? 0)  •  Archives scanned: \(stats.archives)  •  Time: \(String(format: "%.1fs", stats.durationSeconds))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Button("Open Results") { appModel.duplicates.showingResults = true }
-                }
-            case .failed(let msg):
-                Text("Failed: \(msg)")
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                .buttonStyle(.borderedProminent)
+
+                Button("Cancel", role: .destructive) { appModel.duplicates.cancel() }
+
+                Spacer()
+
+                Button("Reset Index", role: .destructive) { appModel.indexing.resetIndexFiles() }
             }
+
+            statusBlock
+
+            DisclosureGroup("Advanced") {
+                advancedOptions
+                    .padding(.top, 8)
+            }
+            .font(.callout)
         }
-        .padding(16)
+        .padding(18)
         .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
-    private func progressView(_ p: IndexerProgress) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            let total = max(1, p.total)
-            let current = min(total, p.startOffset + p.seen)
-            ProgressView(value: Double(current), total: Double(total)) {
-                Text(phaseText(p.phase))
+    @ViewBuilder
+    private var statusBlock: some View {
+        switch appModel.duplicates.status {
+        case .idle:
+            Text("Ready.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        case .running(let msg):
+            HStack(spacing: 10) {
+                ProgressView()
+                Text(msg)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        case .completed(let stats):
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Found \(appModel.duplicates.result?.groups.count ?? 0) duplicate groups.")
+                    .font(.callout)
+                Text("Scanned \(stats.archives) archives in \(String(format: "%.1fs", stats.durationSeconds)).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Button("Open Results") { appModel.duplicates.showingResults = true }
             }
-
-            HStack(spacing: 14) {
-                Text("Seen: \(p.seen)")
-                Text("Indexed: \(p.indexed)")
-                Text("Skipped: \(p.skipped)")
-                Text("Failed: \(p.failed)")
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-
-            if let arcid = p.currentArcid, !arcid.isEmpty {
-                Text("Current: \(arcid)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+        case .failed(let msg):
+            Text("Failed: \(msg)")
+                .font(.callout)
+                .foregroundStyle(.red)
         }
     }
 
-    private func phaseText(_ phase: IndexerProgress.Phase) -> String {
-        switch phase {
-        case .starting:
-            return "Starting"
-        case .enumerating(let total):
-            return "Enumerating (\(total) total)"
-        case .indexing(let total):
-            return "Indexing (\(total) total)"
-        case .completed(let total):
-            return "Completed (\(total) total)"
+    private var advancedOptions: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Match Strictness")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Picker("Strictness", selection: $appModel.duplicates.strictness) {
+                Text("Strict").tag(DuplicateScanViewModel.Strictness.strict)
+                Text("Balanced").tag(DuplicateScanViewModel.Strictness.balanced)
+                Text("Loose").tag(DuplicateScanViewModel.Strictness.loose)
+            }
+            .pickerStyle(.segmented)
+
+            Toggle("Also match approximate covers (recommended)", isOn: $appModel.duplicates.includeApproximate)
+                .font(.callout)
+
+            Toggle("Also match exact same cover image", isOn: $appModel.duplicates.includeExactChecksum)
+                .font(.callout)
         }
     }
 
@@ -293,3 +225,4 @@ struct RootView: View {
         .font(.caption)
     }
 }
+
