@@ -8,6 +8,7 @@ final class AppModel: ObservableObject {
 
     @Published var connectionStatus: ConnectionStatus = .idle
     @Published var indexing = IndexingViewModel()
+    @Published var duplicates = DuplicateScanViewModel()
 
     enum ConnectionStatus: Equatable {
         case idle

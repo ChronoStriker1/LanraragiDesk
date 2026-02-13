@@ -22,6 +22,14 @@ struct RootView: View {
         .sheet(isPresented: $showingAddProfile) {
             ProfileEditorView(mode: .add)
         }
+        .sheet(isPresented: $appModel.duplicates.showingResults) {
+            if let profile = appModel.selectedProfile, let result = appModel.duplicates.result {
+                DuplicateResultsView(profile: profile, result: result, thumbnails: appModel.duplicates.thumbnails)
+            } else {
+                ContentUnavailableView("No Results", systemImage: "square.stack.3d.up.slash")
+                    .frame(minWidth: 640, minHeight: 480)
+            }
+        }
     }
 
     private var sidebar: some View {
@@ -87,6 +95,7 @@ struct RootView: View {
                     .bold()
 
                 indexingCard(profile: profile)
+                duplicatesCard(profile: profile)
 
                 Spacer()
             } else {
@@ -130,6 +139,68 @@ struct RootView: View {
                 progressView(p)
             case .completed(let p):
                 progressView(p)
+            case .failed(let msg):
+                Text("Failed: \(msg)")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+        .padding(16)
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func duplicatesCard(profile: Profile) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Duplicate Scan")
+                        .font(.headline)
+                    Text("Finds likely duplicates using exact checksum matches and optional approximate cover hashing.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+
+                HStack(spacing: 10) {
+                    Button("Scan") {
+                        appModel.duplicates.start(profile: profile)
+                    }
+                    Button("Cancel", role: .destructive) {
+                        appModel.duplicates.cancel()
+                    }
+                }
+            }
+
+            HStack(spacing: 12) {
+                Toggle("Exact", isOn: $appModel.duplicates.includeExactChecksum)
+                Toggle("Approx", isOn: $appModel.duplicates.includeApproximate)
+
+                Stepper("dHash ≤ \(appModel.duplicates.dHashThreshold)", value: $appModel.duplicates.dHashThreshold, in: 0...32)
+                Stepper("aHash ≤ \(appModel.duplicates.aHashThreshold)", value: $appModel.duplicates.aHashThreshold, in: 0...32)
+                Stepper("Max bucket \(appModel.duplicates.bucketMaxSize)", value: $appModel.duplicates.bucketMaxSize, in: 8...512, step: 8)
+            }
+            .font(.caption)
+
+            switch appModel.duplicates.status {
+            case .idle:
+                Text("Ready.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            case .running(let msg):
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text(msg)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            case .completed(let stats):
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Groups: \(appModel.duplicates.result?.groups.count ?? 0)  •  Archives scanned: \(stats.archives)  •  Time: \(String(format: "%.1fs", stats.durationSeconds))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Open Results") { appModel.duplicates.showingResults = true }
+                }
             case .failed(let msg):
                 Text("Failed: \(msg)")
                     .font(.caption)

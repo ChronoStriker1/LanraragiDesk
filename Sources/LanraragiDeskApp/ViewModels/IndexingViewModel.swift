@@ -71,13 +71,8 @@ final class IndexingViewModel: ObservableObject {
     func cancel() {
         task?.cancel()
         task = nil
-        status = .idle
+                status = .idle
     }
 
-    private static func indexDBURL() -> URL {
-        let fm = FileManager.default
-        let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dir = appSupport.appendingPathComponent("LanraragiDesk", isDirectory: true)
-        return dir.appendingPathComponent("index.sqlite")
-    }
+    private static func indexDBURL() -> URL { AppPaths.indexDBURL() }
 }

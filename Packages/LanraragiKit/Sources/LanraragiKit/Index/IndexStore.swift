@@ -2,6 +2,35 @@ import Foundation
 import SQLite3
 
 public final class IndexStore: @unchecked Sendable {
+    public struct ScanFingerprint: Sendable, Hashable {
+        public var arcid: String
+        public var checksumSHA256: Data
+        public var dHashCenter90: UInt64
+        public var aHashCenter90: UInt64
+
+        public init(arcid: String, checksumSHA256: Data, dHashCenter90: UInt64, aHashCenter90: UInt64) {
+            self.arcid = arcid
+            self.checksumSHA256 = checksumSHA256
+            self.dHashCenter90 = dHashCenter90
+            self.aHashCenter90 = aHashCenter90
+        }
+    }
+
+    public struct NotDuplicatePair: Sendable, Hashable {
+        public var arcidA: String
+        public var arcidB: String
+
+        public init(arcidA: String, arcidB: String) {
+            if arcidA <= arcidB {
+                self.arcidA = arcidA
+                self.arcidB = arcidB
+            } else {
+                self.arcidA = arcidB
+                self.arcidB = arcidA
+            }
+        }
+    }
+
     public struct Configuration: Sendable {
         public var url: URL
 
@@ -20,6 +49,9 @@ public final class IndexStore: @unchecked Sendable {
     private var stmtUpsertFingerprint: OpaquePointer?
     private var stmtGetLastStart: OpaquePointer?
     private var stmtSetLastStart: OpaquePointer?
+    private var stmtSelectScanFingerprints: OpaquePointer?
+    private var stmtSelectNotDuplicates: OpaquePointer?
+    private var stmtInsertNotDuplicate: OpaquePointer?
 
     public init(configuration: Configuration) throws {
         self.config = configuration
@@ -70,6 +102,29 @@ public final class IndexStore: @unchecked Sendable {
               last_start = excluded.last_start,
               last_indexed_at = excluded.last_indexed_at;
             """)
+
+            stmtSelectScanFingerprints = try Self.prepare(opened, sql: """
+            SELECT arcid, kind, crop, hash64, thumb_checksum
+            FROM fingerprints
+            WHERE profile_id = ?
+              AND (
+                (kind = 0 AND crop = 0) OR
+                (kind = 0 AND crop = 1) OR
+                (kind = 1 AND crop = 1)
+              );
+            """)
+
+            stmtSelectNotDuplicates = try Self.prepare(opened, sql: """
+            SELECT arcid_a, arcid_b
+            FROM not_duplicates
+            WHERE profile_id = ?;
+            """)
+
+            stmtInsertNotDuplicate = try Self.prepare(opened, sql: """
+            INSERT INTO not_duplicates(profile_id, arcid_a, arcid_b, created_at)
+            VALUES(?, ?, ?, ?)
+            ON CONFLICT(profile_id, arcid_a, arcid_b) DO NOTHING;
+            """)
         }
     }
 
@@ -81,6 +136,9 @@ public final class IndexStore: @unchecked Sendable {
                 stmtUpsertFingerprint,
                 stmtGetLastStart,
                 stmtSetLastStart,
+                stmtSelectScanFingerprints,
+                stmtSelectNotDuplicates,
+                stmtInsertNotDuplicate,
             ].forEach { stmt in
                 if let stmt {
                     sqlite3_finalize(stmt)
@@ -97,6 +155,9 @@ public final class IndexStore: @unchecked Sendable {
             stmtUpsertFingerprint = nil
             stmtGetLastStart = nil
             stmtSetLastStart = nil
+            stmtSelectScanFingerprints = nil
+            stmtSelectNotDuplicates = nil
+            stmtInsertNotDuplicate = nil
         }
     }
 
@@ -191,6 +252,118 @@ public final class IndexStore: @unchecked Sendable {
         }
     }
 
+    public func loadScanFingerprints(profileID: UUID) throws -> [ScanFingerprint] {
+        try queue.sync {
+            guard let db, let stmtSelectScanFingerprints else { throw IndexStoreError.notOpen }
+            sqlite3_reset(stmtSelectScanFingerprints)
+            sqlite3_clear_bindings(stmtSelectScanFingerprints)
+
+            try bindText(stmtSelectScanFingerprints, index: 1, value: profileID.uuidString)
+
+            struct Partial {
+                var checksum: Data?
+                var dHashCenter90: UInt64?
+                var aHashCenter90: UInt64?
+            }
+
+            var byArcid: [String: Partial] = [:]
+            byArcid.reserveCapacity(60_000)
+
+            while true {
+                let rc = sqlite3_step(stmtSelectScanFingerprints)
+                if rc == SQLITE_DONE { break }
+                if rc != SQLITE_ROW {
+                    throw IndexStoreError.sqlite(rc: rc, message: Self.errorMessage(db))
+                }
+
+                guard let arcidC = sqlite3_column_text(stmtSelectScanFingerprints, 0) else { continue }
+                let arcid = String(cString: arcidC)
+                let kind = Int(sqlite3_column_int(stmtSelectScanFingerprints, 1))
+                let crop = Int(sqlite3_column_int(stmtSelectScanFingerprints, 2))
+                let hash64 = UInt64(bitPattern: sqlite3_column_int64(stmtSelectScanFingerprints, 3))
+
+                let blobPtr = sqlite3_column_blob(stmtSelectScanFingerprints, 4)
+                let blobLen = Int(sqlite3_column_bytes(stmtSelectScanFingerprints, 4))
+                let checksum: Data? = (blobPtr != nil && blobLen > 0) ? Data(bytes: blobPtr!, count: blobLen) : nil
+
+                var p = byArcid[arcid] ?? Partial()
+                if p.checksum == nil, let checksum {
+                    p.checksum = checksum
+                }
+
+                if kind == FingerprintKind.dHash.rawValue, crop == FingerprintCrop.center90.rawValue {
+                    p.dHashCenter90 = hash64
+                } else if kind == FingerprintKind.aHash.rawValue, crop == FingerprintCrop.center90.rawValue {
+                    p.aHashCenter90 = hash64
+                }
+
+                byArcid[arcid] = p
+            }
+
+            var out: [ScanFingerprint] = []
+            out.reserveCapacity(byArcid.count)
+
+            for (arcid, p) in byArcid {
+                guard
+                    let checksum = p.checksum,
+                    let dh = p.dHashCenter90,
+                    let ah = p.aHashCenter90
+                else { continue }
+                out.append(.init(arcid: arcid, checksumSHA256: checksum, dHashCenter90: dh, aHashCenter90: ah))
+            }
+
+            out.sort { $0.arcid < $1.arcid }
+            return out
+        }
+    }
+
+    public func loadNotDuplicatePairs(profileID: UUID) throws -> Set<NotDuplicatePair> {
+        try queue.sync {
+            guard let db, let stmtSelectNotDuplicates else { throw IndexStoreError.notOpen }
+            sqlite3_reset(stmtSelectNotDuplicates)
+            sqlite3_clear_bindings(stmtSelectNotDuplicates)
+
+            try bindText(stmtSelectNotDuplicates, index: 1, value: profileID.uuidString)
+
+            var out = Set<NotDuplicatePair>()
+
+            while true {
+                let rc = sqlite3_step(stmtSelectNotDuplicates)
+                if rc == SQLITE_DONE { break }
+                if rc != SQLITE_ROW {
+                    throw IndexStoreError.sqlite(rc: rc, message: Self.errorMessage(db))
+                }
+
+                guard
+                    let aC = sqlite3_column_text(stmtSelectNotDuplicates, 0),
+                    let bC = sqlite3_column_text(stmtSelectNotDuplicates, 1)
+                else { continue }
+
+                out.insert(.init(arcidA: String(cString: aC), arcidB: String(cString: bC)))
+            }
+
+            return out
+        }
+    }
+
+    public func addNotDuplicatePair(profileID: UUID, arcidA: String, arcidB: String) throws {
+        try queue.sync {
+            guard let db, let stmtInsertNotDuplicate else { throw IndexStoreError.notOpen }
+            sqlite3_reset(stmtInsertNotDuplicate)
+            sqlite3_clear_bindings(stmtInsertNotDuplicate)
+
+            let pair = NotDuplicatePair(arcidA: arcidA, arcidB: arcidB)
+            let now = Int64(Date().timeIntervalSince1970)
+
+            try bindText(stmtInsertNotDuplicate, index: 1, value: profileID.uuidString)
+            try bindText(stmtInsertNotDuplicate, index: 2, value: pair.arcidA)
+            try bindText(stmtInsertNotDuplicate, index: 3, value: pair.arcidB)
+            sqlite3_bind_int64(stmtInsertNotDuplicate, 4, now)
+
+            try stepDone(stmtInsertNotDuplicate, db: db)
+        }
+    }
+
     private static func open(url: URL, db: inout OpaquePointer?) throws {
         let fm = FileManager.default
         let dir = url.deletingLastPathComponent()
@@ -255,6 +428,11 @@ public final class IndexStore: @unchecked Sendable {
         try exec(db, """
         CREATE INDEX IF NOT EXISTS idx_fingerprints_profile_kind_crop_hash
         ON fingerprints(profile_id, kind, crop, hash64);
+        """)
+
+        try exec(db, """
+        CREATE INDEX IF NOT EXISTS idx_fingerprints_profile_checksum
+        ON fingerprints(profile_id, thumb_checksum);
         """)
     }
 
