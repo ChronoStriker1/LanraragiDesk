@@ -19,6 +19,7 @@ final class DuplicateScanViewModel: ObservableObject {
     @Published private(set) var status: Status = .idle
     @Published private(set) var result: DuplicateScanResult?
     @Published private(set) var resultRevision: Int = 0
+    @Published private(set) var notMatches: [IndexStore.NotDuplicatePair] = []
 
     // Tuning knobs
     @Published var includeExactChecksum: Bool = true
@@ -159,6 +160,31 @@ final class DuplicateScanViewModel: ObservableObject {
             status = .failed("Failed to clear exclusions: \(error)")
             return
         }
+        notMatches = []
+    }
+
+    func loadNotDuplicatePairs(profile: Profile) async {
+        do {
+            let store = try IndexStore(configuration: .init(url: AppPaths.indexDBURL()))
+            let set = try store.loadNotDuplicatePairs(profileID: profile.id)
+            notMatches = set.sorted { a, b in
+                if a.arcidA != b.arcidA { return a.arcidA < b.arcidA }
+                return a.arcidB < b.arcidB
+            }
+        } catch {
+            status = .failed("Failed to load exclusions: \(error)")
+        }
+    }
+
+    func removeNotDuplicatePair(profile: Profile, pair: IndexStore.NotDuplicatePair) {
+        do {
+            let store = try IndexStore(configuration: .init(url: AppPaths.indexDBURL()))
+            try store.removeNotDuplicatePair(profileID: profile.id, arcidA: pair.arcidA, arcidB: pair.arcidB)
+        } catch {
+            status = .failed("Failed to remove exclusion: \(error)")
+            return
+        }
+        notMatches.removeAll { $0 == pair }
     }
 
     func deleteArchive(profile: Profile, arcid: String) async throws {

@@ -45,7 +45,7 @@ struct PairReviewView: View {
 
             HSplitView {
                 pairList
-                    .frame(minWidth: 128, idealWidth: 140, maxWidth: 160)
+                    .frame(minWidth: 260, idealWidth: 280, maxWidth: 340)
 
                 pairDetail
                     .frame(minWidth: 520)
@@ -273,8 +273,8 @@ private struct PairRowView: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            CoverThumb(profile: profile, arcid: pair.arcidA, thumbnails: thumbnails)
-            CoverThumb(profile: profile, arcid: pair.arcidB, thumbnails: thumbnails)
+            CoverThumb(profile: profile, arcid: pair.arcidA, thumbnails: thumbnails, size: .init(width: 112, height: 144))
+            CoverThumb(profile: profile, arcid: pair.arcidB, thumbnails: thumbnails, size: .init(width: 112, height: 144))
         }
         .frame(maxWidth: .infinity, alignment: .center)
         .padding(.vertical, 8)
@@ -299,56 +299,6 @@ private struct PairRowView: View {
     }
 }
 
-private struct CoverThumb: View {
-    let profile: Profile
-    let arcid: String
-    let thumbnails: ThumbnailLoader
-
-    @State private var image: NSImage?
-    @State private var task: Task<Void, Never>?
-
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(.quaternary)
-
-            if let image {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .padding(4)
-            } else {
-                ProgressView()
-                    .scaleEffect(0.7)
-            }
-        }
-        .frame(width: 56, height: 72)
-        .onAppear {
-            if image != nil { return }
-            task?.cancel()
-            task = Task {
-                if let img = await fetch() {
-                    await MainActor.run { image = img }
-                }
-            }
-        }
-        .onDisappear {
-            task?.cancel()
-            task = nil
-        }
-    }
-
-    private func fetch() async -> NSImage? {
-        do {
-            let bytes = try await thumbnails.thumbnailBytes(profile: profile, arcid: arcid)
-            return await MainActor.run { NSImage(data: bytes) }
-        } catch {
-            return nil
-        }
-    }
-}
-
 private struct PairCompareView: View {
     let profile: Profile
     let pair: DuplicateScanResult.Pair
@@ -365,7 +315,7 @@ private struct PairCompareView: View {
     @State private var pagesScrollMinY: CGFloat = 0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             topBar
                 .animation(.snappy(duration: 0.2), value: detailsCollapsed)
 
@@ -435,30 +385,44 @@ private struct PairCompareView: View {
                     arcid: pair.arcidA,
                     meta: metaA,
                     thumbnails: thumbnails,
-                    collapsed: detailsCollapsed,
-                    onDelete: { confirmDeleteArcid = pair.arcidA }
+                    collapsed: detailsCollapsed
                 )
 
-                Divider()
-                    .padding(.vertical, 6)
+                Divider().padding(.vertical, 6)
 
-                Button("Not a match") {
-                    markNotDuplicate(pair)
-                    goNext()
+                HStack(spacing: 10) {
+                    Button(role: .destructive) { confirmDeleteArcid = pair.arcidA } label: {
+                        Image(systemName: "trash")
+                            .imageScale(.medium)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(detailsCollapsed ? .mini : .small)
+                    .help("Delete left archive from LANraragi")
+
+                    Button("Not a match") {
+                        markNotDuplicate(pair)
+                        goNext()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(detailsCollapsed ? .small : .regular)
+
+                    Button(role: .destructive) { confirmDeleteArcid = pair.arcidB } label: {
+                        Image(systemName: "trash")
+                            .imageScale(.medium)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(detailsCollapsed ? .mini : .small)
+                    .help("Delete right archive from LANraragi")
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(detailsCollapsed ? .small : .regular)
 
-                Divider()
-                    .padding(.vertical, 6)
+                Divider().padding(.vertical, 6)
 
                 ArchiveSideHeader(
                     profile: profile,
                     arcid: pair.arcidB,
                     meta: metaB,
                     thumbnails: thumbnails,
-                    collapsed: detailsCollapsed,
-                    onDelete: { confirmDeleteArcid = pair.arcidB }
+                    collapsed: detailsCollapsed
                 )
             }
 
@@ -591,12 +555,10 @@ private struct ArchiveSideHeader: View {
     let meta: ArchiveMetadata?
     let thumbnails: ThumbnailLoader
     let collapsed: Bool
-    let onDelete: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            CoverThumb(profile: profile, arcid: arcid, thumbnails: thumbnails)
-                .frame(width: 64, height: 82)
+            CoverThumb(profile: profile, arcid: arcid, thumbnails: thumbnails, size: .init(width: 64, height: 82))
 
             VStack(alignment: .leading, spacing: collapsed ? 4 : 6) {
                 Text(displayTitle)
@@ -624,14 +586,6 @@ private struct ArchiveSideHeader: View {
             }
 
             Spacer(minLength: 0)
-
-            Button(role: .destructive) { onDelete() } label: {
-                Image(systemName: "trash")
-                    .imageScale(.medium)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(collapsed ? .mini : .small)
-            .help("Delete this archive from LANraragi")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -723,11 +677,13 @@ private struct TagGroupCompareView: View {
                                         tags: r.leftTags,
                                         highlight: r.leftOnly
                                     )
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                                     Divider()
                                     TagChipWrap(
                                         tags: r.rightTags,
                                         highlight: r.rightOnly
                                     )
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                                 }
                             }
                             .padding(6)
@@ -736,7 +692,7 @@ private struct TagGroupCompareView: View {
                         }
                     }
                 }
-                .frame(maxHeight: 96)
+                .frame(maxHeight: 180)
             }
         )
     }

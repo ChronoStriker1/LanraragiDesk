@@ -12,6 +12,7 @@ struct RootView: View {
     enum Tab: Hashable {
         case scan
         case review
+        case notMatch
     }
 
     var body: some View {
@@ -82,6 +83,11 @@ struct RootView: View {
             reviewTab(profile: profile)
                 .tag(Tab.review)
                 .tabItem { Label("Review", systemImage: "square.stack.3d.up") }
+
+            NotMatchesView(profile: profile)
+                .environmentObject(appModel)
+                .tag(Tab.notMatch)
+                .tabItem { Label("Not a match", systemImage: "nosign") }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

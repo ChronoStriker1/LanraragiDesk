@@ -53,6 +53,7 @@ public final class IndexStore: @unchecked Sendable {
     private var stmtSelectNotDuplicates: OpaquePointer?
     private var stmtInsertNotDuplicate: OpaquePointer?
     private var stmtDeleteNotDuplicates: OpaquePointer?
+    private var stmtDeleteNotDuplicatePair: OpaquePointer?
 
     public init(configuration: Configuration) throws {
         self.config = configuration
@@ -130,6 +131,13 @@ public final class IndexStore: @unchecked Sendable {
             stmtDeleteNotDuplicates = try Self.prepare(opened, sql: """
             DELETE FROM not_duplicates WHERE profile_id = ?;
             """)
+
+            stmtDeleteNotDuplicatePair = try Self.prepare(opened, sql: """
+            DELETE FROM not_duplicates
+            WHERE profile_id = ?
+              AND arcid_a = ?
+              AND arcid_b = ?;
+            """)
         }
     }
 
@@ -145,6 +153,7 @@ public final class IndexStore: @unchecked Sendable {
                 stmtSelectNotDuplicates,
                 stmtInsertNotDuplicate,
                 stmtDeleteNotDuplicates,
+                stmtDeleteNotDuplicatePair,
             ].forEach { stmt in
                 if let stmt {
                     sqlite3_finalize(stmt)
@@ -165,6 +174,7 @@ public final class IndexStore: @unchecked Sendable {
             stmtSelectNotDuplicates = nil
             stmtInsertNotDuplicate = nil
             stmtDeleteNotDuplicates = nil
+            stmtDeleteNotDuplicatePair = nil
         }
     }
 
@@ -383,6 +393,21 @@ public final class IndexStore: @unchecked Sendable {
 
             try bindText(stmtDeleteNotDuplicates, index: 1, value: profileID.uuidString)
             try stepDone(stmtDeleteNotDuplicates, db: db)
+        }
+    }
+
+    public func removeNotDuplicatePair(profileID: UUID, arcidA: String, arcidB: String) throws {
+        try queue.sync {
+            guard let db, let stmtDeleteNotDuplicatePair else { throw IndexStoreError.notOpen }
+            sqlite3_reset(stmtDeleteNotDuplicatePair)
+            sqlite3_clear_bindings(stmtDeleteNotDuplicatePair)
+
+            let pair = NotDuplicatePair(arcidA: arcidA, arcidB: arcidB)
+
+            try bindText(stmtDeleteNotDuplicatePair, index: 1, value: profileID.uuidString)
+            try bindText(stmtDeleteNotDuplicatePair, index: 2, value: pair.arcidA)
+            try bindText(stmtDeleteNotDuplicatePair, index: 3, value: pair.arcidB)
+            try stepDone(stmtDeleteNotDuplicatePair, db: db)
         }
     }
 
