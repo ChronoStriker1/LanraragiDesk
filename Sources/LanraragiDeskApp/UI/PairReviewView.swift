@@ -249,46 +249,29 @@ private struct PairRowView: View {
     let markNotDuplicate: (DuplicateScanResult.Pair) -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 6) {
-                CoverThumb(profile: profile, arcid: pair.arcidA, thumbnails: thumbnails)
-                CoverThumb(profile: profile, arcid: pair.arcidB, thumbnails: thumbnails)
-            }
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(label)
-                    .font(.headline)
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-
-            Spacer()
+        HStack(spacing: 8) {
+            CoverThumb(profile: profile, arcid: pair.arcidA, thumbnails: thumbnails)
+            CoverThumb(profile: profile, arcid: pair.arcidB, thumbnails: thumbnails)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
+        .padding(.leading, 8)
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(reasonColor.opacity(0.9))
+                .frame(width: 4)
+                .padding(.vertical, 8)
+        }
         .contextMenu {
             Button("Not a match") { markNotDuplicate(pair) }
         }
     }
 
-    private var label: String {
+    private var reasonColor: Color {
         switch pair.reason {
         case .exactCover:
-            return "Exact cover"
+            return .green
         case .similarCover:
-            return "Similar cover"
-        }
-    }
-
-    private var detail: String {
-        switch pair.reason {
-        case .exactCover:
-            return "Likely identical cover image"
-        case .similarCover:
-            let d = pair.dHashDistance.map(String.init) ?? "?"
-            let a = pair.aHashDistance.map(String.init) ?? "?"
-            return "Distance: d=\(d), a=\(a)"
+            return .orange
         }
     }
 }
@@ -356,18 +339,19 @@ private struct PairCompareView: View {
     @State private var confirmDeleteArcid: String?
     @State private var metaA: ArchiveMetadata?
     @State private var metaB: ArchiveMetadata?
-    @State private var showingDetailsA: Bool = false
-    @State private var showingDetailsB: Bool = false
+    @State private var pagesScrollMinY: CGFloat = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             topBar
+                .animation(.snappy(duration: 0.2), value: detailsCollapsed)
 
             SyncedPagesGridView(
                 profile: profile,
                 arcidA: pair.arcidA,
                 arcidB: pair.arcidB,
-                archives: archives
+                archives: archives,
+                scrollMinY: $pagesScrollMinY
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -415,41 +399,46 @@ private struct PairCompareView: View {
         }
     }
 
+    private var detailsCollapsed: Bool {
+        // `minY` becomes negative as you scroll down.
+        pagesScrollMinY < -60
+    }
+
     private var topBar: some View {
-        HStack(alignment: .top, spacing: 14) {
-            ArchiveSideHeader(
-                profile: profile,
-                arcid: pair.arcidA,
-                meta: metaA,
-                thumbnails: thumbnails,
-                onDelete: { confirmDeleteArcid = pair.arcidA },
-                onDetails: { showingDetailsA = true }
-            )
-            .popover(isPresented: $showingDetailsA) {
-                ArchiveDetailsPopover(arcid: pair.arcidA, meta: metaA)
-                    .frame(width: 420, height: 520)
-                    .padding(14)
+        VStack(alignment: .leading, spacing: detailsCollapsed ? 0 : 10) {
+            HStack(alignment: .top, spacing: 12) {
+                ArchiveSideHeader(
+                    profile: profile,
+                    arcid: pair.arcidA,
+                    meta: metaA,
+                    thumbnails: thumbnails,
+                    onDelete: { confirmDeleteArcid = pair.arcidA }
+                )
+
+                Divider()
+                    .padding(.vertical, 6)
+
+                Button("Not a match") {
+                    markNotDuplicate(pair)
+                    goNext()
+                }
+                .buttonStyle(.borderedProminent)
+                .padding(.top, 16)
+
+                Divider()
+                    .padding(.vertical, 6)
+
+                ArchiveSideHeader(
+                    profile: profile,
+                    arcid: pair.arcidB,
+                    meta: metaB,
+                    thumbnails: thumbnails,
+                    onDelete: { confirmDeleteArcid = pair.arcidB }
+                )
             }
 
-            Button("Not a match") {
-                markNotDuplicate(pair)
-                goNext()
-            }
-            .buttonStyle(.borderedProminent)
-            .padding(.top, 18)
-
-            ArchiveSideHeader(
-                profile: profile,
-                arcid: pair.arcidB,
-                meta: metaB,
-                thumbnails: thumbnails,
-                onDelete: { confirmDeleteArcid = pair.arcidB },
-                onDetails: { showingDetailsB = true }
-            )
-            .popover(isPresented: $showingDetailsB) {
-                ArchiveDetailsPopover(arcid: pair.arcidB, meta: metaB)
-                    .frame(width: 420, height: 520)
-                    .padding(14)
+            if !detailsCollapsed {
+                ArchiveCompareDetails(metaA: metaA, metaB: metaB)
             }
         }
         .padding(12)
@@ -577,22 +566,11 @@ private struct ArchiveSideHeader: View {
     let meta: ArchiveMetadata?
     let thumbnails: ThumbnailLoader
     let onDelete: () -> Void
-    let onDetails: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
-            ZStack(alignment: .topTrailing) {
-                CoverThumb(profile: profile, arcid: arcid, thumbnails: thumbnails)
-                    .frame(width: 64, height: 82)
-
-                Button(role: .destructive) { onDelete() } label: {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.mini)
-                .help("Delete this archive")
-                .padding(4)
-            }
+            CoverThumb(profile: profile, arcid: arcid, thumbnails: thumbnails)
+                .frame(width: 64, height: 82)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(displayTitle)
@@ -616,10 +594,11 @@ private struct ArchiveSideHeader: View {
                     }
                 }
 
-                Button("Details") { onDetails() }
-                    .buttonStyle(.borderless)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Button(role: .destructive) { onDelete() } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
 
             Spacer(minLength: 0)
@@ -633,73 +612,53 @@ private struct ArchiveSideHeader: View {
     }
 }
 
-private struct ArchiveDetailsPopover: View {
-    let arcid: String
-    let meta: ArchiveMetadata?
-
-    var body: some View {
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text(meta?.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? meta!.title! : "Untitled")
-                    .font(.title3)
-                    .bold()
-                    .textSelection(.enabled)
-
-                KeyValueGrid(rows: [
-                    ("ID", arcid),
-                    ("Category", meta?.category),
-                    ("Pages", meta?.pagecount.map(String.init)),
-                    ("Filename", meta?.filename),
-                    ("Extension", meta?.fileExtension),
-                    ("New", meta?.isnew.map { $0 ? "Yes" : "No" }),
-                    ("Progress", meta?.progress.map(String.init)),
-                    ("Last Read", meta?.lastreadtime.map(String.init)),
-                ])
-
-                if let summary = meta?.summary?.trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Summary")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(summary)
-                            .font(.callout)
-                            .textSelection(.enabled)
-                    }
-                    .padding(12)
-                    .background(.thinMaterial.opacity(0.3))
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }
-
-                TagGroupsView(tags: meta?.tags)
-            }
-        }
-    }
-}
-
-private struct KeyValueGrid: View {
-    let rows: [(String, String?)]
+private struct ArchiveCompareDetails: View {
+    let metaA: ArchiveMetadata?
+    let metaB: ArchiveMetadata?
 
     var body: some View {
         Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 8) {
-            ForEach(rows.indices, id: \.self) { idx in
-                let (k, v) = rows[idx]
-                if let v = v?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty {
-                    GridRow {
-                        Text(k)
-                            .foregroundStyle(.secondary)
-                            .font(.caption)
-                            .frame(width: 90, alignment: .leading)
-                        Text(v)
-                            .font(.callout)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-            }
+            diffRow("Category", a: metaA?.category, b: metaB?.category)
+            diffRow("Pages", a: metaA?.pagecount.map(String.init), b: metaB?.pagecount.map(String.init))
+            diffRow("Extension", a: metaA?.fileExtension, b: metaB?.fileExtension)
+            diffRow("Filename", a: metaA?.filename, b: metaB?.filename, lineLimit: 2)
+            diffRow("Tags", a: metaA?.tags, b: metaB?.tags, lineLimit: 2)
+            diffRow("Summary", a: metaA?.summary, b: metaB?.summary, lineLimit: 2)
+            diffRow("New", a: metaA?.isnew.map { $0 ? "Yes" : "No" }, b: metaB?.isnew.map { $0 ? "Yes" : "No" })
+            diffRow("Progress", a: metaA?.progress.map(String.init), b: metaB?.progress.map(String.init))
+            diffRow("Last Read", a: metaA?.lastreadtime.map(String.init), b: metaB?.lastreadtime.map(String.init))
         }
-        .padding(12)
-        .background(.thinMaterial.opacity(0.3))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .font(.caption)
+        .padding(.top, 2)
+    }
+
+    @ViewBuilder
+    private func diffRow(_ label: String, a: String?, b: String?, lineLimit: Int = 1) -> some View {
+        let left = (a?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? a! : "—"
+        let right = (b?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? b! : "—"
+        let different = left != right && left != "—" && right != "—"
+
+        GridRow {
+            Text(label)
+                .foregroundStyle(.secondary)
+                .frame(width: 86, alignment: .leading)
+
+            Text(left)
+                .lineLimit(lineLimit)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 2)
+                .padding(.horizontal, 6)
+                .background(different ? Color.yellow.opacity(0.14) : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            Text(right)
+                .lineLimit(lineLimit)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 2)
+                .padding(.horizontal, 6)
+                .background(different ? Color.yellow.opacity(0.14) : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
     }
 }
 
@@ -708,10 +667,25 @@ private struct SyncedPagesGridView: View {
     let arcidA: String
     let arcidB: String
     let archives: ArchiveLoader
+    @Binding var scrollMinY: CGFloat
 
     @State private var pagesA: [URL] = []
     @State private var pagesB: [URL] = []
     @State private var errorText: String?
+
+    init(
+        profile: Profile,
+        arcidA: String,
+        arcidB: String,
+        archives: ArchiveLoader,
+        scrollMinY: Binding<CGFloat> = .constant(0)
+    ) {
+        self.profile = profile
+        self.arcidA = arcidA
+        self.arcidB = arcidB
+        self.archives = archives
+        self._scrollMinY = scrollMinY
+    }
 
     var body: some View {
         Group {
@@ -728,8 +702,8 @@ private struct SyncedPagesGridView: View {
                 }
             } else {
                 GeometryReader { geo in
-                    let spacing: CGFloat = 10
-                    let sideWidth = max(240, (geo.size.width - spacing) / 2.0)
+                    let centerGap: CGFloat = 22
+                    let sideWidth = max(140, (geo.size.width - centerGap) / 2.0)
                     let minTile: CGFloat = 140
                     let cols = max(2, min(6, Int(sideWidth / minTile)))
                     let tileWidth = (sideWidth - CGFloat(cols - 1) * 8) / CGFloat(cols)
@@ -737,8 +711,16 @@ private struct SyncedPagesGridView: View {
 
                     ScrollView(.vertical) {
                         LazyVStack(alignment: .leading, spacing: 12) {
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: ScrollMinYPreferenceKey.self,
+                                    value: proxy.frame(in: .named("pagesScroll")).minY
+                                )
+                            }
+                            .frame(height: 0)
+
                             ForEach(stride(from: 0, to: max(pagesA.count, pagesB.count), by: cols).map { $0 }, id: \.self) { start in
-                                HStack(alignment: .top, spacing: spacing) {
+                                HStack(alignment: .top, spacing: centerGap) {
                                     PageGridSide(
                                         profile: profile,
                                         pages: pagesA,
@@ -763,6 +745,17 @@ private struct SyncedPagesGridView: View {
                         }
                         .padding(.vertical, 10)
                     }
+                    .coordinateSpace(name: "pagesScroll")
+                    .onPreferenceChange(ScrollMinYPreferenceKey.self) { v in
+                        scrollMinY = v
+                    }
+                    .overlay(alignment: .center) {
+                        Rectangle()
+                            .fill(Color(nsColor: .separatorColor))
+                            .frame(width: 1)
+                            .padding(.vertical, 10)
+                            .allowsHitTesting(false)
+                    }
                 }
             }
         }
@@ -779,6 +772,13 @@ private struct SyncedPagesGridView: View {
                 errorText = String(describing: error)
             }
         }
+    }
+}
+
+private struct ScrollMinYPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 
