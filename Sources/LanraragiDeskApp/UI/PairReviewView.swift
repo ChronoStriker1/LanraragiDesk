@@ -896,7 +896,7 @@ private struct SyncedPagesGridView: View {
                                 }
                             }
                         }
-                        .padding(.vertical, 10)
+                        .padding(.vertical, 6)
                     }
                     .coordinateSpace(name: "pagesScroll")
                     .onPreferenceChange(ScrollMinYPreferenceKey.self) { v in
@@ -906,7 +906,7 @@ private struct SyncedPagesGridView: View {
                         Rectangle()
                             .fill(Color(nsColor: .separatorColor))
                             .frame(width: 1)
-                            .padding(.vertical, 10)
+                            .padding(.vertical, 6)
                             .allowsHitTesting(false)
                     }
                 }
