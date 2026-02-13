@@ -7,6 +7,7 @@ final class AppModel: ObservableObject {
     @Published var selectedProfileID: Profile.ID?
 
     @Published var connectionStatus: ConnectionStatus = .idle
+    @Published var indexing = IndexingViewModel()
 
     enum ConnectionStatus: Equatable {
         case idle

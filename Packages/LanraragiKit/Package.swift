@@ -12,7 +12,10 @@ let package = Package(
     targets: [
         .target(
             name: "LanraragiKit",
-            dependencies: []
+            dependencies: [],
+            linkerSettings: [
+                .linkedLibrary("sqlite3")
+            ]
         ),
         .testTarget(
             name: "LanraragiKitTests",

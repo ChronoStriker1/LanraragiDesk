@@ -10,6 +10,7 @@
 		357E6825CEFEFA8EA5B45966 /* LanraragiDeskApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF5978E02C65E10E0EEF7643 /* LanraragiDeskApp.swift */; };
 		462D167127B78592933CCE35 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64DB4339053B57ED7A535ED8 /* AppModel.swift */; };
 		6EE68711387D794F38396D14 /* LanraragiKit in Frameworks */ = {isa = PBXBuildFile; productRef = 426F45F44E9E4A6E4A031FB6 /* LanraragiKit */; };
+		7542369653C2D01A55CA1E70 /* IndexingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93C3DC7516031BE8557B0B91 /* IndexingViewModel.swift */; };
 		DDDB37F2CDB1F904FAFF1F3C /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3A8A1896B87FF041125DD84 /* KeychainService.swift */; };
 		DE9EFC3A45B2EDD7BBEEF9A0 /* ProfileEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53E76144EA3A608FC23C8A94 /* ProfileEditorView.swift */; };
 		E53EB607E67003100933762A /* Profile.swift in Sources */ = {isa = PBXBuildFile; fileRef = B86D008FE0E3FC57FBA6B31A /* Profile.swift */; };
@@ -23,6 +24,7 @@
 		53E76144EA3A608FC23C8A94 /* ProfileEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileEditorView.swift; sourceTree = "<group>"; };
 		64DB4339053B57ED7A535ED8 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		76F557803B708694C1EF5904 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		93C3DC7516031BE8557B0B91 /* IndexingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IndexingViewModel.swift; sourceTree = "<group>"; };
 		B86D008FE0E3FC57FBA6B31A /* Profile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Profile.swift; sourceTree = "<group>"; };
 		D0705B9BBB876D1BB705AA53 /* ProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileStore.swift; sourceTree = "<group>"; };
 		D3A8A1896B87FF041125DD84 /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
@@ -54,6 +56,7 @@
 			isa = PBXGroup;
 			children = (
 				64DB4339053B57ED7A535ED8 /* AppModel.swift */,
+				93C3DC7516031BE8557B0B91 /* IndexingViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -182,6 +185,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				462D167127B78592933CCE35 /* AppModel.swift in Sources */,
+				7542369653C2D01A55CA1E70 /* IndexingViewModel.swift in Sources */,
 				DDDB37F2CDB1F904FAFF1F3C /* KeychainService.swift in Sources */,
 				357E6825CEFEFA8EA5B45966 /* LanraragiDeskApp.swift in Sources */,
 				E53EB607E67003100933762A /* Profile.swift in Sources */,

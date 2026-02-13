@@ -1,4 +1,5 @@
 import SwiftUI
+import LanraragiKit
 
 struct RootView: View {
     @EnvironmentObject private var appModel: AppModel
@@ -85,8 +86,7 @@ struct RootView: View {
                     .font(.title2)
                     .bold()
 
-                Text("Indexing + scan UI comes next. This screen will become the Dedup Workbench.")
-                    .foregroundStyle(.secondary)
+                indexingCard(profile: profile)
 
                 Spacer()
             } else {
@@ -98,6 +98,87 @@ struct RootView: View {
             }
         }
         .padding(24)
+    }
+
+    private func indexingCard(profile: Profile) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Fingerprint Index")
+                        .font(.headline)
+                    Text("Builds a local cover fingerprint database so later duplicate scans don’t do O(n²) comparisons.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                HStack(spacing: 10) {
+                    Button("Start Index") {
+                        appModel.indexing.start(profile: profile)
+                    }
+                    Button("Cancel", role: .destructive) {
+                        appModel.indexing.cancel()
+                    }
+                }
+            }
+
+            switch appModel.indexing.status {
+            case .idle:
+                Text("Ready.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            case .running(let p):
+                progressView(p)
+            case .completed(let p):
+                progressView(p)
+            case .failed(let msg):
+                Text("Failed: \(msg)")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+        .padding(16)
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func progressView(_ p: IndexerProgress) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            let total = max(1, p.total)
+            let current = min(total, p.startOffset + p.seen)
+            ProgressView(value: Double(current), total: Double(total)) {
+                Text(phaseText(p.phase))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 14) {
+                Text("Seen: \(p.seen)")
+                Text("Indexed: \(p.indexed)")
+                Text("Skipped: \(p.skipped)")
+                Text("Failed: \(p.failed)")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            if let arcid = p.currentArcid, !arcid.isEmpty {
+                Text("Current: \(arcid)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func phaseText(_ phase: IndexerProgress.Phase) -> String {
+        switch phase {
+        case .starting:
+            return "Starting"
+        case .enumerating(let total):
+            return "Enumerating (\(total) total)"
+        case .indexing(let total):
+            return "Indexing (\(total) total)"
+        case .completed(let total):
+            return "Completed (\(total) total)"
+        }
     }
 
     private var connectionPill: some View {
