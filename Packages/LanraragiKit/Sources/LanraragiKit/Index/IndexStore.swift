@@ -183,6 +183,7 @@ public final class IndexStore: @unchecked Sendable {
             guard let db, let stmtGetHasAnyFingerprint else { throw IndexStoreError.notOpen }
             sqlite3_reset(stmtGetHasAnyFingerprint)
             sqlite3_clear_bindings(stmtGetHasAnyFingerprint)
+            defer { sqlite3_reset(stmtGetHasAnyFingerprint) } // End the read transaction promptly (WAL checkpoint friendliness).
 
             try bindText(stmtGetHasAnyFingerprint, index: 1, value: profileID.uuidString)
             try bindText(stmtGetHasAnyFingerprint, index: 2, value: arcid)
@@ -222,6 +223,7 @@ public final class IndexStore: @unchecked Sendable {
             guard let db, let stmtGetLastStart else { throw IndexStoreError.notOpen }
             sqlite3_reset(stmtGetLastStart)
             sqlite3_clear_bindings(stmtGetLastStart)
+            defer { sqlite3_reset(stmtGetLastStart) }
 
             try bindText(stmtGetLastStart, index: 1, value: profileID.uuidString)
 
@@ -257,6 +259,7 @@ public final class IndexStore: @unchecked Sendable {
             guard let db, let stmtSelectScanFingerprints else { throw IndexStoreError.notOpen }
             sqlite3_reset(stmtSelectScanFingerprints)
             sqlite3_clear_bindings(stmtSelectScanFingerprints)
+            defer { sqlite3_reset(stmtSelectScanFingerprints) }
 
             try bindText(stmtSelectScanFingerprints, index: 1, value: profileID.uuidString)
 
@@ -322,6 +325,7 @@ public final class IndexStore: @unchecked Sendable {
             guard let db, let stmtSelectNotDuplicates else { throw IndexStoreError.notOpen }
             sqlite3_reset(stmtSelectNotDuplicates)
             sqlite3_clear_bindings(stmtSelectNotDuplicates)
+            defer { sqlite3_reset(stmtSelectNotDuplicates) }
 
             try bindText(stmtSelectNotDuplicates, index: 1, value: profileID.uuidString)
 
@@ -381,6 +385,13 @@ public final class IndexStore: @unchecked Sendable {
         try exec(db, "PRAGMA synchronous = NORMAL;")
         try exec(db, "PRAGMA temp_store = MEMORY;")
         try exec(db, "PRAGMA foreign_keys = ON;")
+
+        // Keep WAL bounded; large libraries can otherwise grow the -wal file until the disk fills.
+        try exec(db, "PRAGMA wal_autocheckpoint = 1000;")
+        try exec(db, "PRAGMA journal_size_limit = 67108864;") // 64 MiB
+
+        // Best-effort: shrink an existing huge WAL when opening (helps after a previous run ballooned it).
+        try exec(db, "PRAGMA wal_checkpoint(TRUNCATE);")
     }
 
     private static func migrate(db: OpaquePointer) throws {
