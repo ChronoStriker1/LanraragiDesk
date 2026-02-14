@@ -19,8 +19,9 @@ public final class IndexStore: @unchecked Sendable {
     public struct NotDuplicatePair: Sendable, Hashable {
         public var arcidA: String
         public var arcidB: String
+        public var createdAt: Int64
 
-        public init(arcidA: String, arcidB: String) {
+        public init(arcidA: String, arcidB: String, createdAt: Int64 = 0) {
             if arcidA <= arcidB {
                 self.arcidA = arcidA
                 self.arcidB = arcidB
@@ -28,6 +29,17 @@ public final class IndexStore: @unchecked Sendable {
                 self.arcidA = arcidB
                 self.arcidB = arcidA
             }
+            self.createdAt = createdAt
+        }
+
+        // Ignore `createdAt` for hashing/equality so callers can identify pairs by IDs alone.
+        public static func == (lhs: NotDuplicatePair, rhs: NotDuplicatePair) -> Bool {
+            lhs.arcidA == rhs.arcidA && lhs.arcidB == rhs.arcidB
+        }
+
+        public func hash(into hasher: inout Hasher) {
+            hasher.combine(arcidA)
+            hasher.combine(arcidB)
         }
     }
 
@@ -117,9 +129,10 @@ public final class IndexStore: @unchecked Sendable {
             """)
 
             stmtSelectNotDuplicates = try Self.prepare(opened, sql: """
-            SELECT arcid_a, arcid_b
+            SELECT arcid_a, arcid_b, created_at
             FROM not_duplicates
-            WHERE profile_id = ?;
+            WHERE profile_id = ?
+            ORDER BY created_at DESC;
             """)
 
             stmtInsertNotDuplicate = try Self.prepare(opened, sql: """
@@ -360,7 +373,12 @@ public final class IndexStore: @unchecked Sendable {
                     let bC = sqlite3_column_text(stmtSelectNotDuplicates, 1)
                 else { continue }
 
-                out.insert(.init(arcidA: String(cString: aC), arcidB: String(cString: bC)))
+                let createdAt = sqlite3_column_int64(stmtSelectNotDuplicates, 2)
+                out.insert(.init(
+                    arcidA: String(cString: aC),
+                    arcidB: String(cString: bC),
+                    createdAt: createdAt
+                ))
             }
 
             return out

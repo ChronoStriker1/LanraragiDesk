@@ -6,16 +6,24 @@ struct CoverThumb: View {
     let arcid: String
     let thumbnails: ThumbnailLoader
     let size: CGSize
+    let contentInset: CGFloat
 
     @State private var image: NSImage?
     @State private var errorText: String?
     @State private var task: Task<Void, Never>?
 
-    init(profile: Profile, arcid: String, thumbnails: ThumbnailLoader, size: CGSize = .init(width: 56, height: 72)) {
+    init(
+        profile: Profile,
+        arcid: String,
+        thumbnails: ThumbnailLoader,
+        size: CGSize = .init(width: 56, height: 72),
+        contentInset: CGFloat = 4
+    ) {
         self.profile = profile
         self.arcid = arcid
         self.thumbnails = thumbnails
         self.size = size
+        self.contentInset = contentInset
     }
 
     var body: some View {
@@ -28,7 +36,7 @@ struct CoverThumb: View {
                     .resizable()
                     .scaledToFit()
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .padding(4)
+                    .padding(contentInset)
             } else if let errorText {
                 Text(errorText)
                     .font(.caption2)

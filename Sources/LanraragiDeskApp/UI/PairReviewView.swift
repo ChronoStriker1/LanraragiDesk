@@ -272,17 +272,27 @@ private struct PairRowView: View {
     let markNotDuplicate: (DuplicateScanResult.Pair) -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
-            CoverThumb(profile: profile, arcid: pair.arcidA, thumbnails: thumbnails, size: .init(width: 112, height: 144))
-            CoverThumb(profile: profile, arcid: pair.arcidB, thumbnails: thumbnails, size: .init(width: 112, height: 144))
+        HStack(spacing: 0) {
+            CoverThumb(
+                profile: profile,
+                arcid: pair.arcidA,
+                thumbnails: thumbnails,
+                size: .init(width: 112, height: 144),
+                contentInset: 0
+            )
+            CoverThumb(
+                profile: profile,
+                arcid: pair.arcidB,
+                thumbnails: thumbnails,
+                size: .init(width: 112, height: 144),
+                contentInset: 0
+            )
         }
         .frame(maxWidth: .infinity, alignment: .center)
-        .padding(.vertical, 8)
         .overlay(alignment: .leading) {
             RoundedRectangle(cornerRadius: 4, style: .continuous)
                 .fill(reasonColor.opacity(0.9))
                 .frame(width: 4)
-                .padding(.vertical, 8)
         }
         .contextMenu {
             Button("Not a match") { markNotDuplicate(pair) }
@@ -764,19 +774,26 @@ private struct ArchiveSideTags: View {
                 LazyVStack(alignment: .leading, spacing: 8) {
                     ForEach(tagRows, id: \.key) { r in
                         let (tags, highlight) = sideTags(r)
-                        if tags.isEmpty {
-                            EmptyView()
-                        } else {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(r.title)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(r.title)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+
+                            if tags.isEmpty {
+                                Text("—")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(.quaternary.opacity(0.35))
+                                    .clipShape(Capsule())
+                            } else {
                                 TagChipWrap(tags: tags, highlight: highlight)
                             }
-                            .padding(8)
-                            .background(r.isDifferent ? Color.yellow.opacity(0.08) : Color.clear)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
+                        .padding(8)
+                        .background(r.isDifferent ? Color.yellow.opacity(0.08) : Color.clear)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                 }
             }
@@ -967,47 +984,45 @@ private struct SyncedPagesGridView: View {
                     let tileHeight = min(240, max(140, tileWidth * 1.35))
 
                     ScrollView(.vertical) {
-                        LazyVStack(alignment: .leading, spacing: 12) {
-                            // Stable scroll position signal for header collapse/expand.
-                            Color.clear
-                                .frame(height: 1)
-                                .opacity(0.001)
-                                .background {
-                                    GeometryReader { proxy in
-                                        Color.clear.preference(
-                                            key: ScrollMinYPreferenceKey.self,
-                                            value: proxy.frame(in: .named("pagesScroll")).minY
+                        VStack(spacing: 0) {
+                            // Keep this outside any Lazy stack so it doesn't get recycled off-screen.
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: ScrollMinYPreferenceKey.self,
+                                    value: proxy.frame(in: .named("pagesScroll")).minY
+                                )
+                            }
+                            .frame(height: 0)
+
+                            LazyVStack(alignment: .leading, spacing: 12) {
+                                ForEach(stride(from: 0, to: max(pagesA.count, pagesB.count), by: cols).map { $0 }, id: \.self) { start in
+                                    HStack(alignment: .top, spacing: centerGap) {
+                                        PageGridSide(
+                                            profile: profile,
+                                            pages: pagesA,
+                                            unavailable: pagesA.isEmpty && errorA != nil,
+                                            startIndex: start,
+                                            count: cols,
+                                            tileHeight: tileHeight,
+                                            archives: archives
                                         )
+                                        .frame(width: sideWidth)
+
+                                        PageGridSide(
+                                            profile: profile,
+                                            pages: pagesB,
+                                            unavailable: pagesB.isEmpty && errorB != nil,
+                                            startIndex: start,
+                                            count: cols,
+                                            tileHeight: tileHeight,
+                                            archives: archives
+                                        )
+                                        .frame(width: sideWidth)
                                     }
                                 }
-
-                            ForEach(stride(from: 0, to: max(pagesA.count, pagesB.count), by: cols).map { $0 }, id: \.self) { start in
-                                HStack(alignment: .top, spacing: centerGap) {
-                                    PageGridSide(
-                                        profile: profile,
-                                        pages: pagesA,
-                                        unavailable: pagesA.isEmpty && errorA != nil,
-                                        startIndex: start,
-                                        count: cols,
-                                        tileHeight: tileHeight,
-                                        archives: archives
-                                    )
-                                    .frame(width: sideWidth)
-
-                                    PageGridSide(
-                                        profile: profile,
-                                        pages: pagesB,
-                                        unavailable: pagesB.isEmpty && errorB != nil,
-                                        startIndex: start,
-                                        count: cols,
-                                        tileHeight: tileHeight,
-                                        archives: archives
-                                    )
-                                    .frame(width: sideWidth)
-                                }
                             }
+                            .padding(.vertical, 6)
                         }
-                        .padding(.vertical, 6)
                     }
                     .coordinateSpace(name: "pagesScroll")
                     .onPreferenceChange(ScrollMinYPreferenceKey.self) { v in
@@ -1135,6 +1150,7 @@ private struct PageThumbTile: View {
     @State private var fullImage: NSImage?
     @State private var errorText: String?
     @State private var hovering: Bool = false
+    @State private var resolutionText: String?
 
     var body: some View {
         ZStack {
@@ -1171,6 +1187,18 @@ private struct PageThumbTile: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(6)
             }
+
+            if let resolutionText, url != nil {
+                Text(resolutionText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(.thinMaterial)
+                    .clipShape(Capsule())
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .padding(6)
+            }
         }
         .frame(maxWidth: .infinity)
         .frame(height: tileHeight)
@@ -1197,12 +1225,15 @@ private struct PageThumbTile: View {
             image = nil
             fullImage = nil
             errorText = nil
+            resolutionText = nil
             guard let url else { return }
             do {
                 let bytes = try await archives.bytes(profile: profile, url: url)
+                let res = ImageDownsampler.resolutionText(from: bytes)
                 let img = await MainActor.run { ImageDownsampler.thumbnail(from: bytes, maxPixelSize: 540) }
                 if let img {
                     image = img
+                    resolutionText = res
                 } else {
                     errorText = "Decode failed"
                 }
@@ -1228,6 +1259,16 @@ private struct PageThumbTile: View {
 }
 
 private enum ImageDownsampler {
+    static func resolutionText(from data: Data) -> String? {
+        let cfData = data as CFData
+        guard let src = CGImageSourceCreateWithData(cfData, nil) else { return nil }
+        guard let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any] else { return nil }
+        let w = props[kCGImagePropertyPixelWidth] as? Int
+        let h = props[kCGImagePropertyPixelHeight] as? Int
+        guard let w, let h, w > 0, h > 0 else { return nil }
+        return "\(w)x\(h)"
+    }
+
     static func thumbnail(from data: Data, maxPixelSize: Int) -> NSImage? {
         guard maxPixelSize > 0 else { return NSImage(data: data) }
         let cfData = data as CFData

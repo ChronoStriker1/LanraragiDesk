@@ -144,6 +144,12 @@ final class DuplicateScanViewModel: ObservableObject {
             return
         }
 
+        // Keep the Scan tab list fresh; newest decision should appear first.
+        let now = Int64(Date().timeIntervalSince1970)
+        let notPair = IndexStore.NotDuplicatePair(arcidA: pair.arcidA, arcidB: pair.arcidB, createdAt: now)
+        notMatches.removeAll { $0 == notPair }
+        notMatches.insert(notPair, at: 0)
+
         // Update the in-memory result to keep the UI responsive.
         if var r = result {
             r.pairs.removeAll { p in
@@ -171,6 +177,7 @@ final class DuplicateScanViewModel: ObservableObject {
             let store = try IndexStore(configuration: .init(url: AppPaths.indexDBURL()))
             let set = try store.loadNotDuplicatePairs(profileID: profile.id)
             notMatches = set.sorted { a, b in
+                if a.createdAt != b.createdAt { return a.createdAt > b.createdAt }
                 if a.arcidA != b.arcidA { return a.arcidA < b.arcidA }
                 return a.arcidB < b.arcidB
             }
