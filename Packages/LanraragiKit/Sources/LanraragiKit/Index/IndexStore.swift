@@ -411,6 +411,21 @@ public final class IndexStore: @unchecked Sendable {
         }
     }
 
+    /// Clears the fingerprint index state so the next scan re-indexes covers.
+    /// By default, this keeps `not_duplicates` decisions.
+    public func resetFingerprintIndex(keepNotDuplicates: Bool = true) throws {
+        try queue.sync {
+            guard let db else { throw IndexStoreError.notOpen }
+            try Self.exec(db, "DELETE FROM fingerprints;")
+            try Self.exec(db, "DELETE FROM index_state;")
+            if !keepNotDuplicates {
+                try Self.exec(db, "DELETE FROM not_duplicates;")
+            }
+            // Best-effort: shrink WAL after large deletes.
+            try? Self.exec(db, "PRAGMA wal_checkpoint(TRUNCATE);")
+        }
+    }
+
     private static func open(url: URL, db: inout OpaquePointer?) throws {
         let fm = FileManager.default
         let dir = url.deletingLastPathComponent()

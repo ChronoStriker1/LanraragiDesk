@@ -171,6 +171,7 @@ struct RootView: View {
                 Spacer()
 
                 Button("Reset Index", role: .destructive) { appModel.indexing.resetIndexFiles() }
+                    .help("Clears local fingerprints so the next scan re-indexes. Keeps current results and “Not a match” decisions.")
             }
 
             statusBlock

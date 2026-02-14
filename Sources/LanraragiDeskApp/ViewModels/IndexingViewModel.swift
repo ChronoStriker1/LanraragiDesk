@@ -101,21 +101,10 @@ final class IndexingViewModel: ObservableObject {
     func resetIndexFiles() {
         cancel()
         store = nil
-
-        let db = Self.indexDBURL()
-        let fm = FileManager.default
-        let candidates = [
-            db,
-            db.appendingPathExtension("wal"),
-            db.appendingPathExtension("shm"),
-        ]
-
         do {
-            for url in candidates {
-                if fm.fileExists(atPath: url.path) {
-                    try fm.removeItem(at: url)
-                }
-            }
+            let s = try IndexStore(configuration: .init(url: Self.indexDBURL()))
+            // Keep "Not a match" decisions; they are user effort.
+            try s.resetFingerprintIndex(keepNotDuplicates: true)
         } catch {
             status = .failed("Reset failed: \(error)")
         }
