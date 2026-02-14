@@ -823,7 +823,9 @@ private struct SyncedPagesGridView: View {
 
     @State private var pagesA: [URL] = []
     @State private var pagesB: [URL] = []
-    @State private var errorText: String?
+    @State private var errorA: String?
+    @State private var errorB: String?
+    @State private var reloadToken: Int = 0
 
     init(
         profile: Profile,
@@ -841,11 +843,27 @@ private struct SyncedPagesGridView: View {
 
     var body: some View {
         Group {
-            if let errorText {
-                Text("Pages error: \(errorText)")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            } else if pagesA.isEmpty || pagesB.isEmpty {
+            if pagesA.isEmpty && pagesB.isEmpty && (errorA != nil || errorB != nil) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Pages failed to load")
+                        .font(.headline)
+                    if let errorA {
+                        Text("Left (\(arcidA)): \(errorA)")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .textSelection(.enabled)
+                    }
+                    if let errorB {
+                        Text("Right (\(arcidB)): \(errorB)")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .textSelection(.enabled)
+                    }
+                    Button("Retry") { reloadToken &+= 1 }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(12)
+            } else if pagesA.isEmpty && pagesB.isEmpty && errorA == nil && errorB == nil {
                 HStack(spacing: 10) {
                     ProgressView()
                     Text("Loading pages…")
@@ -877,6 +895,7 @@ private struct SyncedPagesGridView: View {
                                     PageGridSide(
                                         profile: profile,
                                         pages: pagesA,
+                                        unavailable: pagesA.isEmpty && errorA != nil,
                                         startIndex: start,
                                         count: cols,
                                         tileHeight: tileHeight,
@@ -887,6 +906,7 @@ private struct SyncedPagesGridView: View {
                                     PageGridSide(
                                         profile: profile,
                                         pages: pagesB,
+                                        unavailable: pagesB.isEmpty && errorB != nil,
                                         startIndex: start,
                                         count: cols,
                                         tileHeight: tileHeight,
@@ -909,23 +929,64 @@ private struct SyncedPagesGridView: View {
                             .padding(.vertical, 6)
                             .allowsHitTesting(false)
                     }
+                    .overlay(alignment: .topLeading) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            if let errorA {
+                                Text("Left pages: \(errorA)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.red)
+                                    .textSelection(.enabled)
+                            }
+                            if let errorB {
+                                Text("Right pages: \(errorB)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.red)
+                                    .textSelection(.enabled)
+                            }
+                            if errorA != nil || errorB != nil {
+                                Button("Retry") { reloadToken &+= 1 }
+                                    .controlSize(.mini)
+                            }
+                        }
+                        .padding(10)
+                        .background(.thinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .padding(8)
+                    }
                 }
             }
         }
-        .task(id: "\(arcidA)|\(arcidB)") {
+        .task(id: "\(arcidA)|\(arcidB)|\(reloadToken)") {
             pagesA = []
             pagesB = []
-            errorText = nil
-            do {
-                async let a = archives.pageURLs(profile: profile, arcid: arcidA)
-                async let b = archives.pageURLs(profile: profile, arcid: arcidB)
-                pagesA = try await a
-                pagesB = try await b
-            } catch {
-                if Task.isCancelled || ErrorPresenter.isCancellationLike(error) {
-                    return
+            errorA = nil
+            errorB = nil
+
+            async let aRes: Result<[URL], Error> = {
+                do { return .success(try await archives.pageURLs(profile: profile, arcid: arcidA)) }
+                catch { return .failure(error) }
+            }()
+            async let bRes: Result<[URL], Error> = {
+                do { return .success(try await archives.pageURLs(profile: profile, arcid: arcidB)) }
+                catch { return .failure(error) }
+            }()
+
+            let (a, b) = await (aRes, bRes)
+
+            switch a {
+            case .success(let pages): pagesA = pages
+            case .failure(let err):
+                if !(Task.isCancelled || ErrorPresenter.isCancellationLike(err)) {
+                    errorA = ErrorPresenter.short(err)
                 }
-                errorText = ErrorPresenter.short(error)
+            }
+
+            switch b {
+            case .success(let pages): pagesB = pages
+            case .failure(let err):
+                if !(Task.isCancelled || ErrorPresenter.isCancellationLike(err)) {
+                    errorB = ErrorPresenter.short(err)
+                }
             }
         }
     }
@@ -941,6 +1002,7 @@ private struct ScrollMinYPreferenceKey: PreferenceKey {
 private struct PageGridSide: View {
     let profile: Profile
     let pages: [URL]
+    let unavailable: Bool
     let startIndex: Int
     let count: Int
     let tileHeight: CGFloat
@@ -958,6 +1020,7 @@ private struct PageGridSide: View {
                     profile: profile,
                     pageIndex: idx,
                     url: (idx < pages.count) ? pages[idx] : nil,
+                    unavailable: unavailable,
                     tileHeight: tileHeight,
                     archives: archives
                 )
@@ -970,6 +1033,7 @@ private struct PageThumbTile: View {
     let profile: Profile
     let pageIndex: Int
     let url: URL?
+    let unavailable: Bool
     let tileHeight: CGFloat
     let archives: ArchiveLoader
 
@@ -986,7 +1050,7 @@ private struct PageThumbTile: View {
                 .fill(.quaternary)
 
             if url == nil {
-                Text("Missing")
+                Text(unavailable ? "Unavailable" : "Missing")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .padding(8)
