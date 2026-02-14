@@ -126,7 +126,7 @@ struct PairReviewView: View {
 
     private var pairList: some View {
         ScrollView(.vertical) {
-            LazyVStack(alignment: .center, spacing: 6) {
+            LazyVStack(alignment: .leading, spacing: 6) {
                 if matchFilter == .both || matchFilter == .exact {
                     sectionHeader("Exact")
                     ForEach(exactPairs, id: \.self) { p in
@@ -142,7 +142,7 @@ struct PairReviewView: View {
                     }
                 }
             }
-            .padding(8)
+            .padding(.vertical, 8)
         }
         .scrollIndicators(.visible)
         .background(.thinMaterial)
@@ -280,6 +280,7 @@ private struct PairRowView: View {
                 size: .init(width: 112, height: 144),
                 contentInset: 0
             )
+            Spacer(minLength: 0)
             CoverThumb(
                 profile: profile,
                 arcid: pair.arcidB,
@@ -288,7 +289,7 @@ private struct PairRowView: View {
                 contentInset: 0
             )
         }
-        .frame(maxWidth: .infinity, alignment: .center)
+        .frame(maxWidth: .infinity)
         .overlay(alignment: .leading) {
             RoundedRectangle(cornerRadius: 4, style: .continuous)
                 .fill(reasonColor.opacity(0.9))
@@ -992,7 +993,9 @@ private struct SyncedPagesGridView: View {
                                     value: proxy.frame(in: .named("pagesScroll")).minY
                                 )
                             }
-                            .frame(height: 0)
+                            .frame(height: 1)
+                            .opacity(0.001)
+                            .allowsHitTesting(false)
 
                             LazyVStack(alignment: .leading, spacing: 12) {
                                 ForEach(stride(from: 0, to: max(pagesA.count, pagesB.count), by: cols).map { $0 }, id: \.self) { start in
