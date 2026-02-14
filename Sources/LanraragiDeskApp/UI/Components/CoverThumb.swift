@@ -34,8 +34,9 @@ struct CoverThumb: View {
             }
         }
         .frame(width: size.width, height: size.height)
-        .onAppear {
-            if image != nil { return }
+        .task(id: arcid) {
+            // When switching between pairs, the view may be reused; reload for the new arcid.
+            image = nil
             task?.cancel()
             task = Task {
                 if let img = await fetch() {
@@ -58,4 +59,3 @@ struct CoverThumb: View {
         }
     }
 }
-

@@ -374,7 +374,7 @@ private struct PairCompareView: View {
 
     private var detailsCollapsed: Bool {
         // `minY` becomes negative as you scroll down.
-        pagesScrollMinY < -24
+        pagesScrollMinY < -4
     }
 
     private var topBar: some View {
@@ -869,7 +869,8 @@ private struct SyncedPagesGridView: View {
                                     value: proxy.frame(in: .named("pagesScroll")).minY
                                 )
                             }
-                            .frame(height: 0)
+                            .frame(height: 1)
+                            .opacity(0.001)
 
                             ForEach(stride(from: 0, to: max(pagesA.count, pagesB.count), by: cols).map { $0 }, id: \.self) { start in
                                 HStack(alignment: .top, spacing: centerGap) {
