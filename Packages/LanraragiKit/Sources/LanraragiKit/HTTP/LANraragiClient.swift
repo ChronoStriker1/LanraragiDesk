@@ -70,8 +70,9 @@ public final class LANraragiClient: @unchecked Sendable {
         return data
     }
 
-    public func getArchiveFiles(arcid: String) async throws -> ArchiveFilesResponse {
-        try await getJSON(path: "/api/archives/\(arcid)/files")
+    public func getArchiveFiles(arcid: String, force: Bool = false) async throws -> ArchiveFilesResponse {
+        let items = force ? [URLQueryItem(name: "force", value: "true")] : []
+        return try await getJSON(path: "/api/archives/\(arcid)/files", queryItems: items)
     }
 
     public func deleteArchive(arcid: String) async throws {

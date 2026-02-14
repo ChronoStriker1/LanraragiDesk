@@ -83,7 +83,13 @@ actor ArchiveLoader {
         let task = Task<[URL], Error> {
             try await limiter.withPermit {
                 let client = try await makeClient(profile: profile)
-                let resp = try await client.getArchiveFiles(arcid: arcid)
+                let resp: ArchiveFilesResponse
+                do {
+                    resp = try await client.getArchiveFiles(arcid: arcid, force: false)
+                } catch let LANraragiError.httpStatus(code, _) where code == 400 {
+                    // Some LANraragi setups return 400 unless file listing is forced (e.g. stale extraction state).
+                    resp = try await client.getArchiveFiles(arcid: arcid, force: true)
+                }
                 var out: [URL] = []
                 out.reserveCapacity(resp.pages.count)
                 for s in resp.pages {

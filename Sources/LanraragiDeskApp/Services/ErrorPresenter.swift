@@ -27,6 +27,11 @@ enum ErrorPresenter {
                 return "Bad response"
             case .httpStatus(let code, _):
                 if code == 404 { return "Missing" }
+                if case .httpStatus(_, let body) = e, let body, !body.isEmpty {
+                    if let msg = extractMessage(fromHTTPBody: body) {
+                        return "HTTP \(code): \(msg)"
+                    }
+                }
                 return "HTTP \(code)"
             case .decoding:
                 return "Decode failed"
@@ -54,5 +59,32 @@ enum ErrorPresenter {
         if error is CancellationError { return "Cancelled" }
         return "Error"
     }
-}
 
+    private static func extractMessage(fromHTTPBody body: Data) -> String? {
+        // LANraragi often returns JSON error bodies; if not, fall back to a short UTF-8 snippet.
+        if
+            let obj = try? JSONSerialization.jsonObject(with: body),
+            let dict = obj as? [String: Any]
+        {
+            let candidates = ["error", "message", "reason", "detail"]
+            for k in candidates {
+                if let s = dict[k] as? String, !s.isEmpty {
+                    return truncate(s)
+                }
+            }
+        }
+
+        let s = String(decoding: body, as: UTF8.self)
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return nil }
+        return truncate(s)
+    }
+
+    private static func truncate(_ s: String, max: Int = 120) -> String {
+        if s.count <= max { return s }
+        let idx = s.index(s.startIndex, offsetBy: max)
+        return String(s[..<idx]) + "…"
+    }
+}
