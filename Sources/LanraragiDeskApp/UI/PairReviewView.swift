@@ -922,7 +922,10 @@ private struct SyncedPagesGridView: View {
                 pagesA = try await a
                 pagesB = try await b
             } catch {
-                errorText = String(describing: error)
+                if Task.isCancelled || ErrorPresenter.isCancellationLike(error) {
+                    return
+                }
+                errorText = ErrorPresenter.short(error)
             }
         }
     }
@@ -1048,7 +1051,10 @@ private struct PageThumbTile: View {
                     errorText = "Decode failed"
                 }
             } catch {
-                errorText = String(describing: error)
+                if Task.isCancelled || ErrorPresenter.isCancellationLike(error) {
+                    return
+                }
+                errorText = ErrorPresenter.short(error)
             }
         }
     }

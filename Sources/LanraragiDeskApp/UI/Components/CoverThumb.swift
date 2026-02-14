@@ -8,6 +8,7 @@ struct CoverThumb: View {
     let size: CGSize
 
     @State private var image: NSImage?
+    @State private var errorText: String?
     @State private var task: Task<Void, Never>?
 
     init(profile: Profile, arcid: String, thumbnails: ThumbnailLoader, size: CGSize = .init(width: 56, height: 72)) {
@@ -28,6 +29,12 @@ struct CoverThumb: View {
                     .scaledToFit()
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .padding(4)
+            } else if let errorText {
+                Text(errorText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(8)
             } else {
                 ProgressView()
                     .scaleEffect(0.7)
@@ -37,10 +44,19 @@ struct CoverThumb: View {
         .task(id: arcid) {
             // When switching between pairs, the view may be reused; reload for the new arcid.
             image = nil
+            errorText = nil
             task?.cancel()
             task = Task {
-                if let img = await fetch() {
+                do {
+                    let img = try await fetch()
                     await MainActor.run { image = img }
+                } catch {
+                    if Task.isCancelled || ErrorPresenter.isCancellationLike(error) {
+                        return
+                    }
+                    await MainActor.run {
+                        self.errorText = ErrorPresenter.short(error)
+                    }
                 }
             }
         }
@@ -50,12 +66,8 @@ struct CoverThumb: View {
         }
     }
 
-    private func fetch() async -> NSImage? {
-        do {
-            let bytes = try await thumbnails.thumbnailBytes(profile: profile, arcid: arcid)
-            return await MainActor.run { NSImage(data: bytes) }
-        } catch {
-            return nil
-        }
+    private func fetch() async throws -> NSImage? {
+        let bytes = try await thumbnails.thumbnailBytes(profile: profile, arcid: arcid)
+        return await MainActor.run { NSImage(data: bytes) }
     }
 }
