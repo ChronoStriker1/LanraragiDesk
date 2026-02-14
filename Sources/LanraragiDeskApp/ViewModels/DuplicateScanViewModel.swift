@@ -38,7 +38,7 @@ final class DuplicateScanViewModel: ObservableObject {
         let rid = UUID()
         runID = rid
 
-        status = .running("Preparing local index…")
+        status = .running("Resetting local index…")
         result = nil
 
         task = Task {
@@ -54,8 +54,11 @@ final class DuplicateScanViewModel: ObservableObject {
             do {
                 let store = try IndexStore(configuration: .init(url: AppPaths.indexDBURL()))
 
+                // Each scan starts from a clean fingerprint index, but keeps user-made exclusions.
+                try store.resetFingerprintIndex(keepNotDuplicates: true)
+
                 // Always run the indexer first. If the index is already complete, this should be quick.
-                status = .running("Updating index (this can take a while on first run)…")
+                status = .running("Indexing covers…")
 
                 let account = "apiKey.\(profile.id.uuidString)"
                 let apiKeyString = try KeychainService.getString(account: account)

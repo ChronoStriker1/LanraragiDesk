@@ -45,7 +45,12 @@ struct RootView: View {
         }
         .onChange(of: appModel.duplicates.resultRevision) { _, _ in
             // Auto-focus the review UI after a scan completes.
-            tab = .review
+            if case .completed = appModel.duplicates.status, appModel.duplicates.result != nil {
+                tab = .review
+            }
+            if appModel.duplicates.result == nil {
+                tab = .scan
+            }
         }
     }
 
@@ -80,9 +85,11 @@ struct RootView: View {
                 .tag(Tab.scan)
                 .tabItem { Label("Scan", systemImage: "magnifyingglass") }
 
-            reviewTab(profile: profile)
-                .tag(Tab.review)
-                .tabItem { Label("Review", systemImage: "square.stack.3d.up") }
+            if appModel.duplicates.result != nil {
+                reviewTab(profile: profile)
+                    .tag(Tab.review)
+                    .tabItem { Label("Review", systemImage: "square.stack.3d.up") }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -159,6 +166,7 @@ struct RootView: View {
 
             HStack(spacing: 12) {
                 Button {
+                    tab = .scan
                     appModel.duplicates.start(profile: profile)
                 } label: {
                     Text("Scan For Duplicates")
@@ -169,13 +177,6 @@ struct RootView: View {
                 Button("Cancel", role: .destructive) { appModel.duplicates.cancel() }
 
                 Spacer()
-
-                Button("Reset Index", role: .destructive) {
-                    // Resetting the index implies results are stale; clear them.
-                    appModel.duplicates.clearResults()
-                    appModel.indexing.resetIndexFiles()
-                }
-                .help("Clears local fingerprints so the next scan re-indexes. Clears current match results and keeps “Not a match” decisions.")
             }
 
             statusBlock

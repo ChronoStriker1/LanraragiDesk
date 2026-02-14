@@ -385,49 +385,88 @@ private struct PairCompareView: View {
     }
 
     private var topBar: some View {
-        VStack(alignment: .leading, spacing: isDetailsCollapsed ? 0 : 10) {
-            HStack(spacing: 0) {
-                ArchiveSideHeader(
-                    profile: profile,
-                    arcid: pair.arcidA,
-                    meta: metaA,
-                    thumbnails: thumbnails,
-                    collapsed: isDetailsCollapsed,
-                    onNotMatch: {
-                        markNotDuplicate(pair)
-                        goNext()
-                    },
-                    onDelete: { confirmDeleteArcid = pair.arcidA }
-                )
-                .id(pair.arcidA)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        let tagRows = TagCompareGrouper.rows(tagsA: metaA?.tags, tagsB: metaB?.tags, maxGroups: 8, maxTagsPerGroup: 18)
 
-                Divider().padding(.vertical, 8)
+        return HStack(spacing: 0) {
+            ArchiveComparePanel(
+                profile: profile,
+                arcid: pair.arcidA,
+                meta: metaA,
+                other: metaB,
+                tagRows: tagRows,
+                showingLeft: true,
+                thumbnails: thumbnails,
+                collapsed: isDetailsCollapsed,
+                onNotMatch: {
+                    markNotDuplicate(pair)
+                    goNext()
+                },
+                onDelete: { confirmDeleteArcid = pair.arcidA }
+            )
+            .id(pair.arcidA)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-                ArchiveSideHeader(
-                    profile: profile,
-                    arcid: pair.arcidB,
-                    meta: metaB,
-                    thumbnails: thumbnails,
-                    collapsed: isDetailsCollapsed,
-                    onNotMatch: {
-                        markNotDuplicate(pair)
-                        goNext()
-                    },
-                    onDelete: { confirmDeleteArcid = pair.arcidB }
-                )
-                .id(pair.arcidB)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            Divider()
+                .padding(.vertical, 10)
 
-            if !isDetailsCollapsed {
-                ArchiveCompareDetails(metaA: metaA, metaB: metaB)
+            ArchiveComparePanel(
+                profile: profile,
+                arcid: pair.arcidB,
+                meta: metaB,
+                other: metaA,
+                tagRows: tagRows,
+                showingLeft: false,
+                thumbnails: thumbnails,
+                collapsed: isDetailsCollapsed,
+                onNotMatch: {
+                    markNotDuplicate(pair)
+                    goNext()
+                },
+                onDelete: { confirmDeleteArcid = pair.arcidB }
+            )
+            .id(pair.arcidB)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+private struct ArchiveComparePanel: View {
+    let profile: Profile
+    let arcid: String
+    let meta: ArchiveMetadata?
+    let other: ArchiveMetadata?
+    let tagRows: [TagCompareGrouper.Row]
+    let showingLeft: Bool
+    let thumbnails: ThumbnailLoader
+    let collapsed: Bool
+    let onNotMatch: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: collapsed ? 0 : 10) {
+            ArchiveSideHeader(
+                profile: profile,
+                arcid: arcid,
+                meta: meta,
+                thumbnails: thumbnails,
+                collapsed: collapsed,
+                onNotMatch: onNotMatch,
+                onDelete: onDelete
+            )
+
+            if !collapsed {
+                ArchiveSideDetails(meta: meta, other: other)
+                ArchiveSideTags(tagRows: tagRows, showingLeft: showingLeft)
             }
         }
-        .padding(isDetailsCollapsed ? 6 : 10)
+        .padding(collapsed ? 8 : 12)
         .background(.quaternary.opacity(0.35))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .fixedSize(horizontal: false, vertical: true)
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 1)
+        }
     }
 }
 
@@ -610,9 +649,6 @@ private struct ArchiveSideHeader: View {
                 .help("Delete this archive from LANraragi")
             }
         }
-        .padding(collapsed ? 6 : 8)
-        .background(.thinMaterial.opacity(0.14))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private var displayTitle: String {
@@ -621,9 +657,9 @@ private struct ArchiveSideHeader: View {
     }
 }
 
-private struct ArchiveCompareDetails: View {
-    let metaA: ArchiveMetadata?
-    let metaB: ArchiveMetadata?
+private struct ArchiveSideDetails: View {
+    let meta: ArchiveMetadata?
+    let other: ArchiveMetadata?
     private static let addedFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateStyle = .medium
@@ -638,20 +674,15 @@ private struct ArchiveCompareDetails: View {
     }()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 8) {
-            diffRow("Pages", a: metaA?.pagecount.map(String.init), b: metaB?.pagecount.map(String.init))
-            diffRow("Extension", a: metaA?.fileExtension, b: metaB?.fileExtension)
-            diffRow("Size", a: sizeString(metaA?.size), b: sizeString(metaB?.size))
-            diffRow("Filename", a: metaA?.filename, b: metaB?.filename, lineLimit: 2)
-            diffRow("Added", a: addedString(from: metaA?.tags), b: addedString(from: metaB?.tags))
-            diffRow("Summary", a: metaA?.summary, b: metaB?.summary, lineLimit: 2)
-            }
-            .font(.caption)
-
-            TagGroupCompareView(tagsA: metaA?.tags, tagsB: metaB?.tags)
+        VStack(alignment: .leading, spacing: 8) {
+            MetaRow(label: "Pages", value: stringOrDash(meta?.pagecount.map(String.init)), different: meta?.pagecount != other?.pagecount)
+            MetaRow(label: "Extension", value: stringOrDash(meta?.fileExtension), different: normalized(meta?.fileExtension) != normalized(other?.fileExtension))
+            MetaRow(label: "Size", value: stringOrDash(sizeString(meta?.size)), different: meta?.size != other?.size)
+            MetaRow(label: "Filename", value: stringOrDash(meta?.filename), different: normalized(meta?.filename) != normalized(other?.filename), lineLimit: 2)
+            MetaRow(label: "Added", value: stringOrDash(addedString(from: meta?.tags)), different: addedString(from: meta?.tags) != addedString(from: other?.tags))
+            MetaRow(label: "Summary", value: stringOrDash(meta?.summary), different: normalized(meta?.summary) != normalized(other?.summary), lineLimit: 2)
         }
-        .padding(.top, 2)
+        .font(.caption)
     }
 
     private func sizeString(_ bytes: Int?) -> String? {
@@ -676,76 +707,76 @@ private struct ArchiveCompareDetails: View {
         return nil
     }
 
-    @ViewBuilder
-    private func diffRow(_ label: String, a: String?, b: String?, lineLimit: Int = 1) -> some View {
-        let left = (a?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? a! : "—"
-        let right = (b?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? b! : "—"
-        let different = left != right && left != "—" && right != "—"
+    private func normalized(_ s: String?) -> String {
+        (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
-        GridRow {
+    private func stringOrDash(_ s: String?) -> String {
+        let t = normalized(s)
+        return t.isEmpty ? "—" : t
+    }
+}
+
+private struct MetaRow: View {
+    let label: String
+    let value: String
+    let different: Bool
+    var lineLimit: Int = 1
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
             Text(label)
                 .foregroundStyle(.secondary)
-                .frame(width: 86, alignment: .leading)
+                .frame(width: 72, alignment: .leading)
 
-            Text(left)
+            Text(value)
                 .lineLimit(lineLimit)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 2)
-                .padding(.horizontal, 6)
-                .background(different ? Color.yellow.opacity(0.14) : Color.clear)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-            Text(right)
-                .lineLimit(lineLimit)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 2)
-                .padding(.horizontal, 6)
-                .background(different ? Color.yellow.opacity(0.14) : Color.clear)
+                .padding(.vertical, 3)
+                .padding(.horizontal, 7)
+                .background(different && value != "—" ? Color.yellow.opacity(0.14) : Color.clear)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
     }
 }
 
-private struct TagGroupCompareView: View {
-    let tagsA: String?
-    let tagsB: String?
+private struct ArchiveSideTags: View {
+    let tagRows: [TagCompareGrouper.Row]
+    let showingLeft: Bool
 
     var body: some View {
-        let rows = TagCompareGrouper.rows(tagsA: tagsA, tagsB: tagsB, maxGroups: 4, maxTagsPerGroup: 12)
-        if rows.isEmpty {
-            return AnyView(EmptyView())
+        if tagRows.isEmpty { return AnyView(EmptyView()) }
+
+        let sideTags: (TagCompareGrouper.Row) -> ([String], Set<String>) = { r in
+            if showingLeft {
+                return (r.leftTags, r.leftOnly)
+            } else {
+                return (r.rightTags, r.rightOnly)
+            }
         }
 
         return AnyView(
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text("Tags")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
                 LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(rows, id: \.key) { r in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(r.title)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-
-                            HStack(alignment: .top, spacing: 10) {
-                                TagChipWrap(
-                                    tags: r.leftTags,
-                                    highlight: r.leftOnly
-                                )
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                Divider()
-                                TagChipWrap(
-                                    tags: r.rightTags,
-                                    highlight: r.rightOnly
-                                )
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                    ForEach(tagRows, id: \.key) { r in
+                        let (tags, highlight) = sideTags(r)
+                        if tags.isEmpty {
+                            EmptyView()
+                        } else {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(r.title)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                TagChipWrap(tags: tags, highlight: highlight)
                             }
+                            .padding(8)
+                            .background(r.isDifferent ? Color.yellow.opacity(0.08) : Color.clear)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
-                        .padding(6)
-                        .background(r.isDifferent ? Color.yellow.opacity(0.08) : Color.clear)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                 }
             }
@@ -939,7 +970,8 @@ private struct SyncedPagesGridView: View {
                         LazyVStack(alignment: .leading, spacing: 12) {
                             // Stable scroll position signal for header collapse/expand.
                             Color.clear
-                                .frame(height: 0)
+                                .frame(height: 1)
+                                .opacity(0.001)
                                 .background {
                                     GeometryReader { proxy in
                                         Color.clear.preference(
