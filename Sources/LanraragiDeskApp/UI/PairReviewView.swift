@@ -3,6 +3,13 @@ import ImageIO
 import SwiftUI
 import LanraragiKit
 
+private enum ReviewLayout {
+    static let pairCoverSize = CGSize(width: 112, height: 144)
+    static let pairListWidth: CGFloat = 112 * 2
+    // Must be >= one page preview tile height (tileHeight is capped at 240).
+    static let minPagesViewportHeight: CGFloat = 260
+}
+
 struct PairReviewView: View {
     let profile: Profile
     let result: DuplicateScanResult
@@ -45,7 +52,8 @@ struct PairReviewView: View {
 
             HSplitView {
                 pairList
-                    .frame(minWidth: 260, idealWidth: 280, maxWidth: 340)
+                    // Exactly two covers wide, per user request.
+                    .frame(width: ReviewLayout.pairListWidth)
 
                 pairDetail
                     .frame(minWidth: 520)
@@ -142,6 +150,9 @@ struct PairReviewView: View {
                     }
                 }
             }
+            // SwiftUI ScrollView content can size to its children; enforce full-width so covers are flush
+            // to the left and right edges (no centering gap).
+            .frame(width: ReviewLayout.pairListWidth, alignment: .leading)
             .padding(.vertical, 8)
         }
         .scrollIndicators(.visible)
@@ -277,19 +288,18 @@ private struct PairRowView: View {
                 profile: profile,
                 arcid: pair.arcidA,
                 thumbnails: thumbnails,
-                size: .init(width: 112, height: 144),
+                size: ReviewLayout.pairCoverSize,
                 contentInset: 0
             )
-            Spacer(minLength: 0)
             CoverThumb(
                 profile: profile,
                 arcid: pair.arcidB,
                 thumbnails: thumbnails,
-                size: .init(width: 112, height: 144),
+                size: ReviewLayout.pairCoverSize,
                 contentInset: 0
             )
         }
-        .frame(maxWidth: .infinity)
+        .frame(width: ReviewLayout.pairListWidth, alignment: .leading)
         .overlay(alignment: .leading) {
             RoundedRectangle(cornerRadius: 4, style: .continuous)
                 .fill(reasonColor.opacity(0.9))
@@ -339,6 +349,8 @@ private struct PairCompareView: View {
                 scrollMinY: $pagesScrollMinY
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(minHeight: ReviewLayout.minPagesViewportHeight)
+            .layoutPriority(1)
         }
         .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -438,7 +450,6 @@ private struct PairCompareView: View {
             .id(pair.arcidB)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -985,52 +996,45 @@ private struct SyncedPagesGridView: View {
                     let tileHeight = min(240, max(140, tileWidth * 1.35))
 
                     ScrollView(.vertical) {
-                        VStack(spacing: 0) {
-                            // Keep this outside any Lazy stack so it doesn't get recycled off-screen.
-                            GeometryReader { proxy in
-                                Color.clear.preference(
-                                    key: ScrollMinYPreferenceKey.self,
-                                    value: proxy.frame(in: .named("pagesScroll")).minY
-                                )
-                            }
-                            .frame(height: 1)
-                            .opacity(0.001)
-                            .allowsHitTesting(false)
+                        // Must be inside the scroll content (document view) so `enclosingScrollView` resolves.
+                        ScrollOffsetObserver { v in
+                            scrollMinY = v
+                        }
+                        .frame(width: 1, height: 1)
+                        .opacity(0.001)
+                        .allowsHitTesting(false)
 
-                            LazyVStack(alignment: .leading, spacing: 12) {
-                                ForEach(stride(from: 0, to: max(pagesA.count, pagesB.count), by: cols).map { $0 }, id: \.self) { start in
-                                    HStack(alignment: .top, spacing: centerGap) {
-                                        PageGridSide(
-                                            profile: profile,
-                                            pages: pagesA,
-                                            unavailable: pagesA.isEmpty && errorA != nil,
-                                            startIndex: start,
-                                            count: cols,
-                                            tileHeight: tileHeight,
-                                            archives: archives
-                                        )
-                                        .frame(width: sideWidth)
+                        LazyVStack(alignment: .leading, spacing: 12) {
+                            ForEach(stride(from: 0, to: max(pagesA.count, pagesB.count), by: cols).map { $0 }, id: \.self) { start in
+                                HStack(alignment: .top, spacing: centerGap) {
+                                    PageGridSide(
+                                        profile: profile,
+                                        pages: pagesA,
+                                        unavailable: pagesA.isEmpty && errorA != nil,
+                                        startIndex: start,
+                                        count: cols,
+                                        tileHeight: tileHeight,
+                                        archives: archives
+                                    )
+                                    .frame(width: sideWidth)
 
-                                        PageGridSide(
-                                            profile: profile,
-                                            pages: pagesB,
-                                            unavailable: pagesB.isEmpty && errorB != nil,
-                                            startIndex: start,
-                                            count: cols,
-                                            tileHeight: tileHeight,
-                                            archives: archives
-                                        )
-                                        .frame(width: sideWidth)
-                                    }
+                                    PageGridSide(
+                                        profile: profile,
+                                        pages: pagesB,
+                                        unavailable: pagesB.isEmpty && errorB != nil,
+                                        startIndex: start,
+                                        count: cols,
+                                        tileHeight: tileHeight,
+                                        archives: archives
+                                    )
+                                    .frame(width: sideWidth)
                                 }
                             }
-                            .padding(.vertical, 6)
                         }
+                        .padding(.vertical, 6)
                     }
-                    .coordinateSpace(name: "pagesScroll")
-                    .onPreferenceChange(ScrollMinYPreferenceKey.self) { v in
-                        scrollMinY = v
-                    }
+                    // On initial load, the pages viewport should be at least one tile tall.
+                    .frame(minHeight: tileHeight + 12)
                     .overlay(alignment: .center) {
                         Rectangle()
                             .fill(Color(nsColor: .separatorColor))
@@ -1065,6 +1069,8 @@ private struct SyncedPagesGridView: View {
                 }
             }
         }
+        // Keep the green box at least one tile high even while loading/errors.
+        .frame(minHeight: ReviewLayout.minPagesViewportHeight)
         .task(id: "\(arcidA)|\(arcidB)|\(reloadToken)") {
             pagesA = []
             pagesB = []
@@ -1102,10 +1108,75 @@ private struct SyncedPagesGridView: View {
     }
 }
 
-private struct ScrollMinYPreferenceKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
+private struct ScrollOffsetObserver: NSViewRepresentable {
+    let onChange: (CGFloat) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onChange: onChange) }
+
+    func makeNSView(context: Context) -> NSView {
+        let v = NSView(frame: .zero)
+        DispatchQueue.main.async {
+            context.coordinator.attach(to: v)
+        }
+        return v
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            context.coordinator.attach(to: nsView)
+        }
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        private var onChange: (CGFloat) -> Void
+        private weak var scrollView: NSScrollView?
+        private weak var clipView: NSClipView?
+
+        init(onChange: @escaping (CGFloat) -> Void) {
+            self.onChange = onChange
+        }
+
+        func attach(to view: NSView) {
+            guard let sv = view.enclosingScrollView else { return }
+            if scrollView === sv { return }
+            scrollView = sv
+
+            if let old = clipView {
+                NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: old)
+            }
+
+            let clip = sv.contentView
+            clipView = clip
+            clip.postsBoundsChangedNotifications = true
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(boundsDidChange(_:)),
+                name: NSView.boundsDidChangeNotification,
+                object: clip
+            )
+
+            // Initial update.
+            updateFromClip(clip)
+        }
+
+        @objc private func boundsDidChange(_ note: Notification) {
+            guard let clip = note.object as? NSClipView else { return }
+            updateFromClip(clip)
+        }
+
+        private func updateFromClip(_ clip: NSClipView) {
+            // At top: origin.y == 0. Scrolling down increases origin.y.
+            let y = clip.bounds.origin.y
+            // Match previous convention: negative when scrolling down.
+            onChange(-y)
+        }
+
+        deinit {
+            if let clipView {
+                NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: clipView)
+            }
+        }
     }
 }
 
