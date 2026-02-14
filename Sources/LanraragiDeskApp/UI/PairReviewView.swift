@@ -601,6 +601,12 @@ private struct ArchiveSideHeader: View {
 private struct ArchiveCompareDetails: View {
     let metaA: ArchiveMetadata?
     let metaB: ArchiveMetadata?
+    private static let addedFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return f
+    }()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -608,6 +614,7 @@ private struct ArchiveCompareDetails: View {
             diffRow("Pages", a: metaA?.pagecount.map(String.init), b: metaB?.pagecount.map(String.init))
             diffRow("Extension", a: metaA?.fileExtension, b: metaB?.fileExtension)
             diffRow("Filename", a: metaA?.filename, b: metaB?.filename, lineLimit: 2)
+            diffRow("Added", a: addedString(from: metaA?.tags), b: addedString(from: metaB?.tags))
             diffRow("Summary", a: metaA?.summary, b: metaB?.summary, lineLimit: 2)
             diffRow("New", a: metaA?.isnew.map { $0 ? "Yes" : "No" }, b: metaB?.isnew.map { $0 ? "Yes" : "No" })
             diffRow("Progress", a: metaA?.progress.map(String.init), b: metaB?.progress.map(String.init))
@@ -618,6 +625,23 @@ private struct ArchiveCompareDetails: View {
             TagGroupCompareView(tagsA: metaA?.tags, tagsB: metaB?.tags)
         }
         .padding(.top, 2)
+    }
+
+    private func addedString(from tags: String?) -> String? {
+        // LANraragi exposes date_added as a tag like `date_added:1712345678`.
+        let raw = tags ?? ""
+        for part in raw.split(separator: ",") {
+            let t = part.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !t.isEmpty else { continue }
+            if t.hasPrefix("date_added:") {
+                let v = t.dropFirst("date_added:".count)
+                if let ts = TimeInterval(v) {
+                    let d = Date(timeIntervalSince1970: ts)
+                    return Self.addedFormatter.string(from: d)
+                }
+            }
+        }
+        return nil
     }
 
     @ViewBuilder
@@ -881,15 +905,6 @@ private struct SyncedPagesGridView: View {
 
                     ScrollView(.vertical) {
                         LazyVStack(alignment: .leading, spacing: 12) {
-                            GeometryReader { proxy in
-                                Color.clear.preference(
-                                    key: ScrollMinYPreferenceKey.self,
-                                    value: proxy.frame(in: .named("pagesScroll")).minY
-                                )
-                            }
-                            .frame(height: 1)
-                            .opacity(0.001)
-
                             ForEach(stride(from: 0, to: max(pagesA.count, pagesB.count), by: cols).map { $0 }, id: \.self) { start in
                                 HStack(alignment: .top, spacing: centerGap) {
                                     PageGridSide(
@@ -917,6 +932,14 @@ private struct SyncedPagesGridView: View {
                             }
                         }
                         .padding(.vertical, 6)
+                        .background {
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: ScrollMinYPreferenceKey.self,
+                                    value: proxy.frame(in: .named("pagesScroll")).minY
+                                )
+                            }
+                        }
                     }
                     .coordinateSpace(name: "pagesScroll")
                     .onPreferenceChange(ScrollMinYPreferenceKey.self) { v in
@@ -961,6 +984,7 @@ private struct SyncedPagesGridView: View {
             pagesB = []
             errorA = nil
             errorB = nil
+            scrollMinY = 0
 
             async let aRes: Result<[URL], Error> = {
                 do { return .success(try await archives.pageURLs(profile: profile, arcid: arcidA)) }

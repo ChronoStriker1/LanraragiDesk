@@ -215,4 +215,10 @@ final class DuplicateScanViewModel: ObservableObject {
         runID = nil
         status = .idle
     }
+
+    func clearResults() {
+        cancel()
+        result = nil
+        resultRevision &+= 1
+    }
 }

@@ -170,8 +170,12 @@ struct RootView: View {
 
                 Spacer()
 
-                Button("Reset Index", role: .destructive) { appModel.indexing.resetIndexFiles() }
-                    .help("Clears local fingerprints so the next scan re-indexes. Keeps current results and “Not a match” decisions.")
+                Button("Reset Index", role: .destructive) {
+                    // Resetting the index implies results are stale; clear them.
+                    appModel.duplicates.clearResults()
+                    appModel.indexing.resetIndexFiles()
+                }
+                .help("Clears local fingerprints so the next scan re-indexes. Clears current match results and keeps “Not a match” decisions.")
             }
 
             statusBlock
