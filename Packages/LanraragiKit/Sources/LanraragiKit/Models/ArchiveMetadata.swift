@@ -6,6 +6,7 @@ public struct ArchiveMetadata: Decodable, Sendable, Equatable {
     public var tags: String?
     public var summary: String?
     public var pagecount: Int?
+    public var size: Int?
     public var filename: String?
     public var fileExtension: String?
     public var category: String?
@@ -19,6 +20,7 @@ public struct ArchiveMetadata: Decodable, Sendable, Equatable {
         tags: String? = nil,
         summary: String? = nil,
         pagecount: Int? = nil,
+        size: Int? = nil,
         filename: String? = nil,
         fileExtension: String? = nil,
         category: String? = nil,
@@ -31,6 +33,7 @@ public struct ArchiveMetadata: Decodable, Sendable, Equatable {
         self.tags = tags
         self.summary = summary
         self.pagecount = pagecount
+        self.size = size
         self.filename = filename
         self.fileExtension = fileExtension
         self.category = category
@@ -45,6 +48,7 @@ public struct ArchiveMetadata: Decodable, Sendable, Equatable {
         case tags
         case summary
         case pagecount
+        case size
         case filename
         case `extension`
         case category
@@ -65,6 +69,7 @@ public struct ArchiveMetadata: Decodable, Sendable, Equatable {
         category = try? c.decode(String.self, forKey: .category)
 
         pagecount = LossyInt.decode(from: c, forKey: .pagecount)
+        size = LossyInt.decode(from: c, forKey: .size)
         progress = LossyInt.decode(from: c, forKey: .progress)
         lastreadtime = LossyInt.decode(from: c, forKey: .lastreadtime)
         isnew = LossyBool.decode(from: c, forKey: .isnew)

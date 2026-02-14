@@ -313,11 +313,12 @@ private struct PairCompareView: View {
     @State private var metaA: ArchiveMetadata?
     @State private var metaB: ArchiveMetadata?
     @State private var pagesScrollMinY: CGFloat = 0
+    @State private var isDetailsCollapsed: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             topBar
-                .animation(.snappy(duration: 0.2), value: detailsCollapsed)
+                .animation(.snappy(duration: 0.2), value: isDetailsCollapsed)
 
             SyncedPagesGridView(
                 profile: profile,
@@ -359,6 +360,7 @@ private struct PairCompareView: View {
             Text("This removes the archive from LANraragi. This cannot be undone.")
         }
         .task(id: "\(pair.arcidA)|\(pair.arcidB)") {
+            isDetailsCollapsed = false
             metaA = nil
             metaB = nil
             do {
@@ -370,70 +372,61 @@ private struct PairCompareView: View {
                 // Ignore; the compare UI still works with IDs only.
             }
         }
-    }
-
-    private var detailsCollapsed: Bool {
-        // `minY` becomes negative as you scroll down.
-        pagesScrollMinY < -4
+        .onChange(of: pagesScrollMinY) { _, v in
+            // Hysteresis avoids flicker around the top of the pages grid.
+            let collapseAt: CGFloat = -18
+            let expandAt: CGFloat = -4
+            if !isDetailsCollapsed, v < collapseAt {
+                isDetailsCollapsed = true
+            } else if isDetailsCollapsed, v > expandAt {
+                isDetailsCollapsed = false
+            }
+        }
     }
 
     private var topBar: some View {
-        VStack(alignment: .leading, spacing: detailsCollapsed ? 0 : 10) {
-            HStack(alignment: .top, spacing: 12) {
+        VStack(alignment: .leading, spacing: isDetailsCollapsed ? 0 : 10) {
+            HStack(spacing: 0) {
                 ArchiveSideHeader(
                     profile: profile,
                     arcid: pair.arcidA,
                     meta: metaA,
                     thumbnails: thumbnails,
-                    collapsed: detailsCollapsed
-                )
-
-                Divider().padding(.vertical, 6)
-
-                HStack(spacing: 10) {
-                    Button(role: .destructive) { confirmDeleteArcid = pair.arcidA } label: {
-                        Image(systemName: "trash")
-                            .imageScale(.medium)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(detailsCollapsed ? .mini : .small)
-                    .help("Delete left archive from LANraragi")
-
-                    Button("Not a match") {
+                    collapsed: isDetailsCollapsed,
+                    onNotMatch: {
                         markNotDuplicate(pair)
                         goNext()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(detailsCollapsed ? .small : .regular)
+                    },
+                    onDelete: { confirmDeleteArcid = pair.arcidA }
+                )
+                .id(pair.arcidA)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                    Button(role: .destructive) { confirmDeleteArcid = pair.arcidB } label: {
-                        Image(systemName: "trash")
-                            .imageScale(.medium)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(detailsCollapsed ? .mini : .small)
-                    .help("Delete right archive from LANraragi")
-                }
-
-                Divider().padding(.vertical, 6)
+                Divider().padding(.vertical, 8)
 
                 ArchiveSideHeader(
                     profile: profile,
                     arcid: pair.arcidB,
                     meta: metaB,
                     thumbnails: thumbnails,
-                    collapsed: detailsCollapsed
+                    collapsed: isDetailsCollapsed,
+                    onNotMatch: {
+                        markNotDuplicate(pair)
+                        goNext()
+                    },
+                    onDelete: { confirmDeleteArcid = pair.arcidB }
                 )
+                .id(pair.arcidB)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            if !detailsCollapsed {
+            if !isDetailsCollapsed {
                 ArchiveCompareDetails(metaA: metaA, metaB: metaB)
             }
         }
-        .padding(detailsCollapsed ? 6 : 10)
+        .padding(isDetailsCollapsed ? 6 : 10)
         .background(.quaternary.opacity(0.35))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        // Prevent this header block from stretching vertically and creating empty space.
         .fixedSize(horizontal: false, vertical: true)
     }
 }
@@ -557,10 +550,24 @@ private struct ArchiveSideHeader: View {
     let meta: ArchiveMetadata?
     let thumbnails: ThumbnailLoader
     let collapsed: Bool
+    let onNotMatch: () -> Void
+    let onDelete: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            CoverThumb(profile: profile, arcid: arcid, thumbnails: thumbnails, size: .init(width: 64, height: 82))
+            ZStack(alignment: .topTrailing) {
+                CoverThumb(profile: profile, arcid: arcid, thumbnails: thumbnails, size: .init(width: 64, height: 82))
+                if meta?.isnew == true {
+                    Image(systemName: "sparkles")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(5)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Circle())
+                        .padding(4)
+                        .help("New")
+                }
+            }
 
             VStack(alignment: .leading, spacing: collapsed ? 4 : 6) {
                 Text(displayTitle)
@@ -588,8 +595,24 @@ private struct ArchiveSideHeader: View {
             }
 
             Spacer(minLength: 0)
+
+            HStack(spacing: collapsed ? 6 : 8) {
+                Button("Not a match") { onNotMatch() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(collapsed ? .mini : .small)
+
+                Button(role: .destructive) { onDelete() } label: {
+                    Image(systemName: "trash")
+                        .imageScale(.medium)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(collapsed ? .mini : .small)
+                .help("Delete this archive from LANraragi")
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(collapsed ? 6 : 8)
+        .background(.thinMaterial.opacity(0.14))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private var displayTitle: String {
@@ -607,24 +630,33 @@ private struct ArchiveCompareDetails: View {
         f.timeStyle = .short
         return f
     }()
+    private static let sizeFormatter: ByteCountFormatter = {
+        let f = ByteCountFormatter()
+        f.allowedUnits = [.useKB, .useMB, .useGB]
+        f.countStyle = .file
+        return f
+    }()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 8) {
             diffRow("Pages", a: metaA?.pagecount.map(String.init), b: metaB?.pagecount.map(String.init))
             diffRow("Extension", a: metaA?.fileExtension, b: metaB?.fileExtension)
+            diffRow("Size", a: sizeString(metaA?.size), b: sizeString(metaB?.size))
             diffRow("Filename", a: metaA?.filename, b: metaB?.filename, lineLimit: 2)
             diffRow("Added", a: addedString(from: metaA?.tags), b: addedString(from: metaB?.tags))
             diffRow("Summary", a: metaA?.summary, b: metaB?.summary, lineLimit: 2)
-            diffRow("New", a: metaA?.isnew.map { $0 ? "Yes" : "No" }, b: metaB?.isnew.map { $0 ? "Yes" : "No" })
-            diffRow("Progress", a: metaA?.progress.map(String.init), b: metaB?.progress.map(String.init))
-            diffRow("Last Read", a: metaA?.lastreadtime.map(String.init), b: metaB?.lastreadtime.map(String.init))
             }
             .font(.caption)
 
             TagGroupCompareView(tagsA: metaA?.tags, tagsB: metaB?.tags)
         }
         .padding(.top, 2)
+    }
+
+    private func sizeString(_ bytes: Int?) -> String? {
+        guard let bytes, bytes > 0 else { return nil }
+        return Self.sizeFormatter.string(fromByteCount: Int64(bytes))
     }
 
     private func addedString(from tags: String?) -> String? {
@@ -905,6 +937,18 @@ private struct SyncedPagesGridView: View {
 
                     ScrollView(.vertical) {
                         LazyVStack(alignment: .leading, spacing: 12) {
+                            // Stable scroll position signal for header collapse/expand.
+                            Color.clear
+                                .frame(height: 0)
+                                .background {
+                                    GeometryReader { proxy in
+                                        Color.clear.preference(
+                                            key: ScrollMinYPreferenceKey.self,
+                                            value: proxy.frame(in: .named("pagesScroll")).minY
+                                        )
+                                    }
+                                }
+
                             ForEach(stride(from: 0, to: max(pagesA.count, pagesB.count), by: cols).map { $0 }, id: \.self) { start in
                                 HStack(alignment: .top, spacing: centerGap) {
                                     PageGridSide(
@@ -932,14 +976,6 @@ private struct SyncedPagesGridView: View {
                             }
                         }
                         .padding(.vertical, 6)
-                        .background {
-                            GeometryReader { proxy in
-                                Color.clear.preference(
-                                    key: ScrollMinYPreferenceKey.self,
-                                    value: proxy.frame(in: .named("pagesScroll")).minY
-                                )
-                            }
-                        }
                     }
                     .coordinateSpace(name: "pagesScroll")
                     .onPreferenceChange(ScrollMinYPreferenceKey.self) { v in
