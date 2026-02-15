@@ -436,7 +436,7 @@ private struct LibraryCard: View {
                     .padding(8)
                 }
                 .overlay(alignment: .topTrailing) {
-                    if let d = meta?.dateAdded {
+                    if let d = ArchiveMetaHelpers.dateAdded(meta) {
                         CoverBadge(text: Self.dateFormatter.string(from: d))
                             .padding(8)
                     }
@@ -553,7 +553,7 @@ private struct LibraryRow: View {
                     }
                 }
                 .overlay(alignment: .topTrailing) {
-                    if let d = meta?.dateAdded {
+                    if let d = ArchiveMetaHelpers.dateAdded(meta) {
                         CoverBadge(text: Self.dateFormatter.string(from: d), font: .caption2.monospacedDigit().weight(.bold))
                             .padding(4)
                     }
@@ -701,5 +701,65 @@ private struct ArchiveHoverDetailsView: View {
             .padding(14)
         }
         .frame(width: 520, height: 340)
+    }
+}
+
+private enum ArchiveMetaHelpers {
+    private static let dateOnlyParsers: [DateFormatter] = {
+        func make(_ format: String) -> DateFormatter {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.timeZone = TimeZone(secondsFromGMT: 0)
+            f.dateFormat = format
+            return f
+        }
+        return [
+            make("yyyy-MM-dd"),
+            make("yyyy/MM/dd"),
+        ]
+    }()
+
+    static func dateAdded(_ meta: ArchiveMetadata?) -> Date? {
+        guard let meta else { return nil }
+        if let d = meta.dateAdded { return d }
+        guard let tags = meta.tags else { return nil }
+        return parseDateAddedTag(tags)
+    }
+
+    private static func parseDateAddedTag(_ tags: String) -> Date? {
+        for raw in tags.split(separator: ",") {
+            let tok = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            let lower = tok.lowercased()
+
+            let prefix: String
+            if lower.hasPrefix("date_added:") {
+                prefix = "date_added:"
+            } else if lower.hasPrefix("dateadded:") {
+                prefix = "dateadded:"
+            } else {
+                continue
+            }
+
+            let value = tok.dropFirst(prefix.count).trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: .init(charactersIn: "\"'"))
+
+            if let rawNum = Int64(value) {
+                let seconds: TimeInterval
+                if rawNum > 1_000_000_000_000 {
+                    seconds = TimeInterval(rawNum) / 1000.0
+                } else {
+                    seconds = TimeInterval(rawNum)
+                }
+                return Date(timeIntervalSince1970: seconds)
+            }
+
+            for f in dateOnlyParsers {
+                if let d = f.date(from: value) {
+                    return d
+                }
+            }
+        }
+
+        return nil
     }
 }
