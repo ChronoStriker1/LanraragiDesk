@@ -23,6 +23,13 @@ It is intentionally pragmatic and may be blunt.
     - `Sources/LanraragiDeskApp/UI/BatchView.swift`
     - `Sources/LanraragiDeskApp/UI/PluginsView.swift`
 
+- Tag suggestions + stats decoding:
+  - Fixed: `/api/database/stats` now decodes whether the server returns a top-level array or a wrapped `{ "tags": [...] }` object.
+  - This unblocks tag autocomplete and the Statistics sidebar page.
+  - Files:
+    - `Packages/LanraragiKit/Sources/LanraragiKit/Models/DatabaseStats.swift`
+    - `Packages/LanraragiKit/Tests/LanraragiKitTests/DatabaseStatsDecodingTests.swift`
+
 - Performance setting expectations:
   - `network.maxConnectionsPerHost` affects URLSession `httpMaximumConnectionsPerHost` only.
   - App-level limiters are still hard-coded (`AsyncLimiter(limit: 4)` in loaders and `IndexerConfig(concurrency: 4)` for indexing).
@@ -128,6 +135,14 @@ It is intentionally pragmatic and may be blunt.
   - Cover overlays: NEW/date/page count.
   - List view is a Table (columns, multi-sort).
   - Hover popover shows full title/summary/tags; clicking a tag appends the raw tag token into the search field (search does not auto-run).
+
+- Statistics page:
+  - Add a Settings checkbox that conditionally adds a Statistics item to the sidebar.
+  - Statistics should mirror LANraragi’s tag statistics table (`/api/database/stats`) and respect the Tag Suggestions min-weight setting.
+  - Files:
+    - `Sources/LanraragiDeskApp/UI/SettingsView.swift`
+    - `Sources/LanraragiDeskApp/UI/RootView.swift`
+    - `Sources/LanraragiDeskApp/UI/StatisticsView.swift`
 
 ## Process
 

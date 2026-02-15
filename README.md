@@ -38,6 +38,9 @@ This is a personal project intended to be published on GitHub (not the Mac App S
   - List server plugins and queue them for selected archives
 - **Activity**
   - Local activity log with filtering and search
+- **Statistics** (optional; enable in Settings)
+  - Sidebar page that mirrors LANraragi’s statistics tag table (`/api/database/stats`)
+  - Filterable, sortable table of tags with count/weight
 
 ## Setup
 

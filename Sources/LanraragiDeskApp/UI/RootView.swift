@@ -7,9 +7,11 @@ struct RootView: View {
 
     @State private var showNotMatchesPanel: Bool = false
     @State private var section: Section = .library
+    @AppStorage("sidebar.showStatistics") private var showStatisticsPage: Bool = false
 
     enum Section: Hashable {
         case library
+        case statistics
         case duplicates
         case review
         case settings
@@ -37,6 +39,11 @@ struct RootView: View {
             appModel.selectFirstIfNeeded()
             if appModel.selectedProfile == nil {
                 appModel.profileEditorMode = .add
+            }
+        }
+        .onChange(of: showStatisticsPage) { _, enabled in
+            if !enabled, section == .statistics {
+                section = .library
             }
         }
         .sheet(item: $appModel.profileEditorMode) { mode in
@@ -83,6 +90,13 @@ struct RootView: View {
                     Label("Library", systemImage: "books.vertical")
                 }
                 .buttonStyle(.plain)
+
+                if showStatisticsPage {
+                    NavigationLink(value: Section.statistics) {
+                        Label("Statistics", systemImage: "chart.bar.xaxis")
+                    }
+                    .buttonStyle(.plain)
+                }
 
                 Divider()
 
@@ -135,6 +149,9 @@ struct RootView: View {
             switch section {
             case .library:
                 LibraryView(profile: profile)
+                    .environmentObject(appModel)
+            case .statistics:
+                StatisticsView(profile: profile)
                     .environmentObject(appModel)
             case .duplicates:
                 runCard(profile: profile)

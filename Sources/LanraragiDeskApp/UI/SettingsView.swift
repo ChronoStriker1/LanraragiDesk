@@ -12,6 +12,7 @@ struct SettingsView: View {
 
     @AppStorage("reader.readingDirection") private var readingDirectionRaw: String = ReaderDirection.ltr.rawValue
     @AppStorage("debug.showFrameNumbers") private var showFrameNumbers: Bool = false
+    @AppStorage("sidebar.showStatistics") private var showStatisticsPage: Bool = false
 
     var body: some View {
         ScrollView(.vertical) {
@@ -73,6 +74,18 @@ struct SettingsView: View {
             }
             .debugFrameNumber(1)
 
+            GroupBox("Sidebar") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle("Show Statistics page", isOn: $showStatisticsPage)
+                        .font(.callout)
+                    Text("Adds a Statistics page to the sidebar that mirrors LANraragi’s statistics tag table.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(8)
+            }
+            .debugFrameNumber(2)
+
             GroupBox("Reader") {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Reading direction")
@@ -93,7 +106,7 @@ struct SettingsView: View {
                 }
                 .padding(8)
             }
-            .debugFrameNumber(2)
+            .debugFrameNumber(3)
 
             GroupBox("Performance") {
                 VStack(alignment: .leading, spacing: 12) {
@@ -113,7 +126,7 @@ struct SettingsView: View {
                 }
                 .padding(8)
             }
-            .debugFrameNumber(3)
+            .debugFrameNumber(4)
 
             GroupBox("Tag suggestions") {
                 VStack(alignment: .leading, spacing: 12) {
@@ -141,7 +154,7 @@ struct SettingsView: View {
                 }
                 .padding(8)
             }
-            .debugFrameNumber(4)
+            .debugFrameNumber(5)
 
             GroupBox("Server actions") {
                 VStack(alignment: .leading, spacing: 12) {
@@ -166,7 +179,7 @@ struct SettingsView: View {
                 }
                 .padding(8)
             }
-            .debugFrameNumber(5)
+            .debugFrameNumber(6)
 
             Spacer(minLength: 0)
         }
