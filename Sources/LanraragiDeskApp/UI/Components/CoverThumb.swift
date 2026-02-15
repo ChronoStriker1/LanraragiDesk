@@ -1,6 +1,22 @@
 import AppKit
 import SwiftUI
 
+@MainActor
+private enum CoverThumbCache {
+    // Cache decoded thumbnails so tab switching doesn't force reload/spinners.
+    // NSCache is thread-safe and auto-purges under memory pressure.
+    static let images: NSCache<NSString, NSImage> = {
+        let c = NSCache<NSString, NSImage>()
+        c.countLimit = 900
+        c.totalCostLimit = 128 * 1024 * 1024
+        return c
+    }()
+
+    nonisolated static func key(arcid: String, size: CGSize, contentInset: CGFloat) -> NSString {
+        "\(arcid)|\(Int(size.width))x\(Int(size.height))|inset=\(Int(contentInset))" as NSString
+    }
+}
+
 struct CoverThumb: View {
     let profile: Profile
     let arcid: String
@@ -51,13 +67,26 @@ struct CoverThumb: View {
         .frame(width: size.width, height: size.height)
         .task(id: arcid) {
             // When switching between pairs, the view may be reused; reload for the new arcid.
+            let cacheKey = CoverThumbCache.key(arcid: arcid, size: size, contentInset: contentInset)
+            if let cached = await MainActor.run(body: { CoverThumbCache.images.object(forKey: cacheKey) }) {
+                image = cached
+                errorText = nil
+                return
+            }
+
             image = nil
             errorText = nil
             task?.cancel()
             task = Task {
                 do {
                     let img = try await fetch()
-                    await MainActor.run { image = img }
+                    await MainActor.run {
+                        image = img
+                        if let img {
+                            let cost = img.tiffRepresentation?.count ?? 1
+                            CoverThumbCache.images.setObject(img, forKey: cacheKey, cost: cost)
+                        }
+                    }
                 } catch {
                     if Task.isCancelled || ErrorPresenter.isCancellationLike(error) {
                         return

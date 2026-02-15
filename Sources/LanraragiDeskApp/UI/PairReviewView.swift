@@ -430,7 +430,9 @@ private struct PairCompareView: View {
     private var topBar: some View {
         let tagRows = TagCompareGrouper.rows(tagsA: metaA?.tags, tagsB: metaB?.tags, maxGroups: 8, maxTagsPerGroup: 18)
 
-        return HStack(spacing: 0) {
+        // Top align panels so a taller tag list on one side doesn't vertically-center the other side,
+        // which creates a changing gap above the shorter side.
+        return HStack(alignment: .top, spacing: 0) {
             ArchiveComparePanel(
                 profile: profile,
                 arcid: pair.arcidA,
@@ -452,11 +454,15 @@ private struct PairCompareView: View {
                 if debugNumberedAreas { ReviewAreaBadge(5) }
             }
 
-            Divider()
-                .padding(.vertical, 10)
-                .overlay(alignment: .center) {
-                    if debugNumberedAreas { ReviewAreaBadge(6) }
+            ZStack(alignment: .top) {
+                Divider()
+                    .padding(.vertical, 10)
+                    .frame(maxHeight: .infinity)
+                if debugNumberedAreas {
+                    ReviewAreaBadge(6)
                 }
+            }
+            .frame(width: 1)
 
             ArchiveComparePanel(
                 profile: profile,
@@ -518,7 +524,8 @@ private struct ArchiveComparePanel: View {
     let onDelete: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: collapsed ? 0 : 10) {
+        // "collapsed" = meta rows hidden; keep Tags visible (collapse up to the Tags section).
+        VStack(alignment: .leading, spacing: collapsed ? 8 : 10) {
             ArchiveSideHeader(
                 profile: profile,
                 arcid: arcid,
@@ -531,8 +538,8 @@ private struct ArchiveComparePanel: View {
 
             if !collapsed {
                 ArchiveSideDetails(meta: meta, other: other)
-                ArchiveSideTags(tagRows: tagRows, showingLeft: showingLeft)
             }
+            ArchiveSideTags(tagRows: tagRows, showingLeft: showingLeft)
         }
         .padding(collapsed ? 8 : 12)
         .background(.quaternary.opacity(0.35))
