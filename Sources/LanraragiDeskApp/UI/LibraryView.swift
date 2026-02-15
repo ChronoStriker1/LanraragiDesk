@@ -684,23 +684,168 @@ private struct ArchiveHoverDetailsView: View {
                     Text("Tags")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    if !tags.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text(tags)
-                            .font(.callout)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                    } else {
-                        Text("No tags.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    TagGroupsView(tags: tags)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
         }
+        .scrollIndicators(.visible)
         .frame(width: 520, height: 340)
+    }
+}
+
+private struct TagGroupsView: View {
+    let tags: String
+
+    private struct TagItem: Hashable {
+        var namespace: String
+        var value: String
+        var display: String
+    }
+
+    private static let humanDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .none
+        return f
+    }()
+
+    private var items: [TagItem] {
+        let raw = tags
+            .split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !raw.isEmpty else { return [] }
+
+        return raw.map { tok in
+            let (ns, v) = TagParser.splitNamespace(tok)
+            let display: String
+            if TagParser.isDateNamespace(ns), let d = TagParser.parseDateValue(v) {
+                display = "\(ns):\(Self.humanDateFormatter.string(from: d))"
+            } else {
+                display = tok
+            }
+            return TagItem(namespace: ns, value: v, display: display)
+        }
+    }
+
+    private var groups: [(String, [TagItem])] {
+        let grouped = Dictionary(grouping: items) { $0.namespace.isEmpty ? "tag" : $0.namespace.lowercased() }
+        let keys = grouped.keys.sorted { a, b in
+            // Show un-namespaced tags first, then alphabetical.
+            if a == "tag", b != "tag" { return true }
+            if a != "tag", b == "tag" { return false }
+            return a.localizedCaseInsensitiveCompare(b) == .orderedAscending
+        }
+        return keys.map { k in
+            let values = (grouped[k] ?? []).sorted { a, b in
+                a.display.localizedCaseInsensitiveCompare(b.display) == .orderedAscending
+            }
+            return (k, values)
+        }
+    }
+
+    var body: some View {
+        if items.isEmpty {
+            Text("No tags.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(groups, id: \.0) { ns, items in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(ns == "tag" ? "Tags" : ns)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 170), spacing: 8, alignment: .leading)],
+                            alignment: .leading,
+                            spacing: 8
+                        ) {
+                            ForEach(items, id: \.self) { t in
+                                TagChip(text: t.display)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct TagChip: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.callout)
+            .textSelection(.enabled)
+            .multilineTextAlignment(.leading)
+            .lineLimit(nil)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.quaternary.opacity(0.35))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 1)
+            }
+    }
+}
+
+private enum TagParser {
+    private static let dateOnlyParsers: [DateFormatter] = {
+        func make(_ format: String) -> DateFormatter {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.timeZone = TimeZone(secondsFromGMT: 0)
+            f.dateFormat = format
+            return f
+        }
+        return [
+            make("yyyy-MM-dd"),
+            make("yyyy/MM/dd"),
+        ]
+    }()
+
+    static func splitNamespace(_ tok: String) -> (String, String) {
+        guard let idx = tok.firstIndex(of: ":") else { return ("", tok) }
+        let ns = String(tok[..<idx]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let v = String(tok[tok.index(after: idx)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return (ns, v)
+    }
+
+    static func isDateNamespace(_ ns: String) -> Bool {
+        let n = ns.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return n == "date_added" || n == "dateadded" || n == "date"
+    }
+
+    static func parseDateValue(_ v: String) -> Date? {
+        let value = v.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: .init(charactersIn: "\"'"))
+
+        if let rawNum = Int64(value) {
+            let seconds: TimeInterval
+            if rawNum > 1_000_000_000_000 {
+                seconds = TimeInterval(rawNum) / 1000.0
+            } else {
+                seconds = TimeInterval(rawNum)
+            }
+            return Date(timeIntervalSince1970: seconds)
+        }
+
+        for f in dateOnlyParsers {
+            if let d = f.date(from: value) {
+                return d
+            }
+        }
+
+        return nil
     }
 }
 

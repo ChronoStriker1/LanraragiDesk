@@ -32,7 +32,6 @@ struct RootView: View {
             .ignoresSafeArea()
 
             content
-                .padding(24)
         }
         .onAppear {
             appModel.selectFirstIfNeeded()
@@ -78,39 +77,49 @@ struct RootView: View {
             NavigationLink(value: Section.library) {
                 Label("Library", systemImage: "books.vertical")
             }
+            .buttonStyle(.plain)
 
             Divider()
 
             NavigationLink(value: Section.duplicates) {
-                Label("Duplicates", systemImage: "rectangle.stack.badge.magnifyingglass")
+                Label("Duplicates", systemImage: "doc.on.doc")
             }
+            .buttonStyle(.plain)
 
             // Only show Review when it's usable (after a scan produced results).
             if appModel.duplicates.result != nil {
                 NavigationLink(value: Section.review) {
                     Label("Review", systemImage: "square.stack.3d.up")
                 }
+                .buttonStyle(.plain)
             }
 
             NavigationLink(value: Section.activity) {
                 Label("Activity", systemImage: "list.bullet.rectangle")
             }
+            .buttonStyle(.plain)
 
             NavigationLink(value: Section.batch) {
                 Label("Batch", systemImage: "square.stack.3d.forward.dottedline")
             }
+            .buttonStyle(.plain)
 
             NavigationLink(value: Section.plugins) {
                 Label("Plugins", systemImage: "puzzlepiece.extension")
             }
+            .buttonStyle(.plain)
 
             Divider()
 
             NavigationLink(value: Section.settings) {
                 Label("Settings", systemImage: "gearshape")
             }
+            .buttonStyle(.plain)
         }
         .listStyle(.sidebar)
+        .labelStyle(.titleAndIcon)
+        .scrollContentBackground(.hidden)
+        .background(Color(nsColor: .windowBackgroundColor))
         .navigationTitle("LanraragiDesk")
     }
 
@@ -152,6 +161,7 @@ struct RootView: View {
 
             Spacer(minLength: 0)
         }
+        .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
