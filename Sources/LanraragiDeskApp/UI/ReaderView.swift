@@ -27,7 +27,8 @@ struct ReaderView: View {
     @State private var timerTask: Task<Void, Never>?
     @State private var loadTask: Task<Void, Never>?
     @State private var prefetchTask: Task<Void, Never>?
-    @State private var isViewingControls: Bool = false
+    // Reserved for future in-reader UI toggles.
+    // (Toolbar items should remain stable; avoid hiding controls unexpectedly.)
 
     var body: some View {
         ZStack {
@@ -88,9 +89,9 @@ struct ReaderView: View {
                 }
 
                 Text(pageCountText)
-                    .font(.callout)
+                    .font(.callout.monospacedDigit())
                     .foregroundStyle(.secondary)
-                    .frame(minWidth: 90, alignment: .leading)
+                    .frame(minWidth: 78, alignment: .leading)
 
                 Divider()
 
@@ -112,9 +113,14 @@ struct ReaderView: View {
                     }
                 } label: {
                     Label("View", systemImage: "rectangle.3.group")
+                        .labelStyle(.titleAndIcon)
                 }
                 .help("Reader view options")
+            }
 
+            // Keep the toggle+slider as a stable-width toolbar item, so enabling auto-advance doesn't
+            // cause the controls to move into the overflow.
+            ToolbarItem(placement: .automatic) {
                 HStack(spacing: 10) {
                     Toggle("Auto-advance", isOn: $autoAdvanceEnabled)
                         .toggleStyle(.switch)
@@ -125,26 +131,30 @@ struct ReaderView: View {
                         .opacity(autoAdvanceEnabled ? 1 : 0.35)
 
                     Text("\(Int(autoAdvanceSeconds))s")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 34, alignment: .trailing)
-
-                    if autoAdvanceEnabled, let countdownRemaining {
-                        Text("Next in \(countdownRemaining)s")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 5)
-                            .background(.thinMaterial)
-                            .clipShape(Capsule())
-                            .help("Auto-advance countdown")
-                    }
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.thinMaterial)
+                        .clipShape(Capsule())
+                        .accessibilityLabel("Auto-advance seconds")
                 }
                 .help("Auto-advance to the next page after the selected delay.")
+                .frame(width: 330, alignment: .leading)
+            }
 
-                Spacer()
-
-                Button("Close") { dismiss() }
+            // Countdown is separate so it can overflow independently without hiding the controls.
+            ToolbarItem(placement: .automatic) {
+                if autoAdvanceEnabled, let countdownRemaining {
+                    Text("Next in \(countdownRemaining)s")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(.thinMaterial)
+                        .clipShape(Capsule())
+                        .help("Auto-advance countdown")
+                }
             }
         }
         .onMoveCommand { dir in
@@ -215,39 +225,33 @@ struct ReaderView: View {
 
     @ViewBuilder
     private var content: some View {
-        VStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(.thinMaterial)
+        ZStack {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(.thinMaterial)
 
-                if let errorText {
-                    Text(errorText)
-                        .foregroundStyle(.red)
-                        .padding(16)
-                } else if image != nil {
-                    ReaderCanvas(
-                        image: image,
-                        imageB: twoPageSpread ? imageB : nil,
-                        pixelSize: imagePixelSize,
-                        pixelSizeB: twoPageSpread ? imageBPixelSize : nil,
-                        fitMode: fitMode,
-                        zoomPercent: zoomPercent,
-                        rtl: readingDirection == .rtl
-                    )
-                    .padding(10)
-                } else if let errorText {
-                    Text(errorText)
-                        .foregroundStyle(.red)
-                        .padding(16)
-                } else {
-                    ProgressView()
+            if let errorText {
+                Text(errorText)
+                    .foregroundStyle(.red)
+                    .padding(16)
+            } else if image != nil {
+                ReaderCanvas(
+                    image: image,
+                    imageB: twoPageSpread ? imageB : nil,
+                    pixelSize: imagePixelSize,
+                    pixelSizeB: twoPageSpread ? imageBPixelSize : nil,
+                    fitMode: fitMode,
+                    zoomPercent: zoomPercent,
+                    rtl: readingDirection == .rtl
+                )
+                .padding(10)
+            } else {
+                ProgressView()
                     .padding(20)
-                }
-
-                clickZones
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            clickZones
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var clickZones: some View {

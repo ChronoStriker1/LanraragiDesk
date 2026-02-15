@@ -40,7 +40,8 @@ actor ThumbnailLoader {
                 let client = LANraragiClient(configuration: .init(
                     baseURL: baseURL,
                     apiKey: LANraragiAPIKey(apiKeyString),
-                    acceptLanguage: acceptLanguage
+                    acceptLanguage: acceptLanguage,
+                    maxConnectionsPerHost: AppSettings.maxConnectionsPerHost(defaultValue: 8)
                 ))
                 return try await client.fetchCoverThumbnailBytes(arcid: arcid)
             }

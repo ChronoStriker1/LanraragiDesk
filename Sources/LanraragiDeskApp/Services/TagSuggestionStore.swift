@@ -108,7 +108,7 @@ actor TagSuggestionStore {
             baseURL: profile.baseURL,
             apiKey: apiKey,
             acceptLanguage: profile.language,
-            maxConnectionsPerHost: 6
+            maxConnectionsPerHost: AppSettings.maxConnectionsPerHost(defaultValue: 8)
         ))
 
         let stats = try await client.getDatabaseStats(minWeight: settings.minWeight)
@@ -164,4 +164,3 @@ actor TagSuggestionStore {
         return try? JSONDecoder().decode(CacheFile.self, from: data)
     }
 }
-

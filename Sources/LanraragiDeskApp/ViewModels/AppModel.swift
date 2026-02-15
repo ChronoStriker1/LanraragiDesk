@@ -6,6 +6,7 @@ import LanraragiKit
 final class AppModel: ObservableObject {
     let profileStore: ProfileStore
     @Published var selectedProfileID: Profile.ID?
+    @Published var profileEditorMode: ProfileEditorMode?
 
     @Published var connectionStatus: ConnectionStatus = .idle
     @Published var indexing: IndexingViewModel
@@ -81,7 +82,8 @@ final class AppModel: ObservableObject {
         let client = LANraragiClient(configuration: .init(
             baseURL: profile.baseURL,
             apiKey: apiKey,
-            acceptLanguage: profile.language
+            acceptLanguage: profile.language,
+            maxConnectionsPerHost: AppSettings.maxConnectionsPerHost(defaultValue: 8)
         ))
 
         do {

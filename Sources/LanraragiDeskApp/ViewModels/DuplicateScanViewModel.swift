@@ -73,7 +73,7 @@ final class DuplicateScanViewModel: ObservableObject {
                     baseURL: profile.baseURL,
                     apiKey: apiKey,
                     acceptLanguage: profile.language,
-                    maxConnectionsPerHost: 8
+                    maxConnectionsPerHost: AppSettings.maxConnectionsPerHost(defaultValue: 8)
                 ))
 
                 let indexer = FingerprintIndexer()
@@ -211,7 +211,7 @@ final class DuplicateScanViewModel: ObservableObject {
             baseURL: profile.baseURL,
             apiKey: apiKey,
             acceptLanguage: profile.language,
-            maxConnectionsPerHost: 4
+            maxConnectionsPerHost: AppSettings.maxConnectionsPerHost(defaultValue: 8)
         ))
 
         try await client.deleteArchive(arcid: arcid)

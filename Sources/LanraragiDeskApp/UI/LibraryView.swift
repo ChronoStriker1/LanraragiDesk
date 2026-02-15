@@ -1,4 +1,7 @@
+import Foundation
+import AppKit
 import SwiftUI
+import LanraragiKit
 
 struct LibraryView: View {
     @EnvironmentObject private var appModel: AppModel
@@ -7,6 +10,14 @@ struct LibraryView: View {
     let profile: Profile
 
     @StateObject private var vm = LibraryViewModel()
+    @State private var tagSuggestions: [TagSuggestionStore.Suggestion] = []
+    @State private var suggestionTask: Task<Void, Never>?
+    @State private var editingMeta: EditorRoute?
+
+    struct EditorRoute: Identifiable, Hashable {
+        let arcid: String
+        var id: String { arcid }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -30,12 +41,28 @@ struct LibraryView: View {
 
             results
         }
+        .sheet(item: $editingMeta) { route in
+            ArchiveMetadataEditorView(
+                profile: profile,
+                arcid: route.arcid,
+                initialMeta: nil,
+                archives: appModel.archives,
+                onSaved: { _ in }
+            )
+            .environmentObject(appModel)
+        }
         .onAppear {
             if vm.arcids.isEmpty {
                 vm.refresh(profile: profile)
             }
         }
         .onChange(of: vm.sort) { _, _ in
+            vm.refresh(profile: profile)
+        }
+        .onChange(of: vm.newOnly) { _, _ in
+            vm.refresh(profile: profile)
+        }
+        .onChange(of: vm.untaggedOnly) { _, _ in
             vm.refresh(profile: profile)
         }
     }
@@ -65,11 +92,43 @@ struct LibraryView: View {
             }
 
             HStack(spacing: 10) {
-                TextField("Search…", text: $vm.query)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit {
-                        vm.refresh(profile: profile)
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("Search…", text: $vm.query)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { vm.refresh(profile: profile) }
+                        .onChange(of: vm.query) { _, _ in
+                            queueSuggestionRefresh()
+                        }
+
+                    if !tagSuggestions.isEmpty {
+                        ScrollView(.vertical) {
+                            LazyVStack(alignment: .leading, spacing: 6) {
+                                ForEach(tagSuggestions.prefix(12), id: \.value) { s in
+                                    Button {
+                                        applySuggestion(s.value)
+                                    } label: {
+                                        HStack(spacing: 10) {
+                                            Text(s.value)
+                                                .font(.callout)
+                                            Spacer()
+                                            Text("\(s.weight)")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.vertical, 6)
+                                        .padding(.horizontal, 10)
+                                        .background(.quaternary.opacity(0.35))
+                                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.vertical, 6)
+                        }
+                        .frame(maxHeight: 160)
                     }
+                }
 
                 Button("Search") {
                     vm.refresh(profile: profile)
@@ -82,6 +141,25 @@ struct LibraryView: View {
                 .disabled(vm.query.isEmpty)
 
                 Spacer()
+            }
+
+            DisclosureGroup("Filters") {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 16) {
+                        Toggle("New only", isOn: $vm.newOnly)
+                        Toggle("Untagged only", isOn: $vm.untaggedOnly)
+                        Spacer()
+                    }
+
+                    HStack(spacing: 10) {
+                        TextField("Category (optional)", text: $vm.category)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 280)
+                            .onSubmit { vm.refresh(profile: profile) }
+                        Spacer()
+                    }
+                }
+                .padding(.top, 6)
             }
         }
         .padding(18)
@@ -102,6 +180,19 @@ struct LibraryView: View {
                     ForEach(vm.arcids, id: \.self) { arcid in
                         LibraryCard(profile: profile, arcid: arcid)
                             .environmentObject(appModel)
+                            .contextMenu {
+                                Button("Open Reader") {
+                                    openWindow(value: ReaderRoute(profileID: profile.id, arcid: arcid))
+                                }
+                                Button("Edit Metadata…") {
+                                    editingMeta = EditorRoute(arcid: arcid)
+                                }
+                                Divider()
+                                Button("Copy Archive ID") {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(arcid, forType: .string)
+                                }
+                            }
                             .onTapGesture {
                                 openWindow(value: ReaderRoute(profileID: profile.id, arcid: arcid))
                             }
@@ -130,6 +221,19 @@ struct LibraryView: View {
                     LibraryRow(profile: profile, arcid: arcid)
                         .environmentObject(appModel)
                         .contentShape(Rectangle())
+                        .contextMenu {
+                            Button("Open Reader") {
+                                openWindow(value: ReaderRoute(profileID: profile.id, arcid: arcid))
+                            }
+                            Button("Edit Metadata…") {
+                                editingMeta = EditorRoute(arcid: arcid)
+                            }
+                            Divider()
+                            Button("Copy Archive ID") {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(arcid, forType: .string)
+                            }
+                        }
                         .onTapGesture {
                             openWindow(value: ReaderRoute(profileID: profile.id, arcid: arcid))
                         }
@@ -151,6 +255,65 @@ struct LibraryView: View {
             .listStyle(.inset)
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         }
+    }
+
+    private func queueSuggestionRefresh() {
+        suggestionTask?.cancel()
+        suggestionTask = Task {
+            // Light debounce so fast typing doesn't spam filtering.
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            if Task.isCancelled { return }
+            await refreshSuggestions()
+        }
+    }
+
+    private func refreshSuggestions() async {
+        let (prefix, _) = currentToken()
+        let q = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard q.count >= 2 else {
+            await MainActor.run { tagSuggestions = [] }
+            return
+        }
+
+        let minWeight = UserDefaults.standard.integer(forKey: "tags.minWeight")
+        let ttlHours = max(1, UserDefaults.standard.integer(forKey: "tags.ttlHours"))
+        let settings = TagSuggestionStore.Settings(minWeight: minWeight, ttlSeconds: ttlHours * 60 * 60)
+
+        let sugg = await appModel.tagSuggestions.suggestions(profile: profile, settings: settings, prefix: q, limit: 20)
+        await MainActor.run { tagSuggestions = sugg }
+    }
+
+    private func applySuggestion(_ value: String) {
+        let (prefix, range) = currentToken()
+        let trimmedPrefix = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPrefix.isEmpty else {
+            vm.query = value + " "
+            tagSuggestions = []
+            return
+        }
+
+        let isNegated = trimmedPrefix.hasPrefix("-")
+        let token = (isNegated ? "-" : "") + value
+
+        if let range {
+            let head = String(vm.query[..<range.lowerBound])
+            vm.query = head + token + " "
+        } else {
+            vm.query = token + " "
+        }
+        tagSuggestions = []
+    }
+
+    private func currentToken() -> (String, Range<String.Index>?) {
+        let q = vm.query
+        if q.isEmpty { return ("", nil) }
+
+        let separators = CharacterSet.whitespacesAndNewlines.union(.init(charactersIn: ","))
+        if let r = q.rangeOfCharacter(from: separators, options: .backwards) {
+            let token = String(q[r.upperBound...])
+            return (token, r.upperBound..<q.endIndex)
+        }
+        return (q, nil)
     }
 }
 

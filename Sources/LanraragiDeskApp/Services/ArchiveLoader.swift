@@ -170,7 +170,7 @@ actor ArchiveLoader {
             baseURL: profile.baseURL,
             apiKey: LANraragiAPIKey(apiKeyString),
             acceptLanguage: profile.language,
-            maxConnectionsPerHost: 8
+            maxConnectionsPerHost: AppSettings.maxConnectionsPerHost(defaultValue: 8)
         ))
     }
 }

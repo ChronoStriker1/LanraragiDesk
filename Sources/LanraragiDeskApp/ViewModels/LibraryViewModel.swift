@@ -27,6 +27,9 @@ final class LibraryViewModel: ObservableObject {
     @Published var query: String = ""
     @Published var layout: Layout = .grid
     @Published var sort: Sort = .newestAdded
+    @Published var newOnly: Bool = false
+    @Published var untaggedOnly: Bool = false
+    @Published var category: String = ""
 
     @Published private(set) var arcids: [String] = []
     @Published private(set) var isLoading: Bool = false
@@ -98,9 +101,9 @@ final class LibraryViewModel: ObservableObject {
         return try await client.search(
             start: start,
             filter: query,
-            category: "",
-            newOnly: false,
-            untaggedOnly: false,
+            category: category,
+            newOnly: newOnly,
+            untaggedOnly: untaggedOnly,
             sortBy: sortBy,
             order: order
         )
@@ -115,7 +118,7 @@ final class LibraryViewModel: ObservableObject {
             baseURL: profile.baseURL,
             apiKey: apiKey,
             acceptLanguage: profile.language,
-            maxConnectionsPerHost: 8
+            maxConnectionsPerHost: AppSettings.maxConnectionsPerHost(defaultValue: 8)
         ))
     }
 }

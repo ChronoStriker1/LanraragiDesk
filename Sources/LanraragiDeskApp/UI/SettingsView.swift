@@ -8,10 +8,47 @@ struct SettingsView: View {
     @State private var tagRefreshStatus: String?
     @State private var thumbsJobStatus: String?
     @State private var forceThumbs: Bool = false
+    @State private var maxConnectionsPerHost: Int = 8
 
     @AppStorage("reader.readingDirection") private var readingDirectionRaw: String = ReaderDirection.ltr.rawValue
+    @AppStorage("debug.showFrameNumbers") private var showFrameNumbers: Bool = false
 
     var body: some View {
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: 18) {
+                if let profile = appModel.selectedProfile {
+                    ConnectionHeaderCard(profile: profile)
+                        .environmentObject(appModel)
+                }
+
+                settingsCard
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(.bottom, 12)
+        }
+        .scrollIndicators(.visible)
+        .onAppear {
+            maxConnectionsPerHost = AppSettings.maxConnectionsPerHost(defaultValue: 8)
+            tagMinWeight = UserDefaults.standard.integer(forKey: "tags.minWeight")
+            if tagMinWeight == 0 {
+                // A bit of signal by default without being too strict.
+                tagMinWeight = 2
+            }
+            let ttl = UserDefaults.standard.integer(forKey: "tags.ttlHours")
+            tagTTLHours = ttl > 0 ? ttl : 24
+        }
+        .onChange(of: tagMinWeight) { _, v in
+            UserDefaults.standard.set(v, forKey: "tags.minWeight")
+        }
+        .onChange(of: tagTTLHours) { _, v in
+            UserDefaults.standard.set(v, forKey: "tags.ttlHours")
+        }
+        .onChange(of: maxConnectionsPerHost) { _, v in
+            UserDefaults.standard.set(max(1, min(32, v)), forKey: AppSettings.maxConnectionsKey)
+        }
+    }
+
+    private var settingsCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Settings")
@@ -23,6 +60,17 @@ struct SettingsView: View {
             }
 
             Divider()
+
+            GroupBox("UI labels") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle("Show region numbers", isOn: $showFrameNumbers)
+                        .font(.callout)
+                    Text("Adds numbered overlays to key panels so you can refer to specific areas when requesting changes.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(8)
+            }
 
             GroupBox("Reader") {
                 VStack(alignment: .leading, spacing: 12) {
@@ -39,6 +87,25 @@ struct SettingsView: View {
                     .frame(width: 320)
 
                     Text("This swaps the on-screen Next/Previous buttons and arrow-key behavior. Page numbers still increase normally.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(8)
+            }
+
+            GroupBox("Performance") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Control how aggressively the app talks to your server.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack(spacing: 12) {
+                        Stepper("Max connections: \(maxConnectionsPerHost)", value: $maxConnectionsPerHost, in: 1...32)
+                            .frame(width: 220, alignment: .leading)
+                        Spacer()
+                    }
+
+                    Text("Lower this if scans make your Mac feel slow or your server struggles. Higher can speed up scans on fast servers.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -101,21 +168,6 @@ struct SettingsView: View {
         .padding(18)
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .onAppear {
-            tagMinWeight = UserDefaults.standard.integer(forKey: "tags.minWeight")
-            if tagMinWeight == 0 {
-                // A bit of signal by default without being too strict.
-                tagMinWeight = 2
-            }
-            let ttl = UserDefaults.standard.integer(forKey: "tags.ttlHours")
-            tagTTLHours = ttl > 0 ? ttl : 24
-        }
-        .onChange(of: tagMinWeight) { _, v in
-            UserDefaults.standard.set(v, forKey: "tags.minWeight")
-        }
-        .onChange(of: tagTTLHours) { _, v in
-            UserDefaults.standard.set(v, forKey: "tags.ttlHours")
-        }
     }
 
     private func refreshTagStats() async {
@@ -154,7 +206,7 @@ struct SettingsView: View {
                 baseURL: profile.baseURL,
                 apiKey: apiKey,
                 acceptLanguage: profile.language,
-                maxConnectionsPerHost: 4
+                maxConnectionsPerHost: AppSettings.maxConnectionsPerHost(defaultValue: 8)
             ))
 
             let job = try await client.regenerateThumbnails(force: forceThumbs)

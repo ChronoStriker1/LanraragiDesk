@@ -107,6 +107,7 @@ struct PairReviewView: View {
         .padding(14)
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .debugFrameNumber(1)
     }
 
     private var filteredPairs: [DuplicateScanResult.Pair] {
@@ -159,6 +160,7 @@ struct PairReviewView: View {
         .scrollIndicators(.visible)
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .debugFrameNumber(2)
     }
 
     @ViewBuilder
@@ -227,6 +229,7 @@ struct PairReviewView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(.thinMaterial)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .debugFrameNumber(3)
             )
         }
 
@@ -240,6 +243,7 @@ struct PairReviewView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(.thinMaterial)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .debugFrameNumber(3)
             )
         }
 
@@ -253,6 +257,7 @@ struct PairReviewView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(.thinMaterial)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .debugFrameNumber(3)
             )
         }
 
@@ -273,6 +278,7 @@ struct PairReviewView: View {
                     self.selection = next
                 }
             )
+            .debugFrameNumber(3)
         )
     }
 }
@@ -365,6 +371,7 @@ private struct PairCompareView: View {
                     archives: archives,
                     scrollMinY: $pagesScrollMinY
                 )
+                .debugFrameNumber(7)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .frame(minHeight: ReviewLayout.minPagesViewportHeight)
                 .layoutPriority(1)
@@ -374,6 +381,7 @@ private struct PairCompareView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .debugFrameNumber(4)
         .confirmationDialog(
             "Delete Archive?",
             isPresented: Binding(
@@ -473,6 +481,7 @@ private struct PairCompareView: View {
             )
             .id(pair.arcidA)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .debugFrameNumber(5)
 
             ZStack(alignment: .top) {
                 Divider()
@@ -480,6 +489,7 @@ private struct PairCompareView: View {
                     .frame(maxHeight: .infinity)
             }
             .frame(width: 28)
+            .debugFrameNumber(6)
 
             ArchiveComparePanel(
                 profile: profile,
@@ -507,6 +517,7 @@ private struct PairCompareView: View {
             )
             .id(pair.arcidB)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .debugFrameNumber(8)
         }
     }
 

@@ -5,10 +5,8 @@ import LanraragiKit
 struct RootView: View {
     @EnvironmentObject private var appModel: AppModel
 
-    @State private var editingProfile: Profile?
-    @State private var showingSetup = false
     @State private var showNotMatchesPanel: Bool = false
-    @State private var section: Section = .duplicates
+    @State private var section: Section = .library
 
     enum Section: Hashable {
         case library
@@ -39,14 +37,11 @@ struct RootView: View {
         .onAppear {
             appModel.selectFirstIfNeeded()
             if appModel.selectedProfile == nil {
-                showingSetup = true
+                appModel.profileEditorMode = .add
             }
         }
-        .sheet(item: $editingProfile) { profile in
-            ProfileEditorView(mode: .edit(profile))
-        }
-        .sheet(isPresented: $showingSetup) {
-            ProfileEditorView(mode: .add)
+        .sheet(item: $appModel.profileEditorMode) { mode in
+            ProfileEditorView(mode: mode)
         }
         .onChange(of: appModel.duplicates.resultRevision) { _, _ in
             // Auto-focus the review UI after a scan completes.
@@ -83,23 +78,18 @@ struct RootView: View {
             NavigationLink(value: Section.library) {
                 Label("Library", systemImage: "books.vertical")
             }
+
+            Divider()
+
             NavigationLink(value: Section.duplicates) {
                 Label("Duplicates", systemImage: "rectangle.stack.badge.magnifyingglass")
             }
 
+            // Only show Review when it's usable (after a scan produced results).
             if appModel.duplicates.result != nil {
                 NavigationLink(value: Section.review) {
                     Label("Review", systemImage: "square.stack.3d.up")
                 }
-            } else {
-                Label("Review", systemImage: "square.stack.3d.up")
-                    .foregroundStyle(.secondary)
-            }
-
-            Divider()
-
-            NavigationLink(value: Section.settings) {
-                Label("Settings", systemImage: "gearshape")
             }
 
             NavigationLink(value: Section.activity) {
@@ -113,6 +103,12 @@ struct RootView: View {
             NavigationLink(value: Section.plugins) {
                 Label("Plugins", systemImage: "puzzlepiece.extension")
             }
+
+            Divider()
+
+            NavigationLink(value: Section.settings) {
+                Label("Settings", systemImage: "gearshape")
+            }
         }
         .listStyle(.sidebar)
         .navigationTitle("LanraragiDesk")
@@ -121,10 +117,6 @@ struct RootView: View {
     @ViewBuilder
     private func detail(profile: Profile) -> some View {
         VStack(alignment: .leading, spacing: 18) {
-            if section != .review {
-                header(profile: profile)
-            }
-
             switch section {
             case .library:
                 LibraryView(profile: profile)
@@ -188,36 +180,6 @@ struct RootView: View {
             .background(.thinMaterial)
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         }
-    }
-
-    private func header(profile: Profile) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("LanraragiDesk")
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
-                Text(profile.baseURL.absoluteString)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            HStack(spacing: 10) {
-                Button(appModel.connectionStatus == .testing ? "Testing…" : "Test Connection") {
-                    Task { await appModel.testConnection() }
-                }
-                .disabled(appModel.connectionStatus == .testing)
-
-                connectionPill
-
-                Button("Connection…") {
-                    editingProfile = profile
-                }
-            }
-        }
-        .padding(18)
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
     private func runCard(profile: Profile) -> some View {
@@ -342,41 +304,5 @@ struct RootView: View {
         }
     }
 
-    private var connectionPill: some View {
-        Group {
-            switch appModel.connectionStatus {
-            case .idle:
-                Text("Not tested")
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(.gray.opacity(0.15))
-                    .clipShape(Capsule())
-            case .testing:
-                Text("Testing")
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(.blue.opacity(0.15))
-                    .clipShape(Capsule())
-            case .ok(let info):
-                Text("OK\(info.version.map { " • v\($0)" } ?? "")")
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(.green.opacity(0.15))
-                    .clipShape(Capsule())
-            case .unauthorized:
-                Text("Unauthorized")
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(.orange.opacity(0.15))
-                    .clipShape(Capsule())
-            case .failed:
-                Text("Failed")
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(.red.opacity(0.15))
-                    .clipShape(Capsule())
-            }
-        }
-        .font(.caption)
-    }
+    // Connection UI lives in Settings.
 }

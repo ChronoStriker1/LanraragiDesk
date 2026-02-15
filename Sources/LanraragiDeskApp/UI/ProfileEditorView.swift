@@ -1,29 +1,17 @@
 import SwiftUI
 
 struct ProfileEditorView: View {
-    enum Mode: Identifiable {
-        case add
-        case edit(Profile)
-
-        var id: String {
-            switch self {
-            case .add: return "add"
-            case .edit(let p): return p.id.uuidString
-            }
-        }
-    }
-
     @EnvironmentObject private var appModel: AppModel
     @Environment(\.dismiss) private var dismiss
 
-    let mode: Mode
+    let mode: ProfileEditorMode
 
     @State private var name: String = ""
     @State private var baseURLString: String = ""
     @State private var language: String = "en-US"
     @State private var apiKey: String = ""
 
-    init(mode: Mode) {
+    init(mode: ProfileEditorMode) {
         self.mode = mode
     }
 

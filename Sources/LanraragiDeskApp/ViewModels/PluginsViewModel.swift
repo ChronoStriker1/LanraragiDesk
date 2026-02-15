@@ -21,7 +21,7 @@ final class PluginsViewModel: ObservableObject {
                 baseURL: profile.baseURL,
                 apiKey: apiKey,
                 acceptLanguage: profile.language,
-                maxConnectionsPerHost: 6
+                maxConnectionsPerHost: AppSettings.maxConnectionsPerHost(defaultValue: 8)
             ))
 
             plugins = try await client.listPlugins()
@@ -40,10 +40,9 @@ final class PluginsViewModel: ObservableObject {
             baseURL: profile.baseURL,
             apiKey: apiKey,
             acceptLanguage: profile.language,
-            maxConnectionsPerHost: 6
+            maxConnectionsPerHost: AppSettings.maxConnectionsPerHost(defaultValue: 8)
         ))
 
         return try await client.queuePlugin(pluginID: pluginID, arcid: arcid, arg: arg)
     }
 }
-
