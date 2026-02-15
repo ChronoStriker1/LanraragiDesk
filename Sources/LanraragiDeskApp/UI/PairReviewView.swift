@@ -8,6 +8,7 @@ private enum ReviewLayout {
     static let pairListWidth: CGFloat = 112 * 2
     // Must be >= one page preview tile height (tileHeight is capped at 240).
     static let minPagesViewportHeight: CGFloat = 260
+    static let topBarSpacingToPages: CGFloat = 8
 }
 
 struct PairReviewView: View {
@@ -353,9 +354,12 @@ private struct PairCompareView: View {
     var body: some View {
         GeometryReader { geo in
             let available = geo.size.height
-            let expandedTop = min(520, max(220, available * 0.46))
-            // Collapsed state should keep header + metadata; Tags collapse away.
-            let collapsedTop = min(320, max(180, available * 0.28))
+            // Pre-collapse: allocate most height to the archive panels (5/8), while reserving a
+            // minimum visible pages viewport (7).
+            let maxTopFromMinPages = max(180, available - ReviewLayout.minPagesViewportHeight - ReviewLayout.topBarSpacingToPages)
+            let expandedTop = max(240, min(maxTopFromMinPages, available * 0.82))
+            // Collapsed state keeps header + metadata; Tags collapse away.
+            let collapsedTop = max(200, min(expandedTop, available * 0.34))
             let topHeight = isDetailsCollapsed ? collapsedTop : expandedTop
 
             VStack(alignment: .leading, spacing: 8) {
@@ -554,7 +558,6 @@ private struct ArchiveComparePanel: View {
                 arcid: arcid,
                 meta: meta,
                 thumbnails: thumbnails,
-                collapsed: collapsed,
                 onNotMatch: onNotMatch,
                 onDelete: onDelete
             )
@@ -701,7 +704,6 @@ private struct ArchiveSideHeader: View {
     let arcid: String
     let meta: ArchiveMetadata?
     let thumbnails: ThumbnailLoader
-    let collapsed: Bool
     let onNotMatch: () -> Void
     let onDelete: () -> Void
 
@@ -721,44 +723,42 @@ private struct ArchiveSideHeader: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: collapsed ? 4 : 6) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(displayTitle)
                     .font(.headline)
-                    .lineLimit(collapsed ? 1 : 2)
+                    .lineLimit(2)
 
-                if !collapsed {
-                    HStack(spacing: 8) {
-                        if let pages = meta?.pagecount {
-                            Text("\(pages) pages")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                HStack(spacing: 8) {
+                    if let pages = meta?.pagecount {
+                        Text("\(pages) pages")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
 
-                        if let ext = meta?.fileExtension, !ext.isEmpty {
-                            Text(ext.uppercased())
-                                .font(.caption2)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(.quaternary.opacity(0.55))
-                                .clipShape(Capsule())
-                        }
+                    if let ext = meta?.fileExtension, !ext.isEmpty {
+                        Text(ext.uppercased())
+                            .font(.caption2)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.quaternary.opacity(0.55))
+                            .clipShape(Capsule())
                     }
                 }
             }
 
             Spacer(minLength: 0)
 
-            HStack(spacing: collapsed ? 6 : 8) {
+            HStack(spacing: 8) {
                 Button("Not a match") { onNotMatch() }
                     .buttonStyle(.borderedProminent)
-                    .controlSize(collapsed ? .mini : .small)
+                    .controlSize(.small)
 
                 Button(role: .destructive) { onDelete() } label: {
                     Image(systemName: "trash")
                         .imageScale(.medium)
                 }
                 .buttonStyle(.bordered)
-                .controlSize(collapsed ? .mini : .small)
+                .controlSize(.small)
                 .help("Delete this archive from LANraragi")
             }
         }
@@ -793,7 +793,13 @@ private struct ArchiveSideDetails: View {
             MetaRow(label: "Size", value: stringOrDash(sizeString(meta?.size)), different: meta?.size != other?.size)
             MetaRow(label: "Filename", value: stringOrDash(meta?.filename), different: normalized(meta?.filename) != normalized(other?.filename), lineLimit: 2)
             MetaRow(label: "Added", value: stringOrDash(addedString(from: meta?.tags)), different: addedString(from: meta?.tags) != addedString(from: other?.tags))
-            MetaRow(label: "Summary", value: stringOrDash(meta?.summary), different: normalized(meta?.summary) != normalized(other?.summary), lineLimit: 2)
+            MetaRow(label: "Summary", value: stringOrDash(meta?.summary), different: normalized(meta?.summary) != normalized(other?.summary), lineLimit: 4)
+            MetaRow(
+                label: "Source",
+                value: stringOrDash(sourceString(from: meta?.tags)),
+                different: normalized(sourceString(from: meta?.tags)) != normalized(sourceString(from: other?.tags)),
+                lineLimit: 3
+            )
         }
         .font(.caption)
     }
@@ -820,6 +826,24 @@ private struct ArchiveSideDetails: View {
         return nil
     }
 
+    private func sourceString(from tags: String?) -> String? {
+        // Common conventions: `source:<url>` or `source_url:<url>`.
+        let raw = tags ?? ""
+        var out: [String] = []
+        out.reserveCapacity(2)
+        for part in raw.split(separator: ",") {
+            let t = part.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !t.isEmpty else { continue }
+            if t.hasPrefix("source:") {
+                out.append(String(t.dropFirst("source:".count)))
+            } else if t.hasPrefix("source_url:") {
+                out.append(String(t.dropFirst("source_url:".count)))
+            }
+        }
+        let uniq = Array(Set(out)).sorted()
+        return uniq.isEmpty ? nil : uniq.joined(separator: "\n")
+    }
+
     private func normalized(_ s: String?) -> String {
         (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -844,6 +868,7 @@ private struct MetaRow: View {
 
             Text(value)
                 .lineLimit(lineLimit)
+                .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 3)
                 .padding(.horizontal, 7)
@@ -928,6 +953,13 @@ private struct TagChipWrap: View {
 }
 
 private enum TagCompareGrouper {
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return f
+    }()
+
     struct Row {
         let key: String
         let title: String
@@ -956,6 +988,8 @@ private enum TagCompareGrouper {
             case "group": return "Group"
             case "tag": return "Tags"
             case "uploader": return "Uploader"
+            case "date_added": return "Added"
+            case "upload_time": return "Uploaded"
             case "other": return "Other"
             default:
                 return key.prefix(1).uppercased() + key.dropFirst()
@@ -1011,13 +1045,31 @@ private enum TagCompareGrouper {
             let p = t.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
             if p.count == 2 {
                 let key = String(p[0]).lowercased()
-                let value = String(p[1])
+                var value = String(p[1])
+                value = formatUnixTimeIfApplicable(key: key, value: value) ?? value
                 buckets[key, default: []].insert(value)
             } else {
                 buckets["other", default: []].insert(t)
             }
         }
         return buckets
+    }
+
+    private static func formatUnixTimeIfApplicable(key: String, value: String) -> String? {
+        // LANraragi often uses unix timestamps in tags like `date_added:1712345678` or `upload_time:...`.
+        let keys = Set(["date_added", "upload_time", "last_read", "lastreadtime"])
+        guard keys.contains(key) else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let raw = Double(trimmed) else { return nil }
+        let seconds: TimeInterval
+        // Heuristic: treat >= 1e12 as milliseconds.
+        if raw >= 1_000_000_000_000 {
+            seconds = raw / 1000.0
+        } else {
+            seconds = raw
+        }
+        guard seconds > 0 else { return nil }
+        return timeFormatter.string(from: Date(timeIntervalSince1970: seconds))
     }
 }
 
