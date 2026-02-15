@@ -10,7 +10,10 @@ This is a personal project intended to be published on GitHub (not the Mac App S
   - Grid or list layout
   - Server-side paging (scales to large libraries)
   - Default sort: **Newest added first** (`date_added desc`), with an automatic fallback to Title if the server rejects it
-  - Search + basic filters (New only, Untagged only, Category)
+  - Cover overlays: **NEW**, **Date added**, **Page count**
+  - Hover a cover to see full **Title**, **Summary**, and grouped **Tags** (click tags to add them to search)
+  - Search + tag suggestions (shown under the search field)
+  - Filters: New only, Untagged only, Category (server-backed)
   - Right-click: open Reader, edit metadata, copy archive id
 - **Duplicates**
   - Local cover fingerprint index (rebuilt at the start of every scan)
@@ -80,12 +83,6 @@ Then build/run the `LanraragiDesk` scheme.
 - “Not a match” decisions are stored locally and are not written back to LANraragi.
 - Network concurrency is configurable in **Settings → Performance** so scans don’t monopolize your Mac.
 
-## Security
-
-- API keys are stored in **Keychain**.
-- Profiles are stored on disk without secrets.
-- Do not paste API keys into issues/PRs.
-
 ## Dev
 
 Requirements:
@@ -95,6 +92,10 @@ Requirements:
 Project layout:
 - `Packages/LanraragiKit`: LANraragi API client + dedup/index core (SwiftPM)
 - `Sources/LanraragiDeskApp`: macOS app (SwiftUI)
+
+## Contributing
+
+See `CONTRIBUTING.md` (includes a rule to keep Markdown docs updated alongside code changes).
 
 ## Roadmap (short)
 

@@ -101,15 +101,13 @@ struct LibraryView: View {
                     TextField("Search…", text: $vm.query)
                         .textFieldStyle(.roundedBorder)
                         .focused($searchFocused)
-                        .onSubmit { vm.refresh(profile: profile) }
+                        .onSubmit { handleSearchSubmit() }
                         .onChange(of: vm.query) { _, _ in
                             queueSuggestionRefresh()
                         }
                         .frame(width: 520)
 
-                    if searchFocused || !tagSuggestions.isEmpty {
-                        tagSuggestionList
-                    }
+                    tagSuggestionList
                 }
                 .zIndex(10)
 
@@ -186,15 +184,16 @@ struct LibraryView: View {
         let minChars = info.hasTagPrefix ? 1 : 2
         let eligible = q.count >= minChars
 
+        // Always reserve space under the search field so suggestions are reliably visible.
         return GroupBox {
             if !eligible {
-                Text("Type tag: then start typing to see tag suggestions.")
+                Text("Start typing to see tag suggestions.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 4)
             } else if tagSuggestions.isEmpty {
-                Text("No tag suggestions yet.")
+                Text("No suggestions.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -231,6 +230,8 @@ struct LibraryView: View {
             }
         }
         .frame(width: 520, alignment: .leading)
+        .opacity(searchFocused || eligible ? 1 : 0)
+        .animation(.easeInOut(duration: 0.12), value: searchFocused)
     }
 
     private var pinnedCategoryButtons: some View {
@@ -268,6 +269,22 @@ struct LibraryView: View {
         let token = "tag:\(t)"
         let needsSpace = !vm.query.isEmpty && !vm.query.hasSuffix(" ")
         vm.query = vm.query + (needsSpace ? " " : "") + token + " "
+        vm.refresh(profile: profile)
+    }
+
+    private func handleSearchSubmit() {
+        let info = currentTokenInfo()
+        let q = info.lookupPrefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        let minChars = info.hasTagPrefix ? 1 : 2
+        let eligible = q.count >= minChars
+
+        // If suggestions are visible, Enter completes the top suggestion first; press Search (button)
+        // or Enter again to run the search.
+        if eligible, let first = tagSuggestions.first, !vm.query.hasSuffix(" ") {
+            applySuggestion(first.value)
+            return
+        }
+
         vm.refresh(profile: profile)
     }
 

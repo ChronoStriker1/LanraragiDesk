@@ -11,14 +11,17 @@ It is intentionally pragmatic and may be blunt.
   - Risk: if the user is *on* Review and `result` becomes nil (clear results/reset/index rebuild), the sidebar hides the item and selection binding may behave oddly. Confirm and adjust logic to: show Review when `section == .review || duplicates.result != nil`.
   - File: `Sources/LanraragiDeskApp/UI/RootView.swift`
 
-- Region numbers (formerly "frame numbers") not showing:
-  - Toggle is `Settings -> UI labels -> Show region numbers` stored in `debug.showFrameNumbers`.
-  - Overlays are currently applied only to Review UI panels.
-  - Verify: toggle actually toggles overlays; confirm overlays don't get hidden by other overlays/materials; ensure Settings is scrollable (it is now).
+## Recently Fixed
+
+- Region numbers (UI labels):
+  - Fixed: `Settings -> UI labels -> Show region numbers` now applies overlays across the app (not just Review).
   - Files:
     - `Sources/LanraragiDeskApp/UI/Components/DebugFrameNumber.swift`
-    - `Sources/LanraragiDeskApp/UI/PairReviewView.swift`
     - `Sources/LanraragiDeskApp/UI/SettingsView.swift`
+    - `Sources/LanraragiDeskApp/UI/LibraryView.swift`
+    - `Sources/LanraragiDeskApp/UI/ActivityView.swift`
+    - `Sources/LanraragiDeskApp/UI/BatchView.swift`
+    - `Sources/LanraragiDeskApp/UI/PluginsView.swift`
 
 - Performance setting expectations:
   - `network.maxConnectionsPerHost` affects URLSession `httpMaximumConnectionsPerHost` only.
@@ -34,6 +37,8 @@ It is intentionally pragmatic and may be blunt.
 - Library (search and quality):
   - Tag completion UI exists, but matching is prefix-only and tokenization is simple.
   - Add a small "help" on LANraragi query syntax and negation (`-tag:`).
+  - Category selector is now server-backed (pinned categories show as buttons).
+  - Tag suggestions are shown under the search field; hover popover tag chips can be clicked to add to search.
   - Add server capability detection for `date_added` sort (today it falls back on HTTP 400/422 only).
   - Consider adding "Open in browser" from library context menu.
   - Files:
@@ -105,7 +110,7 @@ It is intentionally pragmatic and may be blunt.
 
 - Settings:
   - Connection header appears only on Settings.
-  - "Show region numbers" toggles overlays on Review.
+  - "Show region numbers" toggles overlays on key panels.
   - Max connections changes influence behavior (at least URLSession limits).
 
 - Sidebar:
@@ -118,4 +123,12 @@ It is intentionally pragmatic and may be blunt.
 - Library:
   - Default sort tries newest-first and falls back gracefully with banner.
   - Search suggestions do not spam network (debounced).
+  - Cover overlays: NEW/date/page count.
+  - Hover popover shows full title/summary/tags; clicking a tag adds it to search.
 
+## Process
+
+- Keep Markdown docs updated alongside code changes:
+  - `README.md` (user-facing)
+  - `CODEX_TODO.md` (internal tracking)
+  - `CONTRIBUTING.md` (contributor guidance)
