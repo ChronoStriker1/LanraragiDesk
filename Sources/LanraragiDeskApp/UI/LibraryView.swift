@@ -164,8 +164,24 @@ private struct LibraryCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            CoverThumb(profile: profile, arcid: arcid, thumbnails: appModel.thumbnails, size: .init(width: 160, height: 210))
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            ZStack(alignment: .topLeading) {
+                CoverThumb(profile: profile, arcid: arcid, thumbnails: appModel.thumbnails, size: .init(width: 160, height: 210))
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+                Button {
+                    appModel.selection.toggle(arcid)
+                } label: {
+                    Image(systemName: appModel.selection.contains(arcid) ? "checkmark.circle.fill" : "circle")
+                        .imageScale(.large)
+                        .foregroundStyle(appModel.selection.contains(arcid) ? .green : .secondary)
+                        .padding(8)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .help("Select for batch operations")
+                .padding(8)
+            }
 
             Text(title)
                 .font(.callout)
@@ -201,6 +217,15 @@ private struct LibraryRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
+            Button {
+                appModel.selection.toggle(arcid)
+            } label: {
+                Image(systemName: appModel.selection.contains(arcid) ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(appModel.selection.contains(arcid) ? .green : .secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Select for batch operations")
+
             CoverThumb(profile: profile, arcid: arcid, thumbnails: appModel.thumbnails, size: .init(width: 54, height: 72))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
@@ -233,4 +258,3 @@ private struct LibraryRow: View {
         }
     }
 }
-

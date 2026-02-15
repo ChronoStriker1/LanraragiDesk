@@ -16,6 +16,7 @@ struct RootView: View {
         case review
         case settings
         case activity
+        case batch
     }
 
     var body: some View {
@@ -103,6 +104,10 @@ struct RootView: View {
             NavigationLink(value: Section.activity) {
                 Label("Activity", systemImage: "list.bullet.rectangle")
             }
+
+            NavigationLink(value: Section.batch) {
+                Label("Batch", systemImage: "square.stack.3d.forward.dottedline")
+            }
         }
         .listStyle(.sidebar)
         .navigationTitle("LanraragiDesk")
@@ -139,6 +144,9 @@ struct RootView: View {
                     .environmentObject(appModel)
             case .activity:
                 ActivityView()
+                    .environmentObject(appModel)
+            case .batch:
+                BatchView()
                     .environmentObject(appModel)
             }
 

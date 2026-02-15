@@ -14,6 +14,7 @@ final class AppModel: ObservableObject {
     let thumbnails: ThumbnailLoader
     let activity: ActivityStore
     let tagSuggestions: TagSuggestionStore
+    let selection: SelectionModel
 
     private var cancellables: Set<AnyCancellable> = []
 
@@ -23,6 +24,7 @@ final class AppModel: ObservableObject {
         self.thumbnails = ThumbnailLoader()
         self.activity = ActivityStore()
         self.tagSuggestions = TagSuggestionStore()
+        self.selection = SelectionModel()
         self.indexing = IndexingViewModel()
         self.duplicates = DuplicateScanViewModel(thumbnails: thumbnails, archives: archives)
 
@@ -41,6 +43,10 @@ final class AppModel: ObservableObject {
             .store(in: &cancellables)
 
         activity.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+
+        selection.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
     }
