@@ -354,7 +354,8 @@ private struct PairCompareView: View {
         GeometryReader { geo in
             let available = geo.size.height
             let expandedTop = min(520, max(220, available * 0.46))
-            let collapsedTop = min(240, max(120, available * 0.22))
+            // Collapsed state should keep header + metadata; Tags collapse away.
+            let collapsedTop = min(320, max(180, available * 0.28))
             let topHeight = isDetailsCollapsed ? collapsedTop : expandedTop
 
             VStack(alignment: .leading, spacing: 8) {
@@ -546,7 +547,7 @@ private struct ArchiveComparePanel: View {
     let onDelete: () -> Void
 
     var body: some View {
-        // "collapsed" = meta rows hidden; keep Tags visible (collapse up to the Tags section).
+        // "collapsed" = collapse Tags away (everything from the Tags section down).
         VStack(alignment: .leading, spacing: 10) {
             ArchiveSideHeader(
                 profile: profile,
@@ -558,17 +559,18 @@ private struct ArchiveComparePanel: View {
                 onDelete: onDelete
             )
 
-            ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 10) {
-                    if !collapsed {
-                        ArchiveSideDetails(meta: meta, other: other)
-                    }
+            ArchiveSideDetails(meta: meta, other: other)
+
+            if !collapsed {
+                ScrollView(.vertical) {
                     ArchiveSideTags(tagRows: tagRows, showingLeft: showingLeft)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 2)
+                        .padding(.trailing, 4)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 2)
+                .scrollIndicators(.visible)
+                .frame(maxHeight: .infinity, alignment: .top)
             }
-            .scrollIndicators(.visible)
         }
         .padding(collapsed ? 8 : 12)
         .background(.quaternary.opacity(0.35))
