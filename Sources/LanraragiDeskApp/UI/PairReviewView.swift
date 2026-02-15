@@ -351,25 +351,47 @@ private struct PairCompareView: View {
     @State private var isDetailsCollapsed: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            topBar
-                .animation(.snappy(duration: 0.2), value: isDetailsCollapsed)
-                .overlay(alignment: .topLeading) {
-                    if debugNumberedAreas { ReviewAreaBadge(4) }
-                }
+        GeometryReader { geo in
+            let available = geo.size.height
+            let expandedTop = min(520, max(220, available * 0.46))
+            let collapsedTop = min(240, max(120, available * 0.22))
+            let topHeight = isDetailsCollapsed ? collapsedTop : expandedTop
 
-            SyncedPagesGridView(
-                profile: profile,
-                arcidA: pair.arcidA,
-                arcidB: pair.arcidB,
-                archives: archives,
-                scrollMinY: $pagesScrollMinY
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .frame(minHeight: ReviewLayout.minPagesViewportHeight)
-            .layoutPriority(1)
-            .overlay(alignment: .topLeading) {
-                if debugNumberedAreas { ReviewAreaBadge(7) }
+            VStack(alignment: .leading, spacing: 8) {
+                topBar
+                    // Keep 5 and 8 mirrored in height; overflow scrolls internally.
+                    .frame(height: topHeight, alignment: .top)
+                    .animation(.snappy(duration: 0.2), value: isDetailsCollapsed)
+                    .overlay(alignment: .topLeading) {
+                        if debugNumberedAreas { ReviewAreaBadge(4) }
+                    }
+
+                SyncedPagesGridView(
+                    profile: profile,
+                    arcidA: pair.arcidA,
+                    arcidB: pair.arcidB,
+                    archives: archives,
+                    scrollMinY: $pagesScrollMinY
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(minHeight: ReviewLayout.minPagesViewportHeight)
+                .layoutPriority(1)
+                .overlay(alignment: .topLeading) {
+                    if debugNumberedAreas { ReviewAreaBadge(7) }
+                }
+                .overlay(alignment: .topTrailing) {
+                    if debugNumberedAreas {
+                        Text("y=\(Int(pagesScrollMinY))  collapsed=\(isDetailsCollapsed ? "1" : "0")")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Capsule())
+                            .padding(8)
+                            .allowsHitTesting(false)
+                    }
+                }
             }
         }
         .padding(14)
@@ -462,7 +484,7 @@ private struct PairCompareView: View {
                     ReviewAreaBadge(6)
                 }
             }
-            .frame(width: 1)
+            .frame(width: 28)
 
             ArchiveComparePanel(
                 profile: profile,
@@ -525,7 +547,7 @@ private struct ArchiveComparePanel: View {
 
     var body: some View {
         // "collapsed" = meta rows hidden; keep Tags visible (collapse up to the Tags section).
-        VStack(alignment: .leading, spacing: collapsed ? 8 : 10) {
+        VStack(alignment: .leading, spacing: 10) {
             ArchiveSideHeader(
                 profile: profile,
                 arcid: arcid,
@@ -536,10 +558,17 @@ private struct ArchiveComparePanel: View {
                 onDelete: onDelete
             )
 
-            if !collapsed {
-                ArchiveSideDetails(meta: meta, other: other)
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 10) {
+                    if !collapsed {
+                        ArchiveSideDetails(meta: meta, other: other)
+                    }
+                    ArchiveSideTags(tagRows: tagRows, showingLeft: showingLeft)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 2)
             }
-            ArchiveSideTags(tagRows: tagRows, showingLeft: showingLeft)
+            .scrollIndicators(.visible)
         }
         .padding(collapsed ? 8 : 12)
         .background(.quaternary.opacity(0.35))
@@ -548,6 +577,7 @@ private struct ArchiveComparePanel: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 1)
         }
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 }
 
@@ -808,7 +838,7 @@ private struct MetaRow: View {
         HStack(alignment: .top, spacing: 10) {
             Text(label)
                 .foregroundStyle(.secondary)
-                .frame(width: 72, alignment: .leading)
+                .frame(width: 64, alignment: .leading)
 
             Text(value)
                 .lineLimit(lineLimit)
@@ -877,7 +907,7 @@ private struct TagChipWrap: View {
     let highlight: Set<String>
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 84), spacing: 6)], alignment: .leading, spacing: 6) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 70), spacing: 6)], alignment: .leading, spacing: 6) {
             ForEach(tags, id: \.self) { t in
                 let style: AnyShapeStyle = highlight.contains(t)
                     ? AnyShapeStyle(Color.yellow.opacity(0.18))
@@ -1191,15 +1221,27 @@ private struct ScrollOffsetObserver: NSViewRepresentable {
         private var onChange: (CGFloat) -> Void
         private weak var scrollView: NSScrollView?
         private weak var clipView: NSClipView?
+        private var attachRetries: Int = 0
 
         init(onChange: @escaping (CGFloat) -> Void) {
             self.onChange = onChange
         }
 
         func attach(to view: NSView) {
-            guard let sv = view.enclosingScrollView else { return }
+            guard let sv = findScrollView(from: view) else {
+                // SwiftUI sometimes inserts the representable before it has a superview; retry briefly.
+                if attachRetries < 12 {
+                    attachRetries += 1
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self, weak view] in
+                        guard let self, let view else { return }
+                        self.attach(to: view)
+                    }
+                }
+                return
+            }
             if scrollView === sv { return }
             scrollView = sv
+            attachRetries = 0
 
             if let old = clipView {
                 NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: old)
@@ -1217,6 +1259,15 @@ private struct ScrollOffsetObserver: NSViewRepresentable {
 
             // Initial update.
             updateFromClip(clip)
+        }
+
+        private func findScrollView(from view: NSView) -> NSScrollView? {
+            var v: NSView? = view
+            while let cur = v {
+                if let sv = cur as? NSScrollView { return sv }
+                v = cur.superview
+            }
+            return view.enclosingScrollView
         }
 
         @objc private func boundsDidChange(_ note: Notification) {
