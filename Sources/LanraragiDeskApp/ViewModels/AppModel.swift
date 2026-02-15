@@ -12,6 +12,8 @@ final class AppModel: ObservableObject {
     @Published var duplicates: DuplicateScanViewModel
     let archives: ArchiveLoader
     let thumbnails: ThumbnailLoader
+    let activity: ActivityStore
+    let tagSuggestions: TagSuggestionStore
 
     private var cancellables: Set<AnyCancellable> = []
 
@@ -19,6 +21,8 @@ final class AppModel: ObservableObject {
         self.profileStore = ProfileStore()
         self.archives = ArchiveLoader()
         self.thumbnails = ThumbnailLoader()
+        self.activity = ActivityStore()
+        self.tagSuggestions = TagSuggestionStore()
         self.indexing = IndexingViewModel()
         self.duplicates = DuplicateScanViewModel(thumbnails: thumbnails, archives: archives)
 
@@ -33,6 +37,10 @@ final class AppModel: ObservableObject {
             .store(in: &cancellables)
 
         duplicates.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+
+        activity.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
     }

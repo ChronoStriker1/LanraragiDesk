@@ -189,6 +189,11 @@ public final class LANraragiClient: @unchecked Sendable {
         return try await postJSON(path: "/api/regen_thumbs", queryItems: queryItems, body: nil)
     }
 
+    public func getDatabaseStats(minWeight: Int = 0) async throws -> DatabaseStats {
+        let queryItems = [URLQueryItem(name: "minweight", value: String(max(0, minWeight)))]
+        return try await getJSON(path: "/api/database/stats", queryItems: queryItems)
+    }
+
     public func getMinionStatus(job: Int) async throws -> MinionStatus {
         try await getJSON(path: "/api/minion/\(job)")
     }

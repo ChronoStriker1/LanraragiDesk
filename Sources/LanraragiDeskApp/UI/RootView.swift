@@ -15,6 +15,7 @@ struct RootView: View {
         case duplicates
         case review
         case settings
+        case activity
     }
 
     var body: some View {
@@ -98,6 +99,10 @@ struct RootView: View {
             NavigationLink(value: Section.settings) {
                 Label("Settings", systemImage: "gearshape")
             }
+
+            NavigationLink(value: Section.activity) {
+                Label("Activity", systemImage: "list.bullet.rectangle")
+            }
         }
         .listStyle(.sidebar)
         .navigationTitle("LanraragiDesk")
@@ -131,6 +136,10 @@ struct RootView: View {
                 }
             case .settings:
                 SettingsView()
+                    .environmentObject(appModel)
+            case .activity:
+                ActivityView()
+                    .environmentObject(appModel)
             }
 
             Spacer(minLength: 0)
