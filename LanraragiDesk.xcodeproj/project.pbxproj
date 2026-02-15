@@ -26,6 +26,7 @@
 		DDDB37F2CDB1F904FAFF1F3C /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3A8A1896B87FF041125DD84 /* KeychainService.swift */; };
 		DE9EFC3A45B2EDD7BBEEF9A0 /* ProfileEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53E76144EA3A608FC23C8A94 /* ProfileEditorView.swift */; };
 		E53EB607E67003100933762A /* Profile.swift in Sources */ = {isa = PBXBuildFile; fileRef = B86D008FE0E3FC57FBA6B31A /* Profile.swift */; };
+		E5E8202DF4A40005368F7C48 /* ArchiveMetadataEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A28E2C8C9D122163053F6A1 /* ArchiveMetadataEditorView.swift */; };
 		ECF1462FD0BB7D27A7E48FE3 /* ErrorPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 301B8E3B58DBC2553F8AF7D8 /* ErrorPresenter.swift */; };
 		F71E979E397E14D574791B80 /* ProfileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0705B9BBB876D1BB705AA53 /* ProfileStore.swift */; };
 		FA5BDE6D31A4CC65C617F51F /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 358F4E9A6F34DDEB4C2966B1 /* RootView.swift */; };
@@ -36,6 +37,7 @@
 		358F4E9A6F34DDEB4C2966B1 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		367FD6B12C893A96F63201E8 /* LanraragiDesk.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LanraragiDesk.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		459B7EE09D6D1F08753A893C /* ThumbnailLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailLoader.swift; sourceTree = "<group>"; };
+		4A28E2C8C9D122163053F6A1 /* ArchiveMetadataEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArchiveMetadataEditorView.swift; sourceTree = "<group>"; };
 		53E76144EA3A608FC23C8A94 /* ProfileEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileEditorView.swift; sourceTree = "<group>"; };
 		54B3E61F93FAE6A29E18E911 /* DuplicateScanViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuplicateScanViewModel.swift; sourceTree = "<group>"; };
 		6032C435F51A77975C1008D7 /* ImageDownsampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageDownsampler.swift; sourceTree = "<group>"; };
@@ -131,6 +133,7 @@
 		CAC542863F7A8848563F6057 /* UI */ = {
 			isa = PBXGroup;
 			children = (
+				4A28E2C8C9D122163053F6A1 /* ArchiveMetadataEditorView.swift */,
 				8590743AAA05E109BCF48A6E /* LibraryView.swift */,
 				99C7CE21E9CCBADBAD7844A7 /* NotMatchesView.swift */,
 				76DFDA70F6C8EF04285A3BAE /* PairReviewView.swift */,
@@ -234,6 +237,7 @@
 				462D167127B78592933CCE35 /* AppModel.swift in Sources */,
 				6FACD0CFFB200075847A6B9C /* AppPaths.swift in Sources */,
 				832E8A0D72B1728D28B249D3 /* ArchiveLoader.swift in Sources */,
+				E5E8202DF4A40005368F7C48 /* ArchiveMetadataEditorView.swift in Sources */,
 				58B951D7DC8BBF39CCCFC850 /* CoverThumb.swift in Sources */,
 				5113E07D4F781D2AA690F2D9 /* DuplicateScanViewModel.swift in Sources */,
 				ECF1462FD0BB7D27A7E48FE3 /* ErrorPresenter.swift in Sources */,

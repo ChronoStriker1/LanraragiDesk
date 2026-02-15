@@ -332,12 +332,14 @@ private struct PairCompareView: View {
     let goNext: () -> Void
 
     @State private var confirmDeleteArcid: String?
+    @State private var editingArcid: String?
     @State private var metaA: ArchiveMetadata?
     @State private var metaB: ArchiveMetadata?
     @State private var pagesScrollMinY: CGFloat = 0
     @State private var isDetailsCollapsed: Bool = false
     @State private var panelScrollY: CGFloat = 0
     @State private var panelScrollActiveID: Int? = nil
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         GeometryReader { geo in
@@ -398,6 +400,22 @@ private struct PairCompareView: View {
         } message: {
             Text("This removes the archive from LANraragi. This cannot be undone.")
         }
+        .sheet(item: Binding(
+            get: { editingArcid.map(ArcidBox.init) },
+            set: { editingArcid = $0?.arcid }
+        )) { box in
+            let arcid = box.arcid
+            ArchiveMetadataEditorView(
+                profile: profile,
+                arcid: arcid,
+                initialMeta: arcid == pair.arcidA ? metaA : (arcid == pair.arcidB ? metaB : nil),
+                archives: archives,
+                onSaved: { updated in
+                    if updated.arcid == pair.arcidA { metaA = updated }
+                    if updated.arcid == pair.arcidB { metaB = updated }
+                }
+            )
+        }
         .task(id: "\(pair.arcidA)|\(pair.arcidB)") {
             isDetailsCollapsed = false
             metaA = nil
@@ -441,6 +459,12 @@ private struct PairCompareView: View {
                 scrollY: $panelScrollY,
                 scrollActiveID: $panelScrollActiveID,
                 scrollID: 0,
+                onRead: {
+                    openWindow(value: ReaderRoute(profileID: profile.id, arcid: pair.arcidA))
+                },
+                onEdit: {
+                    editingArcid = pair.arcidA
+                },
                 onNotMatch: {
                     markNotDuplicate(pair)
                     goNext()
@@ -469,6 +493,12 @@ private struct PairCompareView: View {
                 scrollY: $panelScrollY,
                 scrollActiveID: $panelScrollActiveID,
                 scrollID: 1,
+                onRead: {
+                    openWindow(value: ReaderRoute(profileID: profile.id, arcid: pair.arcidB))
+                },
+                onEdit: {
+                    editingArcid = pair.arcidB
+                },
                 onNotMatch: {
                     markNotDuplicate(pair)
                     goNext()
@@ -478,6 +508,11 @@ private struct PairCompareView: View {
             .id(pair.arcidB)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private struct ArcidBox: Identifiable {
+        let arcid: String
+        var id: String { arcid }
     }
 }
 
@@ -493,6 +528,8 @@ private struct ArchiveComparePanel: View {
     @Binding var scrollY: CGFloat
     @Binding var scrollActiveID: Int?
     let scrollID: Int
+    let onRead: () -> Void
+    let onEdit: () -> Void
     let onNotMatch: () -> Void
     let onDelete: () -> Void
 
@@ -504,6 +541,8 @@ private struct ArchiveComparePanel: View {
                 arcid: arcid,
                 meta: meta,
                 thumbnails: thumbnails,
+                onRead: onRead,
+                onEdit: onEdit,
                 onNotMatch: onNotMatch,
                 onDelete: onDelete
             )
@@ -660,6 +699,8 @@ private struct ArchiveSideHeader: View {
     let arcid: String
     let meta: ArchiveMetadata?
     let thumbnails: ThumbnailLoader
+    let onRead: () -> Void
+    let onEdit: () -> Void
     let onNotMatch: () -> Void
     let onDelete: () -> Void
 
@@ -705,6 +746,22 @@ private struct ArchiveSideHeader: View {
             Spacer(minLength: 0)
 
             HStack(spacing: 8) {
+                Button { onRead() } label: {
+                    Image(systemName: "book")
+                        .imageScale(.medium)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Open reader")
+
+                Button { onEdit() } label: {
+                    Image(systemName: "tag")
+                        .imageScale(.medium)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Edit tags and metadata")
+
                 Button("Not a match") { onNotMatch() }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)

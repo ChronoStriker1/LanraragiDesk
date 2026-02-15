@@ -99,6 +99,29 @@ public final class LANraragiClient: @unchecked Sendable {
         }
     }
 
+    public func updateArchiveMetadata(
+        arcid: String,
+        title: String,
+        tags: String,
+        summary: String
+    ) async throws {
+        let body: [String: Any] = [
+            "title": title,
+            "tags": tags,
+            "summary": summary,
+        ]
+        let data = try JSONSerialization.data(withJSONObject: body, options: [])
+
+        let url = try makeURL(path: "/api/archives/\(arcid)/metadata")
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        applyDefaultHeaders(to: &req)
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = data
+
+        try await performNoContent(req)
+    }
+
     public func fetchBytes(url: URL) async throws -> Data {
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
@@ -294,6 +317,27 @@ public final class LANraragiClient: @unchecked Sendable {
             return try JSONDecoder().decode(T.self, from: data)
         } catch {
             throw LANraragiError.decoding(error)
+        }
+    }
+
+    private func performNoContent(_ req: URLRequest) async throws {
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await session.data(for: req)
+        } catch {
+            throw LANraragiError.transport(error)
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw LANraragiError.invalidResponse
+        }
+
+        if http.statusCode == 401 {
+            throw LANraragiError.unauthorized
+        }
+
+        guard (200...299).contains(http.statusCode) else {
+            throw LANraragiError.httpStatus(http.statusCode, body: data)
         }
     }
 

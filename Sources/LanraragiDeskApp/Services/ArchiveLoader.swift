@@ -47,6 +47,26 @@ actor ArchiveLoader {
         return m
     }
 
+    func updateMetadata(
+        profile: Profile,
+        arcid: String,
+        title: String,
+        tags: String,
+        summary: String
+    ) async throws -> ArchiveMetadata {
+        let client = try await makeClient(profile: profile)
+        try await limiter.withPermit {
+            try await client.updateArchiveMetadata(arcid: arcid, title: title, tags: tags, summary: summary)
+        }
+
+        // Refresh caches for this archive.
+        metaCache[arcid] = nil
+        metaRawCache[arcid] = nil
+
+        let updated = try await metadata(profile: profile, arcid: arcid)
+        return updated
+    }
+
     func metadataPrettyJSON(profile: Profile, arcid: String) async throws -> String {
         if let s = metaRawCache[arcid] { return s }
         if let t = metaRawInflight[arcid] { return try await t.value }
