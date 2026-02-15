@@ -14,6 +14,7 @@ struct RootView: View {
         case library
         case duplicates
         case review
+        case settings
     }
 
     var body: some View {
@@ -91,6 +92,12 @@ struct RootView: View {
                 Label("Review", systemImage: "square.stack.3d.up")
                     .foregroundStyle(.secondary)
             }
+
+            Divider()
+
+            NavigationLink(value: Section.settings) {
+                Label("Settings", systemImage: "gearshape")
+            }
         }
         .listStyle(.sidebar)
         .navigationTitle("LanraragiDesk")
@@ -122,6 +129,8 @@ struct RootView: View {
                     .background(.thinMaterial)
                     .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                 }
+            case .settings:
+                SettingsView()
             }
 
             Spacer(minLength: 0)

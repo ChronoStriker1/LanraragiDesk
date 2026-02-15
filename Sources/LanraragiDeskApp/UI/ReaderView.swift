@@ -1,20 +1,6 @@
 import AppKit
 import SwiftUI
 
-private enum ReaderDirection: String, CaseIterable, Identifiable {
-    case ltr
-    case rtl
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .ltr: return "Left-to-right"
-        case .rtl: return "Right-to-left"
-        }
-    }
-}
-
 struct ReaderView: View {
     @EnvironmentObject private var appModel: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -49,25 +35,49 @@ struct ReaderView: View {
 
             content
                 .padding(18)
+                .background(
+                    KeyDownCatcher { event in
+                        handleKeyDown(event)
+                    }
+                    .frame(width: 0, height: 0)
+                )
         }
         .navigationTitle(titleText)
         .toolbar {
             ToolbarItemGroup(placement: .automatic) {
-                Button {
-                    goPrev(userInitiated: true)
-                } label: {
-                    Image(systemName: "chevron.left")
-                }
-                .help("Previous page")
-                .disabled(pageIndex <= 0)
+                if readingDirection == .rtl {
+                    Button {
+                        goNext(userInitiated: true)
+                    } label: {
+                        Image(systemName: "chevron.left")
+                    }
+                    .help("Next page")
+                    .disabled(pageIndex >= max(0, pages.count - 1))
 
-                Button {
-                    goNext(userInitiated: true)
-                } label: {
-                    Image(systemName: "chevron.right")
+                    Button {
+                        goPrev(userInitiated: true)
+                    } label: {
+                        Image(systemName: "chevron.right")
+                    }
+                    .help("Previous page")
+                    .disabled(pageIndex <= 0)
+                } else {
+                    Button {
+                        goPrev(userInitiated: true)
+                    } label: {
+                        Image(systemName: "chevron.left")
+                    }
+                    .help("Previous page")
+                    .disabled(pageIndex <= 0)
+
+                    Button {
+                        goNext(userInitiated: true)
+                    } label: {
+                        Image(systemName: "chevron.right")
+                    }
+                    .help("Next page")
+                    .disabled(pageIndex >= max(0, pages.count - 1))
                 }
-                .help("Next page")
-                .disabled(pageIndex >= max(0, pages.count - 1))
 
                 Text(pageCountText)
                     .font(.callout)
@@ -76,32 +86,21 @@ struct ReaderView: View {
 
                 Divider()
 
-                Picker("", selection: $readingDirectionRaw) {
-                    ForEach(ReaderDirection.allCases) { d in
-                        Text(d.title).tag(d.rawValue)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 240)
-                .help("Controls direction only. Page numbers still increase normally.")
+                HStack(spacing: 10) {
+                    Toggle("Auto-advance", isOn: $autoAdvanceEnabled)
+                        .toggleStyle(.switch)
 
-                Toggle("Auto-advance", isOn: $autoAdvanceEnabled)
-                    .toggleStyle(.switch)
+                    Slider(value: $autoAdvanceSeconds, in: 2...30, step: 1)
+                        .frame(width: 160)
+                        .disabled(!autoAdvanceEnabled)
+                        .opacity(autoAdvanceEnabled ? 1 : 0.35)
 
-                if autoAdvanceEnabled {
-                    HStack(spacing: 10) {
-                        Text("Seconds")
-                            .foregroundStyle(.secondary)
-                        Slider(value: $autoAdvanceSeconds, in: 2...30, step: 1)
-                            .frame(width: 180)
-                        Text("\(Int(autoAdvanceSeconds))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 26, alignment: .trailing)
-                    }
-                    .help("Wait time before advancing to the next page.")
+                    Text("\(Int(autoAdvanceSeconds))s")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 34, alignment: .trailing)
 
-                    if let countdownRemaining {
+                    if autoAdvanceEnabled, let countdownRemaining {
                         Text("Next in \(countdownRemaining)s")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -112,6 +111,7 @@ struct ReaderView: View {
                             .help("Auto-advance countdown")
                     }
                 }
+                .help("Auto-advance to the next page after the selected delay.")
 
                 Spacer()
 
@@ -351,5 +351,57 @@ struct ReaderView: View {
         guard pageIndex > 0 else { return }
         pageIndex -= 1
     }
+
+    private func handleKeyDown(_ event: NSEvent) {
+        // Arrow keys handled via `.onMoveCommand`.
+        // Space: next page. Shift-space: previous page.
+        // Esc: close.
+        switch event.keyCode {
+        case 49: // space
+            if event.modifierFlags.contains(.shift) {
+                goPrev(userInitiated: true)
+            } else {
+                goNext(userInitiated: true)
+            }
+        case 53: // escape
+            dismiss()
+        default:
+            break
+        }
+    }
 }
 
+private struct KeyDownCatcher: NSViewRepresentable {
+    let onKeyDown: (NSEvent) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let v = CatcherView()
+        v.onKeyDown = onKeyDown
+        return v
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        guard let v = nsView as? CatcherView else { return }
+        v.onKeyDown = onKeyDown
+    }
+
+    private final class CatcherView: NSView {
+        var onKeyDown: ((NSEvent) -> Void)?
+
+        override var acceptsFirstResponder: Bool { true }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let window = self.window else { return }
+                if window.firstResponder !== self {
+                    window.makeFirstResponder(self)
+                }
+            }
+        }
+
+        override func keyDown(with event: NSEvent) {
+            onKeyDown?(event)
+        }
+    }
+}
