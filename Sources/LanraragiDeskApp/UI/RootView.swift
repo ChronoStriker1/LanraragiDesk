@@ -7,18 +7,13 @@ struct RootView: View {
 
     @State private var editingProfile: Profile?
     @State private var showingSetup = false
-    @State private var tab: Tab = .manage
     @State private var showNotMatchesPanel: Bool = false
-    @State private var manageSection: ManageSection = .duplicates
+    @State private var section: Section = .duplicates
 
-    enum Tab: Hashable {
-        case manage
-        case review
-    }
-
-    enum ManageSection: String, Hashable {
+    enum Section: Hashable {
         case library
         case duplicates
+        case review
     }
 
     var body: some View {
@@ -52,10 +47,10 @@ struct RootView: View {
         .onChange(of: appModel.duplicates.resultRevision) { _, _ in
             // Auto-focus the review UI after a scan completes.
             if case .completed = appModel.duplicates.status, appModel.duplicates.result != nil {
-                tab = .review
+                section = .review
             }
-            if appModel.duplicates.result == nil {
-                tab = .manage
+            if appModel.duplicates.result == nil, section == .review {
+                section = .duplicates
             }
         }
     }
@@ -63,14 +58,12 @@ struct RootView: View {
     @ViewBuilder
     private var content: some View {
         if let profile = appModel.selectedProfile {
-            VStack(alignment: .leading, spacing: 18) {
-                if tab == .manage {
-                    header(profile: profile)
-                }
-                tabs(profile: profile)
-                Spacer()
+            NavigationSplitView {
+                sidebar(profile: profile)
+            } detail: {
+                detail(profile: profile)
             }
-            .frame(minWidth: 900, minHeight: 620, alignment: .topLeading)
+            .frame(minWidth: 980, minHeight: 640)
         } else {
             ContentUnavailableView(
                 "Connect To LANraragi",
@@ -81,45 +74,59 @@ struct RootView: View {
         }
     }
 
-    private func tabs(profile: Profile) -> some View {
-        TabView(selection: $tab) {
-            VStack(alignment: .leading, spacing: 0) {
-                managePicker
-                    .padding(.bottom, 12)
-
-                switch manageSection {
-                case .library:
-                    LibraryView(profile: profile)
-                        .environmentObject(appModel)
-                case .duplicates:
-                    runCard(profile: profile)
-                }
-                Spacer(minLength: 0)
+    private func sidebar(profile: Profile) -> some View {
+        List(selection: $section) {
+            NavigationLink(value: Section.library) {
+                Label("Library", systemImage: "books.vertical")
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .tag(Tab.manage)
-                .tabItem { Label("Manage", systemImage: "slider.horizontal.3") }
+            NavigationLink(value: Section.duplicates) {
+                Label("Duplicates", systemImage: "rectangle.stack.badge.magnifyingglass")
+            }
 
             if appModel.duplicates.result != nil {
-                reviewTab(profile: profile)
-                    .tag(Tab.review)
-                    .tabItem { Label("Review", systemImage: "square.stack.3d.up") }
+                NavigationLink(value: Section.review) {
+                    Label("Review", systemImage: "square.stack.3d.up")
+                }
+            } else {
+                Label("Review", systemImage: "square.stack.3d.up")
+                    .foregroundStyle(.secondary)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .listStyle(.sidebar)
+        .navigationTitle("LanraragiDesk")
     }
 
-    private var managePicker: some View {
-        HStack {
-            Picker("", selection: $manageSection) {
-                Text("Library").tag(ManageSection.library)
-                Text("Duplicates").tag(ManageSection.duplicates)
+    @ViewBuilder
+    private func detail(profile: Profile) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            if section != .review {
+                header(profile: profile)
             }
-            .pickerStyle(.segmented)
-            .frame(width: 280)
 
-            Spacer()
+            switch section {
+            case .library:
+                LibraryView(profile: profile)
+                    .environmentObject(appModel)
+            case .duplicates:
+                runCard(profile: profile)
+            case .review:
+                if appModel.duplicates.result != nil {
+                    reviewTab(profile: profile)
+                } else {
+                    ContentUnavailableView(
+                        "No Results Yet",
+                        systemImage: "square.stack.3d.up.slash",
+                        description: Text("Run a scan to see duplicate groups here.")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(.thinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                }
+            }
+
+            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     @ViewBuilder
@@ -194,7 +201,7 @@ struct RootView: View {
 
             HStack(spacing: 12) {
                 Button {
-                    tab = .manage
+                    section = .duplicates
                     appModel.duplicates.start(profile: profile)
                 } label: {
                     Text("Find Duplicates")
@@ -241,7 +248,7 @@ struct RootView: View {
                     Text("Scanned \(stats.archives) archives in \(String(format: "%.1fs", stats.durationSeconds)).")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Button("Go To Review") { tab = .review }
+                    Button("Go To Review") { section = .review }
                 }
             case .failed(let msg):
                 Text("Failed: \(msg)")
