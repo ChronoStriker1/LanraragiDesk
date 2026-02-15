@@ -13,6 +13,7 @@ struct LibraryView: View {
     @State private var tagSuggestions: [TagSuggestionStore.Suggestion] = []
     @State private var suggestionTask: Task<Void, Never>?
     @State private var editingMeta: EditorRoute?
+    @FocusState private var searchFocused: Bool
 
     struct EditorRoute: Identifiable, Hashable {
         let arcid: String
@@ -99,40 +100,18 @@ struct LibraryView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     TextField("Search…", text: $vm.query)
                         .textFieldStyle(.roundedBorder)
+                        .focused($searchFocused)
                         .onSubmit { vm.refresh(profile: profile) }
                         .onChange(of: vm.query) { _, _ in
                             queueSuggestionRefresh()
                         }
+                        .frame(width: 520)
 
-                    if !tagSuggestions.isEmpty {
-                        ScrollView(.vertical) {
-                            LazyVStack(alignment: .leading, spacing: 6) {
-                                ForEach(tagSuggestions.prefix(12), id: \.value) { s in
-                                    Button {
-                                        applySuggestion(s.value)
-                                    } label: {
-                                        HStack(spacing: 10) {
-                                            Text(s.value)
-                                                .font(.callout)
-                                            Spacer()
-                                            Text("\(s.weight)")
-                                                .font(.caption2)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(.vertical, 6)
-                                        .padding(.horizontal, 10)
-                                        .background(.quaternary.opacity(0.35))
-                                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            .padding(.vertical, 6)
-                        }
-                        .frame(maxHeight: 160)
+                    if searchFocused || !tagSuggestions.isEmpty {
+                        tagSuggestionList
                     }
                 }
+                .zIndex(10)
 
                 Button("Search") {
                     vm.refresh(profile: profile)
@@ -156,28 +135,27 @@ struct LibraryView: View {
                     }
 
                     HStack(spacing: 10) {
-                        Picker("Category", selection: $vm.categoryID) {
-                            Text("All categories").tag("")
+                        pinnedCategoryButtons
 
-                            let pinned = vm.categories.filter { $0.pinned }
+                        Menu {
+                            Button("All categories") { vm.categoryID = "" }
+
                             let unpinned = vm.categories.filter { !$0.pinned }
-
-                            if !pinned.isEmpty {
-                                Divider()
-                                ForEach(pinned, id: \.id) { c in
-                                    Label(c.name, systemImage: "pin.fill").tag(c.id)
-                                }
-                            }
-
                             if !unpinned.isEmpty {
                                 Divider()
-                                ForEach(unpinned, id: \.id) { c in
-                                    Text(c.name).tag(c.id)
-                                }
                             }
+
+                            ForEach(unpinned, id: \.id) { c in
+                                Button(c.name) { vm.categoryID = c.id }
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "folder")
+                                Text(unpinnedCategoryLabel)
+                            }
+                            .font(.callout)
                         }
-                        .pickerStyle(.menu)
-                        .frame(maxWidth: 340, alignment: .leading)
+                        .menuStyle(.borderlessButton)
 
                         if vm.isLoadingCategories {
                             ProgressView()
@@ -202,6 +180,97 @@ struct LibraryView: View {
         .debugFrameNumber(1)
     }
 
+    private var tagSuggestionList: some View {
+        let info = currentTokenInfo()
+        let q = info.lookupPrefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        let minChars = info.hasTagPrefix ? 1 : 2
+        let eligible = q.count >= minChars
+
+        return GroupBox {
+            if !eligible {
+                Text("Type tag: then start typing to see tag suggestions.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
+            } else if tagSuggestions.isEmpty {
+                Text("No tag suggestions yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
+            } else {
+                ScrollView(.vertical) {
+                    LazyVStack(alignment: .leading, spacing: 6) {
+                        ForEach(tagSuggestions.prefix(24), id: \.value) { s in
+                            Button {
+                                applySuggestion(s.value)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Text(s.value)
+                                        .font(.callout)
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                    Text("\(s.weight)")
+                                        .font(.caption2.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 6)
+                                .padding(.horizontal, 10)
+                                .background(.quaternary.opacity(0.35))
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+                .scrollIndicators(.visible)
+                .frame(maxHeight: 170)
+            }
+        }
+        .frame(width: 520, alignment: .leading)
+    }
+
+    private var pinnedCategoryButtons: some View {
+        let pinned = vm.categories.filter { $0.pinned }
+
+        return ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                CategoryChip(title: "All", selected: vm.categoryID.isEmpty) {
+                    vm.categoryID = ""
+                }
+                ForEach(pinned, id: \.id) { c in
+                    CategoryChip(title: c.name, selected: vm.categoryID == c.id, pinned: true) {
+                        vm.categoryID = c.id
+                    }
+                }
+            }
+            .padding(.vertical, 2)
+        }
+        .scrollIndicators(.hidden)
+        .frame(maxWidth: 360, alignment: .leading)
+    }
+
+    private var unpinnedCategoryLabel: String {
+        guard !vm.categoryID.isEmpty else { return "More categories" }
+        if let c = vm.categories.first(where: { $0.id == vm.categoryID }), !c.pinned {
+            return c.name
+        }
+        return "More categories"
+    }
+
+    private func addTagToQuery(_ rawTag: String) {
+        let t = rawTag.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+
+        let token = "tag:\(t)"
+        let needsSpace = !vm.query.isEmpty && !vm.query.hasSuffix(" ")
+        vm.query = vm.query + (needsSpace ? " " : "") + token + " "
+        vm.refresh(profile: profile)
+    }
+
     @ViewBuilder
     private var results: some View {
         switch vm.layout {
@@ -213,7 +282,7 @@ struct LibraryView: View {
                     spacing: 12
                 ) {
                     ForEach(vm.arcids, id: \.self) { arcid in
-                        LibraryCard(profile: profile, arcid: arcid)
+                        LibraryCard(profile: profile, arcid: arcid, onSelectTag: addTagToQuery)
                             .environmentObject(appModel)
                             .contextMenu {
                                 Button("Open Reader") {
@@ -254,7 +323,7 @@ struct LibraryView: View {
         case .list:
             List {
                 ForEach(vm.arcids, id: \.self) { arcid in
-                    LibraryRow(profile: profile, arcid: arcid)
+                    LibraryRow(profile: profile, arcid: arcid, onSelectTag: addTagToQuery)
                         .environmentObject(appModel)
                         .contentShape(Rectangle())
                         .contextMenu {
@@ -395,6 +464,7 @@ private struct LibraryCard: View {
 
     let profile: Profile
     let arcid: String
+    let onSelectTag: (String) -> Void
 
     @State private var meta: ArchiveMetadata?
     @State private var title: String = "Loading…"
@@ -415,31 +485,35 @@ private struct LibraryCard: View {
             CoverThumb(profile: profile, arcid: arcid, thumbnails: appModel.thumbnails, size: .init(width: 160, height: 210))
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(alignment: .topLeading) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        if meta?.isnew == true {
-                            CoverBadge(text: "NEW", background: .green.opacity(0.85))
-                        }
-
+                    if meta?.isnew == true {
+                        CoverBadge(text: "NEW", background: .green.opacity(0.65))
+                            .padding(8)
+                    }
+                }
+                .overlay(alignment: .topTrailing) {
+                    VStack(alignment: .trailing, spacing: 6) {
                         Button {
                             appModel.selection.toggle(arcid)
                         } label: {
                             Image(systemName: appModel.selection.contains(arcid) ? "checkmark.circle.fill" : "circle")
                                 .imageScale(.large)
-                                .foregroundStyle(appModel.selection.contains(arcid) ? .green : .secondary)
+                                .foregroundStyle(appModel.selection.contains(arcid) ? .green : .white)
                                 .padding(8)
-                                .background(.ultraThinMaterial)
+                                .background(.black.opacity(0.22))
                                 .clipShape(Circle())
+                                .shadow(color: .black.opacity(0.35), radius: 2, x: 0, y: 1)
                         }
                         .buttonStyle(.plain)
                         .help("Select for batch operations")
+                        .opacity(hoveringCover ? 1 : 0)
+                        .animation(.easeInOut(duration: 0.12), value: hoveringCover)
+                        .zIndex(100)
+
+                        if let d = ArchiveMetaHelpers.dateAdded(meta) {
+                            CoverBadge(text: Self.dateFormatter.string(from: d))
+                        }
                     }
                     .padding(8)
-                }
-                .overlay(alignment: .topTrailing) {
-                    if let d = ArchiveMetaHelpers.dateAdded(meta) {
-                        CoverBadge(text: Self.dateFormatter.string(from: d))
-                            .padding(8)
-                    }
                 }
                 .overlay(alignment: .bottom) {
                     if let pages = meta?.pagecount, pages > 0 {
@@ -459,7 +533,11 @@ private struct LibraryCard: View {
                     ArchiveHoverDetailsView(
                         title: meta?.title ?? title,
                         summary: meta?.summary ?? "",
-                        tags: meta?.tags ?? ""
+                        tags: meta?.tags ?? "",
+                        onSelectTag: { rawTag in
+                            onSelectTag(rawTag)
+                            showDetails = false
+                        }
                     )
                     .onHover { hovering in
                         hoveringPopover = hovering
@@ -517,6 +595,7 @@ private struct LibraryRow: View {
 
     let profile: Profile
     let arcid: String
+    let onSelectTag: (String) -> Void
 
     @State private var meta: ArchiveMetadata?
     @State private var title: String = "Loading…"
@@ -535,28 +614,38 @@ private struct LibraryRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Button {
-                appModel.selection.toggle(arcid)
-            } label: {
-                Image(systemName: appModel.selection.contains(arcid) ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(appModel.selection.contains(arcid) ? .green : .secondary)
-            }
-            .buttonStyle(.plain)
-            .help("Select for batch operations")
-
             CoverThumb(profile: profile, arcid: arcid, thumbnails: appModel.thumbnails, size: .init(width: 54, height: 72))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(alignment: .topLeading) {
                     if meta?.isnew == true {
-                        CoverBadge(text: "NEW", background: .green.opacity(0.85), font: .caption2.weight(.bold))
+                        CoverBadge(text: "NEW", background: .green.opacity(0.65), font: .caption2.weight(.bold))
                             .padding(4)
                     }
                 }
                 .overlay(alignment: .topTrailing) {
-                    if let d = ArchiveMetaHelpers.dateAdded(meta) {
-                        CoverBadge(text: Self.dateFormatter.string(from: d), font: .caption2.monospacedDigit().weight(.bold))
-                            .padding(4)
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Button {
+                            appModel.selection.toggle(arcid)
+                        } label: {
+                            Image(systemName: appModel.selection.contains(arcid) ? "checkmark.circle.fill" : "circle")
+                                .imageScale(.medium)
+                                .foregroundStyle(appModel.selection.contains(arcid) ? .green : .white)
+                                .padding(6)
+                                .background(.black.opacity(0.22))
+                                .clipShape(Circle())
+                                .shadow(color: .black.opacity(0.35), radius: 1, x: 0, y: 1)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Select for batch operations")
+                        .opacity(hoveringCover ? 1 : 0)
+                        .animation(.easeInOut(duration: 0.12), value: hoveringCover)
+                        .zIndex(100)
+
+                        if let d = ArchiveMetaHelpers.dateAdded(meta) {
+                            CoverBadge(text: Self.dateFormatter.string(from: d), font: .caption2.monospacedDigit().weight(.bold))
+                        }
                     }
+                    .padding(4)
                 }
                 .overlay(alignment: .bottom) {
                     if let pages = meta?.pagecount, pages > 0 {
@@ -572,7 +661,11 @@ private struct LibraryRow: View {
                     ArchiveHoverDetailsView(
                         title: meta?.title ?? title,
                         summary: meta?.summary ?? "",
-                        tags: meta?.tags ?? ""
+                        tags: meta?.tags ?? "",
+                        onSelectTag: { rawTag in
+                            onSelectTag(rawTag)
+                            showDetails = false
+                        }
                     )
                     .onHover { hovering in
                         hoveringPopover = hovering
@@ -633,15 +726,27 @@ private struct LibraryRow: View {
 
 private struct CoverBadge: View {
     let text: String
-    var background: Color = .black.opacity(0.7)
+    var background: Color = .black.opacity(0.55)
     var foreground: Color = .white
     var font: Font = .caption.monospacedDigit().weight(.bold)
 
     var body: some View {
-        Text(text)
+        ZStack {
+            // Faux-stroke for readability on busy thumbnails.
+            Group {
+                Text(text).offset(x: -1, y: 0)
+                Text(text).offset(x: 1, y: 0)
+                Text(text).offset(x: 0, y: -1)
+                Text(text).offset(x: 0, y: 1)
+            }
             .font(font)
-            .foregroundStyle(foreground)
-            .lineLimit(1)
+            .foregroundStyle(.black.opacity(0.9))
+
+            Text(text)
+                .font(font)
+                .foregroundStyle(foreground)
+        }
+        .lineLimit(1)
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
             .background(background)
@@ -654,6 +759,7 @@ private struct ArchiveHoverDetailsView: View {
     let title: String
     let summary: String
     let tags: String
+    let onSelectTag: (String) -> Void
 
     var body: some View {
         ScrollView(.vertical) {
@@ -684,7 +790,7 @@ private struct ArchiveHoverDetailsView: View {
                     Text("Tags")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    TagGroupsView(tags: tags)
+                    TagGroupsView(tags: tags, onSelectTag: onSelectTag)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -697,11 +803,13 @@ private struct ArchiveHoverDetailsView: View {
 
 private struct TagGroupsView: View {
     let tags: String
+    let onSelectTag: (String) -> Void
 
     private struct TagItem: Hashable {
         var namespace: String
         var value: String
         var display: String
+        var rawToken: String
     }
 
     private static let humanDateFormatter: DateFormatter = {
@@ -727,7 +835,7 @@ private struct TagGroupsView: View {
             } else {
                 display = tok
             }
-            return TagItem(namespace: ns, value: v, display: display)
+            return TagItem(namespace: ns, value: v, display: display, rawToken: tok)
         }
     }
 
@@ -754,36 +862,42 @@ private struct TagGroupsView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         } else {
-            VStack(alignment: .leading, spacing: 12) {
-                ForEach(groups, id: \.0) { ns, items in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(ns == "tag" ? "Tags" : ns)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(groups, id: \.0) { ns, items in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(ns == "tag" ? "Tags" : ns)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
 
-                        LazyVGrid(
-                            columns: [GridItem(.adaptive(minimum: 170), spacing: 8, alignment: .leading)],
-                            alignment: .leading,
-                            spacing: 8
-                        ) {
-                            ForEach(items, id: \.self) { t in
-                                TagChip(text: t.display)
+                            LazyVGrid(
+                                columns: [GridItem(.adaptive(minimum: 170), spacing: 8, alignment: .leading)],
+                                alignment: .leading,
+                                spacing: 8
+                            ) {
+                                ForEach(items, id: \.self) { t in
+                                    TagChip(text: t.display) {
+                                        onSelectTag(t.rawToken)
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
+            .scrollIndicators(.visible)
+            .frame(maxHeight: 190)
         }
     }
 }
 
 private struct TagChip: View {
     let text: String
+    let onClick: () -> Void
 
     var body: some View {
         Text(text)
             .font(.callout)
-            .textSelection(.enabled)
             .multilineTextAlignment(.leading)
             .lineLimit(nil)
             .fixedSize(horizontal: false, vertical: true)
@@ -795,6 +909,50 @@ private struct TagChip: View {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .strokeBorder(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 1)
             }
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .onTapGesture {
+                onClick()
+            }
+            .help("Click to add to Library search")
+    }
+}
+
+private struct CategoryChip: View {
+    let title: String
+    let selected: Bool
+    var pinned: Bool = false
+    let onClick: () -> Void
+
+    var body: some View {
+        let bg: AnyShapeStyle = selected
+            ? AnyShapeStyle(Color.accentColor.opacity(0.25))
+            : AnyShapeStyle(.quaternary.opacity(0.35))
+
+        Button {
+            onClick()
+        } label: {
+            HStack(spacing: 6) {
+                if pinned {
+                    Image(systemName: "pin.fill")
+                        .imageScale(.small)
+                }
+                Text(title)
+                    .lineLimit(1)
+            }
+            .font(.callout)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(bg)
+            .clipShape(Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(
+                        selected ? Color.accentColor.opacity(0.45) : Color(nsColor: .separatorColor).opacity(0.45),
+                        lineWidth: 1
+                    )
+            }
+        }
+        .buttonStyle(.plain)
     }
 }
 
