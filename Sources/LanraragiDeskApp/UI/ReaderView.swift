@@ -112,8 +112,10 @@ struct ReaderView: View {
                             .frame(width: 180)
                     }
                 } label: {
-                    Label("View", systemImage: "rectangle.3.group")
-                        .labelStyle(.titleAndIcon)
+                    HStack(spacing: 6) {
+                        Image(systemName: "rectangle.3.group")
+                        Text("View")
+                    }
                 }
                 .help("Reader view options")
             }
