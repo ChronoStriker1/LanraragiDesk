@@ -26,11 +26,16 @@ final class DuplicateScanViewModel: ObservableObject {
     @Published var includeApproximate: Bool = true
     @Published var strictness: Strictness = .balanced
 
-    let thumbnails = ThumbnailLoader()
-    let archives = ArchiveLoader()
+    let thumbnails: ThumbnailLoader
+    let archives: ArchiveLoader
 
     private var task: Task<Void, Never>?
     private var runID: UUID?
+
+    init(thumbnails: ThumbnailLoader = ThumbnailLoader(), archives: ArchiveLoader = ArchiveLoader()) {
+        self.thumbnails = thumbnails
+        self.archives = archives
+    }
 
     func start(profile: Profile) {
         guard task == nil else { return }

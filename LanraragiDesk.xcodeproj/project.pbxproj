@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		130862FF85B509435312CB5E /* ReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD459C22BE11F681F28C2F38 /* ReaderView.swift */; };
+		2CC4FCA30B43919EBE99690B /* LibraryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1F2885B0666E3F9BE5689F9 /* LibraryViewModel.swift */; };
 		357E6825CEFEFA8EA5B45966 /* LanraragiDeskApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF5978E02C65E10E0EEF7643 /* LanraragiDeskApp.swift */; };
 		462D167127B78592933CCE35 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64DB4339053B57ED7A535ED8 /* AppModel.swift */; };
 		4CF1B22A3D290E0F65F546D7 /* NotMatchesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99C7CE21E9CCBADBAD7844A7 /* NotMatchesView.swift */; };
@@ -15,8 +17,11 @@
 		6B35F39BF0AD26CD55A13641 /* ThumbnailLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 459B7EE09D6D1F08753A893C /* ThumbnailLoader.swift */; };
 		6EE68711387D794F38396D14 /* LanraragiKit in Frameworks */ = {isa = PBXBuildFile; productRef = 426F45F44E9E4A6E4A031FB6 /* LanraragiKit */; };
 		6FACD0CFFB200075847A6B9C /* AppPaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99CBA245A79722298EB8ADD5 /* AppPaths.swift */; };
+		7065DE50731D88BE5A3F6C36 /* ReaderRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0B4C016BE5ACCF114FD7456 /* ReaderRoute.swift */; };
 		7542369653C2D01A55CA1E70 /* IndexingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93C3DC7516031BE8557B0B91 /* IndexingViewModel.swift */; };
 		832E8A0D72B1728D28B249D3 /* ArchiveLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92B6686EDCF99DFFC6D32B78 /* ArchiveLoader.swift */; };
+		9789B431AA03054EAF70EF31 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8590743AAA05E109BCF48A6E /* LibraryView.swift */; };
+		9DDDA0347F89382A644FB753 /* ImageDownsampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6032C435F51A77975C1008D7 /* ImageDownsampler.swift */; };
 		B276D2843F10809C7F019FCD /* PairReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76DFDA70F6C8EF04285A3BAE /* PairReviewView.swift */; };
 		DDDB37F2CDB1F904FAFF1F3C /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3A8A1896B87FF041125DD84 /* KeychainService.swift */; };
 		DE9EFC3A45B2EDD7BBEEF9A0 /* ProfileEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53E76144EA3A608FC23C8A94 /* ProfileEditorView.swift */; };
@@ -33,17 +38,22 @@
 		459B7EE09D6D1F08753A893C /* ThumbnailLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailLoader.swift; sourceTree = "<group>"; };
 		53E76144EA3A608FC23C8A94 /* ProfileEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileEditorView.swift; sourceTree = "<group>"; };
 		54B3E61F93FAE6A29E18E911 /* DuplicateScanViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuplicateScanViewModel.swift; sourceTree = "<group>"; };
+		6032C435F51A77975C1008D7 /* ImageDownsampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageDownsampler.swift; sourceTree = "<group>"; };
 		64DB4339053B57ED7A535ED8 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		72C4199C56747CD950398BF5 /* CoverThumb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoverThumb.swift; sourceTree = "<group>"; };
 		76DFDA70F6C8EF04285A3BAE /* PairReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairReviewView.swift; sourceTree = "<group>"; };
 		76F557803B708694C1EF5904 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		8590743AAA05E109BCF48A6E /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		92B6686EDCF99DFFC6D32B78 /* ArchiveLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArchiveLoader.swift; sourceTree = "<group>"; };
 		93C3DC7516031BE8557B0B91 /* IndexingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IndexingViewModel.swift; sourceTree = "<group>"; };
 		99C7CE21E9CCBADBAD7844A7 /* NotMatchesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotMatchesView.swift; sourceTree = "<group>"; };
 		99CBA245A79722298EB8ADD5 /* AppPaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPaths.swift; sourceTree = "<group>"; };
 		B86D008FE0E3FC57FBA6B31A /* Profile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Profile.swift; sourceTree = "<group>"; };
 		D0705B9BBB876D1BB705AA53 /* ProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileStore.swift; sourceTree = "<group>"; };
+		D0B4C016BE5ACCF114FD7456 /* ReaderRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderRoute.swift; sourceTree = "<group>"; };
 		D3A8A1896B87FF041125DD84 /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
+		DD459C22BE11F681F28C2F38 /* ReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderView.swift; sourceTree = "<group>"; };
+		F1F2885B0666E3F9BE5689F9 /* LibraryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryViewModel.swift; sourceTree = "<group>"; };
 		F4D929F9A0F9C6B65C283387 /* LanraragiKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = LanraragiKit; path = Packages/LanraragiKit; sourceTree = SOURCE_ROOT; };
 		FF5978E02C65E10E0EEF7643 /* LanraragiDeskApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanraragiDeskApp.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -74,6 +84,7 @@
 				64DB4339053B57ED7A535ED8 /* AppModel.swift */,
 				54B3E61F93FAE6A29E18E911 /* DuplicateScanViewModel.swift */,
 				93C3DC7516031BE8557B0B91 /* IndexingViewModel.swift */,
+				F1F2885B0666E3F9BE5689F9 /* LibraryViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -104,6 +115,7 @@
 			isa = PBXGroup;
 			children = (
 				B86D008FE0E3FC57FBA6B31A /* Profile.swift */,
+				D0B4C016BE5ACCF114FD7456 /* ReaderRoute.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -119,9 +131,11 @@
 		CAC542863F7A8848563F6057 /* UI */ = {
 			isa = PBXGroup;
 			children = (
+				8590743AAA05E109BCF48A6E /* LibraryView.swift */,
 				99C7CE21E9CCBADBAD7844A7 /* NotMatchesView.swift */,
 				76DFDA70F6C8EF04285A3BAE /* PairReviewView.swift */,
 				53E76144EA3A608FC23C8A94 /* ProfileEditorView.swift */,
+				DD459C22BE11F681F28C2F38 /* ReaderView.swift */,
 				358F4E9A6F34DDEB4C2966B1 /* RootView.swift */,
 				A7A1CD4891181418913FA15A /* Components */,
 			);
@@ -142,6 +156,7 @@
 				99CBA245A79722298EB8ADD5 /* AppPaths.swift */,
 				92B6686EDCF99DFFC6D32B78 /* ArchiveLoader.swift */,
 				301B8E3B58DBC2553F8AF7D8 /* ErrorPresenter.swift */,
+				6032C435F51A77975C1008D7 /* ImageDownsampler.swift */,
 				D3A8A1896B87FF041125DD84 /* KeychainService.swift */,
 				D0705B9BBB876D1BB705AA53 /* ProfileStore.swift */,
 				459B7EE09D6D1F08753A893C /* ThumbnailLoader.swift */,
@@ -222,14 +237,19 @@
 				58B951D7DC8BBF39CCCFC850 /* CoverThumb.swift in Sources */,
 				5113E07D4F781D2AA690F2D9 /* DuplicateScanViewModel.swift in Sources */,
 				ECF1462FD0BB7D27A7E48FE3 /* ErrorPresenter.swift in Sources */,
+				9DDDA0347F89382A644FB753 /* ImageDownsampler.swift in Sources */,
 				7542369653C2D01A55CA1E70 /* IndexingViewModel.swift in Sources */,
 				DDDB37F2CDB1F904FAFF1F3C /* KeychainService.swift in Sources */,
 				357E6825CEFEFA8EA5B45966 /* LanraragiDeskApp.swift in Sources */,
+				9789B431AA03054EAF70EF31 /* LibraryView.swift in Sources */,
+				2CC4FCA30B43919EBE99690B /* LibraryViewModel.swift in Sources */,
 				4CF1B22A3D290E0F65F546D7 /* NotMatchesView.swift in Sources */,
 				B276D2843F10809C7F019FCD /* PairReviewView.swift in Sources */,
 				E53EB607E67003100933762A /* Profile.swift in Sources */,
 				DE9EFC3A45B2EDD7BBEEF9A0 /* ProfileEditorView.swift in Sources */,
 				F71E979E397E14D574791B80 /* ProfileStore.swift in Sources */,
+				7065DE50731D88BE5A3F6C36 /* ReaderRoute.swift in Sources */,
+				130862FF85B509435312CB5E /* ReaderView.swift in Sources */,
 				FA5BDE6D31A4CC65C617F51F /* RootView.swift in Sources */,
 				6B35F39BF0AD26CD55A13641 /* ThumbnailLoader.swift in Sources */,
 			);

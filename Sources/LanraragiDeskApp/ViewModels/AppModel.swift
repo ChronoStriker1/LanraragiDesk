@@ -10,13 +10,17 @@ final class AppModel: ObservableObject {
     @Published var connectionStatus: ConnectionStatus = .idle
     @Published var indexing: IndexingViewModel
     @Published var duplicates: DuplicateScanViewModel
+    let archives: ArchiveLoader
+    let thumbnails: ThumbnailLoader
 
     private var cancellables: Set<AnyCancellable> = []
 
     init() {
         self.profileStore = ProfileStore()
+        self.archives = ArchiveLoader()
+        self.thumbnails = ThumbnailLoader()
         self.indexing = IndexingViewModel()
-        self.duplicates = DuplicateScanViewModel()
+        self.duplicates = DuplicateScanViewModel(thumbnails: thumbnails, archives: archives)
 
         // SwiftUI doesn't automatically observe nested ObservableObjects through a parent EnvironmentObject.
         // Forward child changes so views reading `appModel.profileStore...` / `appModel.indexing...` update.

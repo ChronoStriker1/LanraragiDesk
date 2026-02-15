@@ -9,10 +9,16 @@ struct RootView: View {
     @State private var showingSetup = false
     @State private var tab: Tab = .manage
     @State private var showNotMatchesPanel: Bool = false
+    @State private var manageSection: ManageSection = .duplicates
 
     enum Tab: Hashable {
         case manage
         case review
+    }
+
+    enum ManageSection: String, Hashable {
+        case library
+        case duplicates
     }
 
     var body: some View {
@@ -78,7 +84,16 @@ struct RootView: View {
     private func tabs(profile: Profile) -> some View {
         TabView(selection: $tab) {
             VStack(alignment: .leading, spacing: 0) {
-                runCard(profile: profile)
+                managePicker
+                    .padding(.bottom, 12)
+
+                switch manageSection {
+                case .library:
+                    LibraryView(profile: profile)
+                        .environmentObject(appModel)
+                case .duplicates:
+                    runCard(profile: profile)
+                }
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -92,6 +107,19 @@ struct RootView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var managePicker: some View {
+        HStack {
+            Picker("", selection: $manageSection) {
+                Text("Library").tag(ManageSection.library)
+                Text("Duplicates").tag(ManageSection.duplicates)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 280)
+
+            Spacer()
+        }
     }
 
     @ViewBuilder
