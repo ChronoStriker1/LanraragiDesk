@@ -115,6 +115,7 @@ It is intentionally pragmatic and may be blunt.
 
 - Sidebar:
   - Review item behavior matches requirement when scan results exist and when cleared.
+  - Sidebar background respects system transparency settings (vibrancy/material).
 
 - Reader:
   - Toolbar items remain visible; do not vanish when auto-advance toggled.

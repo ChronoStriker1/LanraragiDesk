@@ -502,19 +502,12 @@ private struct LibraryCard: View {
             CoverThumb(profile: profile, arcid: arcid, thumbnails: appModel.thumbnails, size: .init(width: 160, height: 210))
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(alignment: .topLeading) {
-                    if meta?.isnew == true {
-                        CoverBadge(text: "NEW", background: .green.opacity(0.55))
-                            .padding(8)
-                    }
-                }
-                .overlay(alignment: .topTrailing) {
-                    ZStack(alignment: .topTrailing) {
-                        if let d = ArchiveMetaHelpers.dateAdded(meta) {
-                            CoverBadge(text: Self.dateFormatter.string(from: d))
-                                .padding(8)
+                    ZStack(alignment: .topLeading) {
+                        if meta?.isnew == true {
+                            CoverBadge(text: "NEW", background: .green.opacity(0.55))
                         }
 
-                        // Always positioned top-right; on hover it overlays other badges.
+                        // Always positioned top-left; on hover it overlays other badges (ex: NEW).
                         if hoveringCover {
                             Button {
                                 appModel.selection.toggle(arcid)
@@ -529,8 +522,16 @@ private struct LibraryCard: View {
                             }
                             .buttonStyle(.plain)
                             .help("Select for batch operations")
-                            .padding(8)
                             .zIndex(200)
+                        }
+                    }
+                    .padding(8)
+                }
+                .overlay(alignment: .topTrailing) {
+                    ZStack(alignment: .topTrailing) {
+                        if let d = ArchiveMetaHelpers.dateAdded(meta) {
+                            CoverBadge(text: Self.dateFormatter.string(from: d))
+                                .padding(8)
                         }
                     }
                 }
@@ -643,16 +644,9 @@ private struct LibraryRow: View {
             CoverThumb(profile: profile, arcid: arcid, thumbnails: appModel.thumbnails, size: .init(width: 54, height: 72))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(alignment: .topLeading) {
-                    if meta?.isnew == true {
-                        CoverBadge(text: "NEW", background: .green.opacity(0.55), font: .caption2.weight(.bold))
-                            .padding(4)
-                    }
-                }
-                .overlay(alignment: .topTrailing) {
-                    ZStack(alignment: .topTrailing) {
-                        if let d = ArchiveMetaHelpers.dateAdded(meta) {
-                            CoverBadge(text: Self.dateFormatter.string(from: d), font: .caption2.monospacedDigit().weight(.bold))
-                                .padding(4)
+                    ZStack(alignment: .topLeading) {
+                        if meta?.isnew == true {
+                            CoverBadge(text: "NEW", background: .green.opacity(0.55), font: .caption2.weight(.bold))
                         }
 
                         if hoveringCover {
@@ -669,8 +663,16 @@ private struct LibraryRow: View {
                             }
                             .buttonStyle(.plain)
                             .help("Select for batch operations")
-                            .padding(4)
                             .zIndex(200)
+                        }
+                    }
+                    .padding(4)
+                }
+                .overlay(alignment: .topTrailing) {
+                    ZStack(alignment: .topTrailing) {
+                        if let d = ArchiveMetaHelpers.dateAdded(meta) {
+                            CoverBadge(text: Self.dateFormatter.string(from: d), font: .caption2.monospacedDigit().weight(.bold))
+                                .padding(4)
                         }
                     }
                 }

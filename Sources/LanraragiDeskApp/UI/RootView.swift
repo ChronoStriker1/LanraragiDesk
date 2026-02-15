@@ -33,6 +33,19 @@ struct RootView: View {
 
             content
         }
+        .toolbar(removing: .sidebarToggle)
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    toggleSidebar()
+                } label: {
+                    Image(systemName: "sidebar.leading")
+                }
+                .help("Toggle Sidebar")
+                // Keep stable sizing so the control doesn't jump as the window state changes.
+                .frame(width: 32, height: 22, alignment: .center)
+            }
+        }
         .onAppear {
             appModel.selectFirstIfNeeded()
             if appModel.selectedProfile == nil {
@@ -119,7 +132,7 @@ struct RootView: View {
         .listStyle(.sidebar)
         .labelStyle(.titleAndIcon)
         .scrollContentBackground(.hidden)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(SidebarVibrancy())
         .navigationTitle("LanraragiDesk")
     }
 
@@ -315,5 +328,23 @@ struct RootView: View {
         }
     }
 
+    private func toggleSidebar() {
+        NSApp.keyWindow?.firstResponder?.tryToPerform(#selector(NSSplitViewController.toggleSidebar(_:)), with: nil)
+    }
+
     // Connection UI lives in Settings.
+}
+
+private struct SidebarVibrancy: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let v = NSVisualEffectView()
+        v.material = .sidebar
+        v.blendingMode = .withinWindow
+        v.state = .followsWindowActiveState
+        return v
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        // No-op; system handles reduced transparency automatically.
+    }
 }
