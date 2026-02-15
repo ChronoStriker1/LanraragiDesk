@@ -21,9 +21,6 @@ struct PairReviewView: View {
     let deleteArchive: (String) async throws -> Void
 
     @AppStorage("review.hoverPagePreview") private var hoverPagePreview: Bool = true
-    // Temporary UI aid so the user can refer to specific regions precisely.
-    // Remove once layout is finalized.
-    @AppStorage("review.debugNumberedAreas") private var debugNumberedAreas: Bool = true
 
     @State private var selection: DuplicateScanResult.Pair?
     @State private var query: String = ""
@@ -58,15 +55,9 @@ struct PairReviewView: View {
                 pairList
                     // Exactly two covers wide, per user request.
                     .frame(width: ReviewLayout.pairListWidth)
-                    .overlay(alignment: .topLeading) {
-                        if debugNumberedAreas { ReviewAreaBadge(2) }
-                    }
 
                 pairDetail
                     .frame(minWidth: 520)
-                    .overlay(alignment: .topLeading) {
-                        if debugNumberedAreas { ReviewAreaBadge(3) }
-                    }
             }
         }
         .onChange(of: query) { _, _ in selection = nil }
@@ -116,9 +107,6 @@ struct PairReviewView: View {
         .padding(14)
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(alignment: .topLeading) {
-            if debugNumberedAreas { ReviewAreaBadge(1) }
-        }
     }
 
     private var filteredPairs: [DuplicateScanResult.Pair] {
@@ -283,8 +271,7 @@ struct PairReviewView: View {
                 },
                 goNext: {
                     self.selection = next
-                },
-                debugNumberedAreas: debugNumberedAreas
+                }
             )
         )
     }
@@ -343,13 +330,14 @@ private struct PairCompareView: View {
     let deleteArchive: (String) async throws -> Void
     let reportError: (String) -> Void
     let goNext: () -> Void
-    let debugNumberedAreas: Bool
 
     @State private var confirmDeleteArcid: String?
     @State private var metaA: ArchiveMetadata?
     @State private var metaB: ArchiveMetadata?
     @State private var pagesScrollMinY: CGFloat = 0
     @State private var isDetailsCollapsed: Bool = false
+    @State private var panelScrollY: CGFloat = 0
+    @State private var panelScrollActiveID: Int? = nil
 
     var body: some View {
         GeometryReader { geo in
@@ -367,9 +355,6 @@ private struct PairCompareView: View {
                     // Keep 5 and 8 mirrored in height; overflow scrolls internally.
                     .frame(height: topHeight, alignment: .top)
                     .animation(.snappy(duration: 0.2), value: isDetailsCollapsed)
-                    .overlay(alignment: .topLeading) {
-                        if debugNumberedAreas { ReviewAreaBadge(4) }
-                    }
 
                 SyncedPagesGridView(
                     profile: profile,
@@ -381,22 +366,6 @@ private struct PairCompareView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .frame(minHeight: ReviewLayout.minPagesViewportHeight)
                 .layoutPriority(1)
-                .overlay(alignment: .topLeading) {
-                    if debugNumberedAreas { ReviewAreaBadge(7) }
-                }
-                .overlay(alignment: .topTrailing) {
-                    if debugNumberedAreas {
-                        Text("y=\(Int(pagesScrollMinY))  collapsed=\(isDetailsCollapsed ? "1" : "0")")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 5)
-                            .background(.ultraThinMaterial)
-                            .clipShape(Capsule())
-                            .padding(8)
-                            .allowsHitTesting(false)
-                    }
-                }
             }
         }
         .padding(14)
@@ -469,6 +438,9 @@ private struct PairCompareView: View {
                 showingLeft: true,
                 thumbnails: thumbnails,
                 collapsed: isDetailsCollapsed,
+                scrollY: $panelScrollY,
+                scrollActiveID: $panelScrollActiveID,
+                scrollID: 0,
                 onNotMatch: {
                     markNotDuplicate(pair)
                     goNext()
@@ -477,17 +449,11 @@ private struct PairCompareView: View {
             )
             .id(pair.arcidA)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .topLeading) {
-                if debugNumberedAreas { ReviewAreaBadge(5) }
-            }
 
             ZStack(alignment: .top) {
                 Divider()
                     .padding(.vertical, 10)
                     .frame(maxHeight: .infinity)
-                if debugNumberedAreas {
-                    ReviewAreaBadge(6)
-                }
             }
             .frame(width: 28)
 
@@ -500,6 +466,9 @@ private struct PairCompareView: View {
                 showingLeft: false,
                 thumbnails: thumbnails,
                 collapsed: isDetailsCollapsed,
+                scrollY: $panelScrollY,
+                scrollActiveID: $panelScrollActiveID,
+                scrollID: 1,
                 onNotMatch: {
                     markNotDuplicate(pair)
                     goNext()
@@ -508,33 +477,7 @@ private struct PairCompareView: View {
             )
             .id(pair.arcidB)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .topLeading) {
-                if debugNumberedAreas { ReviewAreaBadge(8) }
-            }
         }
-    }
-}
-
-private struct ReviewAreaBadge: View {
-    let n: Int
-
-    init(_ n: Int) { self.n = n }
-
-    var body: some View {
-        Text("\(n)")
-            .font(.system(size: 12, weight: .bold, design: .rounded))
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(.ultraThinMaterial)
-            .clipShape(Capsule())
-            .overlay {
-                Capsule()
-                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 1)
-            }
-            .padding(8)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
     }
 }
 
@@ -547,6 +490,9 @@ private struct ArchiveComparePanel: View {
     let showingLeft: Bool
     let thumbnails: ThumbnailLoader
     let collapsed: Bool
+    @Binding var scrollY: CGFloat
+    @Binding var scrollActiveID: Int?
+    let scrollID: Int
     let onNotMatch: () -> Void
     let onDelete: () -> Void
 
@@ -566,6 +512,15 @@ private struct ArchiveComparePanel: View {
 
             if !collapsed {
                 ScrollView(.vertical) {
+                    SyncedScrollBridge(
+                        id: scrollID,
+                        offsetY: $scrollY,
+                        activeID: $scrollActiveID
+                    )
+                    .frame(width: 1, height: 1)
+                    .opacity(0.001)
+                    .allowsHitTesting(false)
+
                     ArchiveSideTags(tagRows: tagRows, showingLeft: showingLeft)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, 2)
@@ -941,6 +896,8 @@ private struct TagChipWrap: View {
                     : AnyShapeStyle(.quaternary.opacity(0.55))
                 Text(t)
                     .font(.caption2)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 5)
                     .background {
@@ -955,8 +912,8 @@ private struct TagChipWrap: View {
 private enum TagCompareGrouper {
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
-        f.dateStyle = .medium
-        f.timeStyle = .short
+        f.locale = .autoupdatingCurrent
+        f.setLocalizedDateFormatFromTemplate("MMM d yyyy h:mm a")
         return f
     }()
 
@@ -1334,6 +1291,133 @@ private struct ScrollOffsetObserver: NSViewRepresentable {
             let y = clip.bounds.origin.y
             // Match previous convention: negative when scrolling down.
             onChange(-y)
+        }
+
+        deinit {
+            if let clipView {
+                NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: clipView)
+            }
+        }
+    }
+}
+
+private struct SyncedScrollBridge: NSViewRepresentable {
+    let id: Int
+    @Binding var offsetY: CGFloat
+    @Binding var activeID: Int?
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            id: id,
+            getOffset: { offsetY },
+            setOffset: { offsetY = $0 },
+            getActive: { activeID },
+            setActive: { activeID = $0 }
+        )
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let v = NSView(frame: .zero)
+        DispatchQueue.main.async {
+            context.coordinator.attach(to: v)
+            context.coordinator.applyOffsetFromModel()
+        }
+        return v
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            context.coordinator.attach(to: nsView)
+            context.coordinator.applyOffsetFromModel()
+        }
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        private let id: Int
+        private let getOffset: () -> CGFloat
+        private let setOffset: (CGFloat) -> Void
+        private let getActive: () -> Int?
+        private let setActive: (Int?) -> Void
+
+        private weak var scrollView: NSScrollView?
+        private weak var clipView: NSClipView?
+        private var attachRetries: Int = 0
+        private var isProgrammatic: Bool = false
+
+        init(
+            id: Int,
+            getOffset: @escaping () -> CGFloat,
+            setOffset: @escaping (CGFloat) -> Void,
+            getActive: @escaping () -> Int?,
+            setActive: @escaping (Int?) -> Void
+        ) {
+            self.id = id
+            self.getOffset = getOffset
+            self.setOffset = setOffset
+            self.getActive = getActive
+            self.setActive = setActive
+        }
+
+        func attach(to view: NSView) {
+            guard let sv = findScrollView(from: view) else {
+                if attachRetries < 12 {
+                    attachRetries += 1
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self, weak view] in
+                        guard let self, let view else { return }
+                        self.attach(to: view)
+                    }
+                }
+                return
+            }
+            if scrollView === sv { return }
+            scrollView = sv
+            attachRetries = 0
+
+            if let old = clipView {
+                NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: old)
+            }
+
+            let clip = sv.contentView
+            clipView = clip
+            clip.postsBoundsChangedNotifications = true
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(boundsDidChange(_:)),
+                name: NSView.boundsDidChangeNotification,
+                object: clip
+            )
+        }
+
+        func applyOffsetFromModel() {
+            guard let sv = scrollView, let clip = clipView else { return }
+            // Only the non-active view should follow the shared offset.
+            if getActive() == id { return }
+
+            let target = max(0, getOffset())
+            let current = clip.bounds.origin.y
+            if abs(current - target) < 0.5 { return }
+
+            isProgrammatic = true
+            clip.scroll(to: NSPoint(x: 0, y: target))
+            sv.reflectScrolledClipView(clip)
+            isProgrammatic = false
+        }
+
+        private func findScrollView(from view: NSView) -> NSScrollView? {
+            var v: NSView? = view
+            while let cur = v {
+                if let sv = cur as? NSScrollView { return sv }
+                v = cur.superview
+            }
+            return view.enclosingScrollView
+        }
+
+        @objc private func boundsDidChange(_ note: Notification) {
+            guard !isProgrammatic else { return }
+            guard let clip = note.object as? NSClipView else { return }
+            setActive(id)
+            setOffset(clip.bounds.origin.y)
         }
 
         deinit {
