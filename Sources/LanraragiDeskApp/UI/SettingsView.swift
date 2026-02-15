@@ -1,10 +1,13 @@
 import SwiftUI
+import LanraragiKit
 
 struct SettingsView: View {
     @EnvironmentObject private var appModel: AppModel
     @State private var tagMinWeight: Int = 2
     @State private var tagTTLHours: Int = 24
     @State private var tagRefreshStatus: String?
+    @State private var thumbsJobStatus: String?
+    @State private var forceThumbs: Bool = false
 
     @AppStorage("reader.readingDirection") private var readingDirectionRaw: String = ReaderDirection.ltr.rawValue
 
@@ -69,6 +72,30 @@ struct SettingsView: View {
                 .padding(8)
             }
 
+            GroupBox("Server actions") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Toggle("Force thumbnail regeneration", isOn: $forceThumbs)
+                        .font(.callout)
+
+                    HStack {
+                        Button("Regenerate Thumbnails") {
+                            Task { await regenThumbs() }
+                        }
+                        .disabled(appModel.selectedProfile == nil)
+
+                        Spacer()
+                    }
+
+                    if let thumbsJobStatus {
+                        Text(thumbsJobStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+                .padding(8)
+            }
+
             Spacer(minLength: 0)
         }
         .padding(18)
@@ -108,6 +135,34 @@ struct SettingsView: View {
         } catch {
             tagRefreshStatus = "Failed: \(error)"
             appModel.activity.add(.init(kind: .error, title: "Tag suggestions refresh failed", detail: String(describing: error)))
+        }
+    }
+
+    private func regenThumbs() async {
+        guard let profile = appModel.selectedProfile else {
+            thumbsJobStatus = "No profile selected."
+            return
+        }
+
+        thumbsJobStatus = "Starting thumbnail regeneration…"
+        do {
+            let account = "apiKey.\(profile.id.uuidString)"
+            let apiKeyString = try KeychainService.getString(account: account)
+            let apiKey = apiKeyString.map { LANraragiAPIKey($0) }
+
+            let client = LANraragiClient(configuration: .init(
+                baseURL: profile.baseURL,
+                apiKey: apiKey,
+                acceptLanguage: profile.language,
+                maxConnectionsPerHost: 4
+            ))
+
+            let job = try await client.regenerateThumbnails(force: forceThumbs)
+            thumbsJobStatus = "Minion job started: \(job.job)"
+            appModel.activity.add(.init(kind: .action, title: "Thumbnail regeneration started", detail: "job \(job.job)"))
+        } catch {
+            thumbsJobStatus = "Failed: \(error)"
+            appModel.activity.add(.init(kind: .error, title: "Thumbnail regeneration failed", detail: String(describing: error)))
         }
     }
 }

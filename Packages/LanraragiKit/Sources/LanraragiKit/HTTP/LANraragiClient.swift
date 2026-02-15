@@ -194,6 +194,49 @@ public final class LANraragiClient: @unchecked Sendable {
         return try await getJSON(path: "/api/database/stats", queryItems: queryItems)
     }
 
+    public func listPlugins() async throws -> [PluginInfo] {
+        let data = try await getData(path: "/api/plugins")
+        let obj = try JSONSerialization.jsonObject(with: data)
+
+        // Common shapes:
+        // - ["pluginA", "pluginB"]
+        // - [{"id":"...", "name":"...", "desc":"..."}]
+        // - {"plugins":[...]}
+        if let arr = obj as? [Any] {
+            return parsePluginsArray(arr)
+        }
+        if let dict = obj as? [String: Any] {
+            if let arr = dict["plugins"] as? [Any] {
+                return parsePluginsArray(arr)
+            }
+        }
+
+        return []
+    }
+
+    public func queuePlugin(pluginID: String, arcid: String, arg: String? = nil) async throws -> MinionJob {
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "plugin", value: pluginID),
+            URLQueryItem(name: "id", value: arcid),
+        ]
+        if let arg, !arg.isEmpty {
+            items.append(URLQueryItem(name: "arg", value: arg))
+        }
+        return try await getJSON(path: "/api/plugins/queue", queryItems: items)
+    }
+
+    public func runPlugin(pluginID: String, arcid: String, arg: String? = nil) async throws -> String {
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "plugin", value: pluginID),
+            URLQueryItem(name: "id", value: arcid),
+        ]
+        if let arg, !arg.isEmpty {
+            items.append(URLQueryItem(name: "arg", value: arg))
+        }
+        let data = try await getData(path: "/api/plugins/use", queryItems: items)
+        return String(decoding: data, as: UTF8.self)
+    }
+
     public func getMinionStatus(job: Int) async throws -> MinionStatus {
         try await getJSON(path: "/api/minion/\(job)")
     }
@@ -283,6 +326,31 @@ public final class LANraragiClient: @unchecked Sendable {
         req.httpMethod = "GET"
         applyDefaultHeaders(to: &req)
         return try await perform(req)
+    }
+
+    private func getData(path: String, queryItems: [URLQueryItem] = []) async throws -> Data {
+        let url = try makeURL(path: path, queryItems: queryItems)
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        applyDefaultHeaders(to: &req)
+
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await session.data(for: req)
+        } catch {
+            throw LANraragiError.transport(error)
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw LANraragiError.invalidResponse
+        }
+        if http.statusCode == 401 {
+            throw LANraragiError.unauthorized
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw LANraragiError.httpStatus(http.statusCode, body: data)
+        }
+        return data
     }
 
     private func postJSON<T: Decodable>(
@@ -378,5 +446,26 @@ public final class LANraragiClient: @unchecked Sendable {
         if let key = config.apiKey {
             req.setValue(key.bearerHeaderValue, forHTTPHeaderField: "Authorization")
         }
+    }
+
+    private func parsePluginsArray(_ arr: [Any]) -> [PluginInfo] {
+        var out: [PluginInfo] = []
+        out.reserveCapacity(arr.count)
+
+        for item in arr {
+            if let s = item as? String {
+                out.append(.init(id: s, title: s))
+            } else if let d = item as? [String: Any] {
+                let id = (d["id"] as? String) ?? (d["name"] as? String) ?? (d["plugin"] as? String) ?? ""
+                let title = (d["title"] as? String) ?? (d["name"] as? String) ?? id
+                let desc = (d["desc"] as? String) ?? (d["description"] as? String)
+                if !id.isEmpty || !title.isEmpty {
+                    out.append(.init(id: id.isEmpty ? title : id, title: title.isEmpty ? id : title, description: desc))
+                }
+            }
+        }
+
+        out.sort { a, b in a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending }
+        return out
     }
 }

@@ -11,6 +11,7 @@
 		2CC4FCA30B43919EBE99690B /* LibraryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1F2885B0666E3F9BE5689F9 /* LibraryViewModel.swift */; };
 		312DD4B589175DEA77C410C6 /* ActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A25853A38F0BC5127176B04 /* ActivityView.swift */; };
 		357E6825CEFEFA8EA5B45966 /* LanraragiDeskApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF5978E02C65E10E0EEF7643 /* LanraragiDeskApp.swift */; };
+		3698660AF1E0714F3D6AD2D1 /* PluginsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFD900A7362E768EBA9F7DB7 /* PluginsViewModel.swift */; };
 		44067B787F238A575A8D41E2 /* ActivityStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE2BADC8CB7C849ECEB31B07 /* ActivityStore.swift */; };
 		462D167127B78592933CCE35 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64DB4339053B57ED7A535ED8 /* AppModel.swift */; };
 		4984C7D6A3203AFF6C091E10 /* TagSuggestionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FFDF919F3AE218E040DC8AA /* TagSuggestionStore.swift */; };
@@ -26,6 +27,7 @@
 		7065DE50731D88BE5A3F6C36 /* ReaderRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0B4C016BE5ACCF114FD7456 /* ReaderRoute.swift */; };
 		7542369653C2D01A55CA1E70 /* IndexingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93C3DC7516031BE8557B0B91 /* IndexingViewModel.swift */; };
 		832E8A0D72B1728D28B249D3 /* ArchiveLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92B6686EDCF99DFFC6D32B78 /* ArchiveLoader.swift */; };
+		90FB6505F5E662992751636C /* PluginsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AEFB9CCF40215DA9778ED91 /* PluginsView.swift */; };
 		969C5A238935EE3AC7799BA0 /* BatchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40493C363CC7F009DAFF416E /* BatchView.swift */; };
 		9789B431AA03054EAF70EF31 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8590743AAA05E109BCF48A6E /* LibraryView.swift */; };
 		9DDDA0347F89382A644FB753 /* ImageDownsampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6032C435F51A77975C1008D7 /* ImageDownsampler.swift */; };
@@ -55,6 +57,7 @@
 		54B3E61F93FAE6A29E18E911 /* DuplicateScanViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuplicateScanViewModel.swift; sourceTree = "<group>"; };
 		55DB22001120CA1D977F2D22 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		58F7CF159983299EE64C06C5 /* ActivityEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityEvent.swift; sourceTree = "<group>"; };
+		5AEFB9CCF40215DA9778ED91 /* PluginsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginsView.swift; sourceTree = "<group>"; };
 		6032C435F51A77975C1008D7 /* ImageDownsampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageDownsampler.swift; sourceTree = "<group>"; };
 		64DB4339053B57ED7A535ED8 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		72C4199C56747CD950398BF5 /* CoverThumb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoverThumb.swift; sourceTree = "<group>"; };
@@ -76,6 +79,7 @@
 		F1F2885B0666E3F9BE5689F9 /* LibraryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryViewModel.swift; sourceTree = "<group>"; };
 		F4D929F9A0F9C6B65C283387 /* LanraragiKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = LanraragiKit; path = Packages/LanraragiKit; sourceTree = SOURCE_ROOT; };
 		FF5978E02C65E10E0EEF7643 /* LanraragiDeskApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanraragiDeskApp.swift; sourceTree = "<group>"; };
+		FFD900A7362E768EBA9F7DB7 /* PluginsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginsViewModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -105,6 +109,7 @@
 				54B3E61F93FAE6A29E18E911 /* DuplicateScanViewModel.swift */,
 				93C3DC7516031BE8557B0B91 /* IndexingViewModel.swift */,
 				F1F2885B0666E3F9BE5689F9 /* LibraryViewModel.swift */,
+				FFD900A7362E768EBA9F7DB7 /* PluginsViewModel.swift */,
 				085B815307B1D671DBC3ABFF /* SelectionModel.swift */,
 			);
 			path = ViewModels;
@@ -161,6 +166,7 @@
 				8590743AAA05E109BCF48A6E /* LibraryView.swift */,
 				99C7CE21E9CCBADBAD7844A7 /* NotMatchesView.swift */,
 				76DFDA70F6C8EF04285A3BAE /* PairReviewView.swift */,
+				5AEFB9CCF40215DA9778ED91 /* PluginsView.swift */,
 				53E76144EA3A608FC23C8A94 /* ProfileEditorView.swift */,
 				DD459C22BE11F681F28C2F38 /* ReaderView.swift */,
 				358F4E9A6F34DDEB4C2966B1 /* RootView.swift */,
@@ -280,6 +286,8 @@
 				2CC4FCA30B43919EBE99690B /* LibraryViewModel.swift in Sources */,
 				4CF1B22A3D290E0F65F546D7 /* NotMatchesView.swift in Sources */,
 				B276D2843F10809C7F019FCD /* PairReviewView.swift in Sources */,
+				90FB6505F5E662992751636C /* PluginsView.swift in Sources */,
+				3698660AF1E0714F3D6AD2D1 /* PluginsViewModel.swift in Sources */,
 				E53EB607E67003100933762A /* Profile.swift in Sources */,
 				DE9EFC3A45B2EDD7BBEEF9A0 /* ProfileEditorView.swift in Sources */,
 				F71E979E397E14D574791B80 /* ProfileStore.swift in Sources */,

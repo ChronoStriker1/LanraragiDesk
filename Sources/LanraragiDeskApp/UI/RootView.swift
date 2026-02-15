@@ -17,6 +17,7 @@ struct RootView: View {
         case settings
         case activity
         case batch
+        case plugins
     }
 
     var body: some View {
@@ -108,6 +109,10 @@ struct RootView: View {
             NavigationLink(value: Section.batch) {
                 Label("Batch", systemImage: "square.stack.3d.forward.dottedline")
             }
+
+            NavigationLink(value: Section.plugins) {
+                Label("Plugins", systemImage: "puzzlepiece.extension")
+            }
         }
         .listStyle(.sidebar)
         .navigationTitle("LanraragiDesk")
@@ -147,6 +152,9 @@ struct RootView: View {
                     .environmentObject(appModel)
             case .batch:
                 BatchView()
+                    .environmentObject(appModel)
+            case .plugins:
+                PluginsView()
                     .environmentObject(appModel)
             }
 
