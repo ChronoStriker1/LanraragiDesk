@@ -23,6 +23,7 @@
 		832E8A0D72B1728D28B249D3 /* ArchiveLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92B6686EDCF99DFFC6D32B78 /* ArchiveLoader.swift */; };
 		9789B431AA03054EAF70EF31 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8590743AAA05E109BCF48A6E /* LibraryView.swift */; };
 		9DDDA0347F89382A644FB753 /* ImageDownsampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6032C435F51A77975C1008D7 /* ImageDownsampler.swift */; };
+		A61E0D2D3C11ED4C7489E96D /* ReaderFitMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA2F400E81B9A7C645B84CDD /* ReaderFitMode.swift */; };
 		B276D2843F10809C7F019FCD /* PairReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76DFDA70F6C8EF04285A3BAE /* PairReviewView.swift */; };
 		DD475A3240478B7C7950CDE2 /* ReaderDirection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9EC55E639FCDA50A382AA2A /* ReaderDirection.swift */; };
 		DDDB37F2CDB1F904FAFF1F3C /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3A8A1896B87FF041125DD84 /* KeychainService.swift */; };
@@ -55,6 +56,7 @@
 		99CBA245A79722298EB8ADD5 /* AppPaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPaths.swift; sourceTree = "<group>"; };
 		A9EC55E639FCDA50A382AA2A /* ReaderDirection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderDirection.swift; sourceTree = "<group>"; };
 		B86D008FE0E3FC57FBA6B31A /* Profile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Profile.swift; sourceTree = "<group>"; };
+		CA2F400E81B9A7C645B84CDD /* ReaderFitMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderFitMode.swift; sourceTree = "<group>"; };
 		D0705B9BBB876D1BB705AA53 /* ProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileStore.swift; sourceTree = "<group>"; };
 		D0B4C016BE5ACCF114FD7456 /* ReaderRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderRoute.swift; sourceTree = "<group>"; };
 		D3A8A1896B87FF041125DD84 /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
@@ -122,6 +124,7 @@
 			children = (
 				B86D008FE0E3FC57FBA6B31A /* Profile.swift */,
 				A9EC55E639FCDA50A382AA2A /* ReaderDirection.swift */,
+				CA2F400E81B9A7C645B84CDD /* ReaderFitMode.swift */,
 				D0B4C016BE5ACCF114FD7456 /* ReaderRoute.swift */,
 			);
 			path = Models;
@@ -259,6 +262,7 @@
 				DE9EFC3A45B2EDD7BBEEF9A0 /* ProfileEditorView.swift in Sources */,
 				F71E979E397E14D574791B80 /* ProfileStore.swift in Sources */,
 				DD475A3240478B7C7950CDE2 /* ReaderDirection.swift in Sources */,
+				A61E0D2D3C11ED4C7489E96D /* ReaderFitMode.swift in Sources */,
 				7065DE50731D88BE5A3F6C36 /* ReaderRoute.swift in Sources */,
 				130862FF85B509435312CB5E /* ReaderView.swift in Sources */,
 				FA5BDE6D31A4CC65C617F51F /* RootView.swift in Sources */,

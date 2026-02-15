@@ -10,16 +10,24 @@ struct ReaderView: View {
     @AppStorage("reader.autoAdvanceEnabled") private var autoAdvanceEnabled: Bool = false
     @AppStorage("reader.autoAdvanceSeconds") private var autoAdvanceSeconds: Double = 8
     @AppStorage("reader.readingDirection") private var readingDirectionRaw: String = ReaderDirection.ltr.rawValue
+    @AppStorage("reader.twoPageSpread") private var twoPageSpread: Bool = false
+    @AppStorage("reader.fitMode") private var fitModeRaw: String = ReaderFitMode.fit.rawValue
+    @AppStorage("reader.zoomPercent") private var zoomPercent: Double = 100
 
     @State private var pages: [URL] = []
     @State private var pageIndex: Int = 0
 
     @State private var image: NSImage?
+    @State private var imageB: NSImage?
+    @State private var imagePixelSize: CGSize?
+    @State private var imageBPixelSize: CGSize?
     @State private var errorText: String?
 
     @State private var countdownRemaining: Int?
     @State private var timerTask: Task<Void, Never>?
     @State private var loadTask: Task<Void, Never>?
+    @State private var prefetchTask: Task<Void, Never>?
+    @State private var isViewingControls: Bool = false
 
     var body: some View {
         ZStack {
@@ -52,7 +60,7 @@ struct ReaderView: View {
                         Image(systemName: "chevron.left")
                     }
                     .help("Next page")
-                    .disabled(pageIndex >= max(0, pages.count - 1))
+                    .disabled(!canGoNext)
 
                     Button {
                         goPrev(userInitiated: true)
@@ -76,7 +84,7 @@ struct ReaderView: View {
                         Image(systemName: "chevron.right")
                     }
                     .help("Next page")
-                    .disabled(pageIndex >= max(0, pages.count - 1))
+                    .disabled(!canGoNext)
                 }
 
                 Text(pageCountText)
@@ -85,6 +93,27 @@ struct ReaderView: View {
                     .frame(minWidth: 90, alignment: .leading)
 
                 Divider()
+
+                Menu {
+                    Toggle("Two-page spread", isOn: $twoPageSpread)
+
+                    Divider()
+
+                    Picker("Fit", selection: $fitModeRaw) {
+                        ForEach(ReaderFitMode.allCases) { m in
+                            Text(m.title).tag(m.rawValue)
+                        }
+                    }
+
+                    HStack {
+                        Text("Zoom")
+                        Slider(value: $zoomPercent, in: 50...200, step: 5)
+                            .frame(width: 180)
+                    }
+                } label: {
+                    Label("View", systemImage: "rectangle.3.group")
+                }
+                .help("Reader view options")
 
                 HStack(spacing: 10) {
                     Toggle("Auto-advance", isOn: $autoAdvanceEnabled)
@@ -143,6 +172,16 @@ struct ReaderView: View {
             loadCurrentPage()
             restartAutoAdvance(reason: .pageChanged)
         }
+        .onChange(of: twoPageSpread) { _, _ in
+            loadCurrentPage()
+            restartAutoAdvance(reason: .settingsChanged)
+        }
+        .onChange(of: fitModeRaw) { _, _ in
+            restartAutoAdvance(reason: .settingsChanged)
+        }
+        .onChange(of: zoomPercent) { _, _ in
+            restartAutoAdvance(reason: .settingsChanged)
+        }
         .onChange(of: autoAdvanceEnabled) { _, _ in
             restartAutoAdvance(reason: .settingsChanged)
         }
@@ -155,11 +194,23 @@ struct ReaderView: View {
         .onDisappear {
             timerTask?.cancel()
             loadTask?.cancel()
+            prefetchTask?.cancel()
         }
     }
 
     private var readingDirection: ReaderDirection {
         ReaderDirection(rawValue: readingDirectionRaw) ?? .ltr
+    }
+
+    private var fitMode: ReaderFitMode {
+        ReaderFitMode(rawValue: fitModeRaw) ?? .fit
+    }
+
+    private var step: Int { twoPageSpread ? 2 : 1 }
+
+    private var canGoNext: Bool {
+        guard !pages.isEmpty else { return false }
+        return (pageIndex + step) <= pages.count - 1
     }
 
     @ViewBuilder
@@ -169,18 +220,28 @@ struct ReaderView: View {
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .fill(.thinMaterial)
 
-                if let image {
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .padding(10)
+                if let errorText {
+                    Text(errorText)
+                        .foregroundStyle(.red)
+                        .padding(16)
+                } else if image != nil {
+                    ReaderCanvas(
+                        image: image,
+                        imageB: twoPageSpread ? imageB : nil,
+                        pixelSize: imagePixelSize,
+                        pixelSizeB: twoPageSpread ? imageBPixelSize : nil,
+                        fitMode: fitMode,
+                        zoomPercent: zoomPercent,
+                        rtl: readingDirection == .rtl
+                    )
+                    .padding(10)
                 } else if let errorText {
                     Text(errorText)
                         .foregroundStyle(.red)
                         .padding(16)
                 } else {
                     ProgressView()
-                        .padding(20)
+                    .padding(20)
                 }
 
                 clickZones
@@ -231,10 +292,14 @@ struct ReaderView: View {
     private func loadArchive() async {
         pages = []
         image = nil
+        imageB = nil
+        imagePixelSize = nil
+        imageBPixelSize = nil
         errorText = nil
         countdownRemaining = nil
         timerTask?.cancel()
         loadTask?.cancel()
+        prefetchTask?.cancel()
 
         guard let profile = appModel.profileStore.profiles.first(where: { $0.id == route.profileID }) else {
             errorText = "Profile not found"
@@ -256,6 +321,9 @@ struct ReaderView: View {
     private func loadCurrentPage() {
         loadTask?.cancel()
         image = nil
+        imageB = nil
+        imagePixelSize = nil
+        imageBPixelSize = nil
         errorText = nil
 
         guard let profile = appModel.profileStore.profiles.first(where: { $0.id == route.profileID }) else {
@@ -266,21 +334,68 @@ struct ReaderView: View {
             errorText = "Missing page"
             return
         }
-        let url = pages[pageIndex]
+        let urlA = pages[pageIndex]
+        let idxB = pageIndex + 1
+        let urlB = (twoPageSpread && idxB < pages.count) ? pages[idxB] : nil
 
         loadTask = Task {
             do {
-                let bytes = try await appModel.archives.bytes(profile: profile, url: url)
-                let img = await MainActor.run { ImageDownsampler.thumbnail(from: bytes, maxPixelSize: 2200) }
+                let bytesA = try await appModel.archives.bytes(profile: profile, url: urlA)
+                let pxA = ImageDownsampler.pixelSize(from: bytesA)
+                let imgA = await MainActor.run { ImageDownsampler.thumbnail(from: bytesA, maxPixelSize: 2400) }
                 if Task.isCancelled { return }
-                if let img {
-                    self.image = img
+                if let imgA {
+                    self.image = imgA
+                    self.imagePixelSize = pxA
                 } else {
                     self.errorText = "Decode failed"
                 }
+
+                if let urlB {
+                    let bytesB = try await appModel.archives.bytes(profile: profile, url: urlB)
+                    let pxB = ImageDownsampler.pixelSize(from: bytesB)
+                    let imgB = await MainActor.run { ImageDownsampler.thumbnail(from: bytesB, maxPixelSize: 2400) }
+                    if Task.isCancelled { return }
+                    self.imageB = imgB
+                    self.imageBPixelSize = pxB
+                }
+
+                startPrefetch(profile: profile)
             } catch {
                 if Task.isCancelled { return }
                 self.errorText = ErrorPresenter.short(error)
+            }
+        }
+    }
+
+    private func startPrefetch(profile: Profile) {
+        prefetchTask?.cancel()
+
+        guard !pages.isEmpty else { return }
+        let candidates: [Int] = {
+            if twoPageSpread {
+                return [pageIndex + 2, pageIndex + 3, pageIndex - 1]
+            } else {
+                return [pageIndex + 1, pageIndex + 2, pageIndex - 1]
+            }
+        }()
+        let indices = candidates.filter { $0 >= 0 && $0 < pages.count }
+        if indices.isEmpty { return }
+
+        prefetchTask = Task.detached(priority: .utility) { [pages] in
+            await withTaskGroup(of: Void.self) { group in
+                // Prefetch is intentionally light: decode a downsampled image and let ArchiveLoader manage bytes.
+                for idx in indices.prefix(3) {
+                    group.addTask {
+                        do {
+                            let url = pages[idx]
+                            let bytes = try await self.appModel.archives.bytes(profile: profile, url: url)
+                            _ = ImageDownsampler.thumbnail(from: bytes, maxPixelSize: 1800)
+                        } catch {
+                            // Best-effort prefetch; ignore errors.
+                        }
+                    }
+                }
             }
         }
     }
@@ -335,13 +450,16 @@ struct ReaderView: View {
         if userInitiated {
             restartAutoAdvance(reason: .userInteraction)
         }
-        guard pageIndex < pages.count - 1 else {
+        guard !pages.isEmpty else { return }
+
+        let next = min(pages.count - 1, pageIndex + step)
+        guard next != pageIndex else {
             if autoAdvanceEnabled {
                 autoAdvanceEnabled = false
             }
             return
         }
-        pageIndex += 1
+        pageIndex = next
     }
 
     private func goPrev(userInitiated: Bool) {
@@ -349,7 +467,7 @@ struct ReaderView: View {
             restartAutoAdvance(reason: .userInteraction)
         }
         guard pageIndex > 0 else { return }
-        pageIndex -= 1
+        pageIndex = max(0, pageIndex - step)
     }
 
     private func handleKeyDown(_ event: NSEvent) {
@@ -365,8 +483,87 @@ struct ReaderView: View {
             }
         case 53: // escape
             dismiss()
+        case 24, 69: // + on some keyboards, numpad +
+            zoomPercent = min(200, zoomPercent + 10)
+        case 27, 78: // - on some keyboards, numpad -
+            zoomPercent = max(50, zoomPercent - 10)
+        case 29: // 0
+            zoomPercent = 100
         default:
             break
+        }
+    }
+}
+
+private struct ReaderCanvas: View {
+    let image: NSImage?
+    let imageB: NSImage?
+    let pixelSize: CGSize?
+    let pixelSizeB: CGSize?
+    let fitMode: ReaderFitMode
+    let zoomPercent: Double
+    let rtl: Bool
+
+    var body: some View {
+        GeometryReader { geo in
+            let scale = scaleFor(container: geo.size)
+            let z = max(0.5, min(2.0, zoomPercent / 100))
+            let finalScale = scale * z
+
+            ScrollView([.horizontal, .vertical]) {
+                HStack(alignment: .top, spacing: 16) {
+                    if rtl, let b = imageB {
+                        pageImage(b, px: pixelSizeB, scale: finalScale)
+                        pageImage(image, px: pixelSize, scale: finalScale)
+                    } else {
+                        pageImage(image, px: pixelSize, scale: finalScale)
+                        if let b = imageB {
+                            pageImage(b, px: pixelSizeB, scale: finalScale)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(8)
+            }
+            .scrollIndicators(.hidden)
+        }
+    }
+
+    @ViewBuilder
+    private func pageImage(_ img: NSImage?, px: CGSize?, scale: CGFloat) -> some View {
+        if let img, let px {
+            Image(nsImage: img)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: px.width * scale, height: px.height * scale)
+                .background(Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        } else if let img {
+            Image(nsImage: img)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+        }
+    }
+
+    private func scaleFor(container: CGSize) -> CGFloat {
+        guard let px = pixelSize, px.width > 0, px.height > 0 else { return 1 }
+        let availableW = max(1, container.width - 20)
+        let availableH = max(1, container.height - 20)
+
+        switch fitMode {
+        case .actualSize:
+            return 1
+        case .fitWidth:
+            let spreadCount: CGFloat = imageB == nil ? 1 : 2
+            let totalW = px.width * spreadCount + (imageB == nil ? 0 : 16)
+            return min(10, availableW / max(1, totalW))
+        case .fit:
+            let spreadCount: CGFloat = imageB == nil ? 1 : 2
+            let totalW = px.width * spreadCount + (imageB == nil ? 0 : 16)
+            let wScale = availableW / max(1, totalW)
+            let hScale = availableH / max(1, px.height)
+            return min(10, min(wScale, hScale))
         }
     }
 }

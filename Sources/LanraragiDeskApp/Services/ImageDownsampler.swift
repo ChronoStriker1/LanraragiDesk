@@ -4,6 +4,16 @@ import ImageIO
 import Foundation
 
 enum ImageDownsampler {
+    static func pixelSize(from data: Data) -> CGSize? {
+        let cfData = data as CFData
+        guard let src = CGImageSourceCreateWithData(cfData, nil) else { return nil }
+        guard let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any] else { return nil }
+        let w = props[kCGImagePropertyPixelWidth] as? CGFloat
+        let h = props[kCGImagePropertyPixelHeight] as? CGFloat
+        guard let w, let h, w > 0, h > 0 else { return nil }
+        return .init(width: w, height: h)
+    }
+
     static func resolutionText(from data: Data) -> String? {
         let cfData = data as CFData
         guard let src = CGImageSourceCreateWithData(cfData, nil) else { return nil }
@@ -29,4 +39,3 @@ enum ImageDownsampler {
         return NSImage(cgImage: cg, size: .zero)
     }
 }
-
