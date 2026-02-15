@@ -33,19 +33,6 @@ struct RootView: View {
 
             content
         }
-        .toolbar(removing: .sidebarToggle)
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Button {
-                    toggleSidebar()
-                } label: {
-                    Image(systemName: "sidebar.leading")
-                }
-                .help("Toggle Sidebar")
-                // Keep stable sizing so the control doesn't jump as the window state changes.
-                .frame(width: 32, height: 22, alignment: .center)
-            }
-        }
         .onAppear {
             appModel.selectFirstIfNeeded()
             if appModel.selectedProfile == nil {
@@ -86,53 +73,59 @@ struct RootView: View {
     }
 
     private func sidebar(profile: Profile) -> some View {
-        List(selection: $section) {
-            NavigationLink(value: Section.library) {
-                Label("Library", systemImage: "books.vertical")
-            }
-            .buttonStyle(.plain)
+        ZStack {
+            // Finder-like frosted background that respects system reduced-transparency settings.
+            SidebarVibrancy()
+                .ignoresSafeArea()
 
-            Divider()
+            List(selection: $section) {
+                NavigationLink(value: Section.library) {
+                    Label("Library", systemImage: "books.vertical")
+                }
+                .buttonStyle(.plain)
 
-            NavigationLink(value: Section.duplicates) {
-                Label("Duplicates", systemImage: "doc.on.doc")
-            }
-            .buttonStyle(.plain)
+                Divider()
 
-            // Only show Review when it's usable (after a scan produced results).
-            if appModel.duplicates.result != nil {
-                NavigationLink(value: Section.review) {
-                    Label("Review", systemImage: "square.stack.3d.up")
+                NavigationLink(value: Section.duplicates) {
+                    Label("Duplicates", systemImage: "doc.on.doc")
+                }
+                .buttonStyle(.plain)
+
+                // Only show Review when it's usable (after a scan produced results).
+                if appModel.duplicates.result != nil {
+                    NavigationLink(value: Section.review) {
+                        Label("Review", systemImage: "square.stack.3d.up")
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                NavigationLink(value: Section.activity) {
+                    Label("Activity", systemImage: "list.bullet.rectangle")
+                }
+                .buttonStyle(.plain)
+
+                NavigationLink(value: Section.batch) {
+                    Label("Batch", systemImage: "square.stack.3d.forward.dottedline")
+                }
+                .buttonStyle(.plain)
+
+                NavigationLink(value: Section.plugins) {
+                    Label("Plugins", systemImage: "puzzlepiece.extension")
+                }
+                .buttonStyle(.plain)
+
+                Divider()
+
+                NavigationLink(value: Section.settings) {
+                    Label("Settings", systemImage: "gearshape")
                 }
                 .buttonStyle(.plain)
             }
-
-            NavigationLink(value: Section.activity) {
-                Label("Activity", systemImage: "list.bullet.rectangle")
-            }
-            .buttonStyle(.plain)
-
-            NavigationLink(value: Section.batch) {
-                Label("Batch", systemImage: "square.stack.3d.forward.dottedline")
-            }
-            .buttonStyle(.plain)
-
-            NavigationLink(value: Section.plugins) {
-                Label("Plugins", systemImage: "puzzlepiece.extension")
-            }
-            .buttonStyle(.plain)
-
-            Divider()
-
-            NavigationLink(value: Section.settings) {
-                Label("Settings", systemImage: "gearshape")
-            }
-            .buttonStyle(.plain)
+            .listStyle(.sidebar)
+            .labelStyle(.titleAndIcon)
+            .scrollContentBackground(.hidden)
+            .listRowBackground(Color.clear)
         }
-        .listStyle(.sidebar)
-        .labelStyle(.titleAndIcon)
-        .scrollContentBackground(.hidden)
-        .background(SidebarVibrancy())
         .navigationTitle("LanraragiDesk")
     }
 
@@ -326,10 +319,6 @@ struct RootView: View {
             }
             .font(.callout)
         }
-    }
-
-    private func toggleSidebar() {
-        NSApp.keyWindow?.firstResponder?.tryToPerform(#selector(NSSplitViewController.toggleSidebar(_:)), with: nil)
     }
 
     // Connection UI lives in Settings.

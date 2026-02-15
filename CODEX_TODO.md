@@ -124,7 +124,9 @@ It is intentionally pragmatic and may be blunt.
 - Library:
   - Default sort tries newest-first and falls back gracefully with banner.
   - Search suggestions do not spam network (debounced).
+  - Search text does not apply until the user presses Search/Enter; filters (New/Untagged/Category) apply immediately.
   - Cover overlays: NEW/date/page count.
+  - List view is a Table (columns, multi-sort).
   - Hover popover shows full title/summary/tags; clicking a tag appends the raw tag token into the search field (search does not auto-run).
 
 ## Process

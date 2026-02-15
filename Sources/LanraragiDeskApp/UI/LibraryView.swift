@@ -10,10 +10,17 @@ struct LibraryView: View {
     let profile: Profile
 
     @StateObject private var vm = LibraryViewModel()
+    @State private var queryDraft: String = ""
     @State private var tagSuggestions: [TagSuggestionStore.Suggestion] = []
     @State private var suggestionTask: Task<Void, Never>?
     @State private var editingMeta: EditorRoute?
     @FocusState private var searchFocused: Bool
+
+    // Used by list/table view to avoid refetching metadata per-cell.
+    @State private var metaByArcid: [String: ArchiveMetadata] = [:]
+    @State private var listSortOrder: [KeyPathComparator<LibraryListRow>] = [
+        .init(\.dateAddedSortKey, order: .reverse)
+    ]
 
     struct EditorRoute: Identifiable, Hashable {
         let arcid: String
@@ -53,6 +60,9 @@ struct LibraryView: View {
             .environmentObject(appModel)
         }
         .onAppear {
+            if queryDraft.isEmpty {
+                queryDraft = vm.query
+            }
             if vm.arcids.isEmpty {
                 vm.refresh(profile: profile)
             }
@@ -88,21 +98,23 @@ struct LibraryView: View {
                 .pickerStyle(.segmented)
                 .frame(width: 140)
 
-                Picker("Sort", selection: $vm.sort) {
-                    ForEach(LibraryViewModel.Sort.allCases) { s in
-                        Text(s.title).tag(s)
+                if vm.layout == .grid {
+                    Picker("Sort", selection: $vm.sort) {
+                        ForEach(LibraryViewModel.Sort.allCases) { s in
+                            Text(s.title).tag(s)
+                        }
                     }
+                    .frame(width: 170)
                 }
-                .frame(width: 170)
             }
 
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 6) {
-                    TextField("Search…", text: $vm.query)
+                    TextField("Search…", text: $queryDraft)
                         .textFieldStyle(.roundedBorder)
                         .focused($searchFocused)
                         .onSubmit { handleSearchSubmit() }
-                        .onChange(of: vm.query) { _, _ in
+                        .onChange(of: queryDraft) { _, _ in
                             queueSuggestionRefresh()
                         }
                         .frame(width: 520)
@@ -112,14 +124,16 @@ struct LibraryView: View {
                 .zIndex(10)
 
                 Button("Search") {
+                    vm.query = queryDraft
                     vm.refresh(profile: profile)
                 }
 
                 Button("Clear") {
+                    queryDraft = ""
                     vm.query = ""
                     vm.refresh(profile: profile)
                 }
-                .disabled(vm.query.isEmpty)
+                .disabled(queryDraft.isEmpty)
 
                 Spacer()
             }
@@ -179,9 +193,9 @@ struct LibraryView: View {
     }
 
     private var tagSuggestionList: some View {
-        let info = currentTokenInfo()
+        let info = currentTokenInfo(queryDraft)
         let q = info.lookupPrefix.trimmingCharacters(in: .whitespacesAndNewlines)
-        let minChars = info.hasTagPrefix ? 1 : 2
+        let minChars = 1
         let eligible = q.count >= minChars
 
         // Always reserve space under the search field so suggestions are reliably visible.
@@ -230,8 +244,6 @@ struct LibraryView: View {
             }
         }
         .frame(width: 520, alignment: .leading)
-        .opacity(searchFocused || eligible ? 1 : 0)
-        .animation(.easeInOut(duration: 0.12), value: searchFocused)
     }
 
     private var pinnedCategoryButtons: some View {
@@ -268,23 +280,12 @@ struct LibraryView: View {
 
         // Insert the raw tag token (ex: "female:ahegao" or "vanilla") without adding "tag:".
         let token = t
-        let needsSpace = !vm.query.isEmpty && !vm.query.hasSuffix(" ")
-        vm.query = vm.query + (needsSpace ? " " : "") + token + " "
+        let needsSpace = !queryDraft.isEmpty && !queryDraft.hasSuffix(" ")
+        queryDraft = queryDraft + (needsSpace ? " " : "") + token + " "
     }
 
     private func handleSearchSubmit() {
-        let info = currentTokenInfo()
-        let q = info.lookupPrefix.trimmingCharacters(in: .whitespacesAndNewlines)
-        let minChars = info.hasTagPrefix ? 1 : 2
-        let eligible = q.count >= minChars
-
-        // If suggestions are visible, Enter completes the top suggestion first; press Search (button)
-        // or Enter again to run the search.
-        if eligible, let first = tagSuggestions.first, !vm.query.hasSuffix(" ") {
-            applySuggestion(first.value)
-            return
-        }
-
+        vm.query = queryDraft
         vm.refresh(profile: profile)
     }
 
@@ -338,45 +339,7 @@ struct LibraryView: View {
             .debugFrameNumber(2)
 
         case .list:
-            List {
-                ForEach(vm.arcids, id: \.self) { arcid in
-                    LibraryRow(profile: profile, arcid: arcid, onSelectTag: addTagToQuery)
-                        .environmentObject(appModel)
-                        .contentShape(Rectangle())
-                        .contextMenu {
-                            Button("Open Reader") {
-                                openWindow(value: ReaderRoute(profileID: profile.id, arcid: arcid))
-                            }
-                            Button("Edit Metadata…") {
-                                editingMeta = EditorRoute(arcid: arcid)
-                            }
-                            Divider()
-                            Button("Copy Archive ID") {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(arcid, forType: .string)
-                            }
-                        }
-                        .onTapGesture {
-                            openWindow(value: ReaderRoute(profileID: profile.id, arcid: arcid))
-                        }
-                        .onAppear {
-                            if arcid == vm.arcids.last {
-                                Task { await vm.loadMore(profile: profile) }
-                            }
-                        }
-                }
-
-                if vm.isLoading {
-                    HStack {
-                        Spacer()
-                        ProgressView()
-                        Spacer()
-                    }
-                }
-            }
-            .listStyle(.inset)
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .debugFrameNumber(2)
+            libraryTable
         }
     }
 
@@ -390,10 +353,123 @@ struct LibraryView: View {
         }
     }
 
+    private var listRows: [LibraryListRow] {
+        vm.arcids.map { arcid in
+            let meta = metaByArcid[arcid]
+            return LibraryListRow(arcid: arcid, meta: meta)
+        }
+    }
+
+    private var sortedListRows: [LibraryListRow] {
+        listRows.sorted(using: listSortOrder)
+    }
+
+    private var libraryTable: some View {
+        Table(sortedListRows, sortOrder: $listSortOrder) {
+            TableColumn("Select") { row in
+                Button {
+                    appModel.selection.toggle(row.arcid)
+                } label: {
+                    Image(systemName: appModel.selection.contains(row.arcid) ? "checkmark.square.fill" : "square")
+                        .foregroundStyle(appModel.selection.contains(row.arcid) ? .green : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Select for batch operations")
+            }
+            .width(min: 54, ideal: 54, max: 54)
+
+            TableColumn("Title", value: \.title) { row in
+                HStack(spacing: 10) {
+                    CoverThumb(profile: profile, arcid: row.arcid, thumbnails: appModel.thumbnails, size: .init(width: 38, height: 52))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                    Text(row.title)
+                        .font(.callout)
+                        .lineLimit(1)
+                }
+                .task(id: row.arcid) {
+                    if metaByArcid[row.arcid] != nil { return }
+                    do {
+                        let meta = try await appModel.archives.metadata(profile: profile, arcid: row.arcid)
+                        await MainActor.run { metaByArcid[row.arcid] = meta }
+                    } catch {
+                        // Leave as-is; cover/title still show.
+                    }
+                }
+                .onAppear {
+                    if row.arcid == vm.arcids.last {
+                        Task { await vm.loadMore(profile: profile) }
+                    }
+                }
+                .onTapGesture(count: 2) {
+                    openWindow(value: ReaderRoute(profileID: profile.id, arcid: row.arcid))
+                }
+                .contextMenu {
+                    Button("Open Reader") {
+                        openWindow(value: ReaderRoute(profileID: profile.id, arcid: row.arcid))
+                    }
+                    Button("Edit Metadata…") {
+                        editingMeta = EditorRoute(arcid: row.arcid)
+                    }
+                    Divider()
+                    Button("Copy Archive ID") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(row.arcid, forType: .string)
+                    }
+                }
+            }
+
+            TableColumn("New", value: \.isNewSortKey) { row in
+                if row.isNew {
+                    Text("NEW")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.green)
+                } else {
+                    Text("")
+                }
+            }
+            .width(min: 52, ideal: 52, max: 70)
+
+            TableColumn("Date", value: \.dateAddedSortKey) { row in
+                Text(row.dateAddedText)
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .width(min: 110, ideal: 120, max: 160)
+
+            TableColumn("Artist", value: \.artist) { row in
+                Text(row.artist)
+                    .font(.callout)
+                    .foregroundStyle(row.artist.isEmpty ? .secondary : .primary)
+                    .lineLimit(1)
+            }
+            .width(min: 120, ideal: 160)
+
+            TableColumn("Group", value: \.group) { row in
+                Text(row.group)
+                    .font(.callout)
+                    .foregroundStyle(row.group.isEmpty ? .secondary : .primary)
+                    .lineLimit(1)
+            }
+            .width(min: 120, ideal: 160)
+
+            TableColumn("Tags", value: \.tags) { row in
+                Text(row.tags)
+                    .font(.callout)
+                    .foregroundStyle(row.tags.isEmpty ? .secondary : .primary)
+                    .lineLimit(1)
+            }
+            .width(min: 220, ideal: 380)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(.thinMaterial)
+        .debugFrameNumber(2)
+    }
+
     private func refreshSuggestions() async {
-        let info = currentTokenInfo()
+        let info = currentTokenInfo(queryDraft)
         let q = info.lookupPrefix.trimmingCharacters(in: .whitespacesAndNewlines)
-        let minChars = info.hasTagPrefix ? 1 : 2
+        let minChars = 1
         guard q.count >= minChars else {
             await MainActor.run { tagSuggestions = [] }
             return
@@ -408,10 +484,10 @@ struct LibraryView: View {
     }
 
     private func applySuggestion(_ value: String) {
-        let info = currentTokenInfo()
+        let info = currentTokenInfo(queryDraft)
         let trimmedRaw = info.raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedRaw.isEmpty else {
-            vm.query = value + " "
+            queryDraft = value + " "
             tagSuggestions = []
             return
         }
@@ -420,10 +496,10 @@ struct LibraryView: View {
         let token = (info.isNegated ? "-" : "") + preservedTagPrefix + value
 
         if let range = info.range {
-            let head = String(vm.query[..<range.lowerBound])
-            vm.query = head + token + " "
+            let head = String(queryDraft[..<range.lowerBound])
+            queryDraft = head + token + " "
         } else {
-            vm.query = token + " "
+            queryDraft = token + " "
         }
         tagSuggestions = []
     }
@@ -436,8 +512,8 @@ struct LibraryView: View {
         var lookupPrefix: String
     }
 
-    private func currentTokenInfo() -> TokenInfo {
-        let q = vm.query
+    private func currentTokenInfo(_ query: String) -> TokenInfo {
+        let q = query
         if q.isEmpty {
             return TokenInfo(raw: "", range: nil, isNegated: false, hasTagPrefix: false, lookupPrefix: "")
         }
@@ -473,6 +549,49 @@ struct LibraryView: View {
             hasTagPrefix: hasTagPrefix,
             lookupPrefix: raw
         )
+    }
+}
+
+private struct LibraryListRow: Identifiable, Hashable {
+    let arcid: String
+
+    let isNew: Bool
+    let dateAdded: Date?
+    let title: String
+    let artist: String
+    let group: String
+    let tags: String
+
+    var id: String { arcid }
+
+    // Sort keys must be non-optional.
+    var isNewSortKey: Int { isNew ? 1 : 0 }
+    var dateAddedSortKey: Double { dateAdded?.timeIntervalSince1970 ?? 0 }
+
+    var dateAddedText: String {
+        guard let dateAdded else { return "" }
+        return Self.dateFormatter.string(from: dateAdded)
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .none
+        return f
+    }()
+
+    init(arcid: String, meta: ArchiveMetadata?) {
+        self.arcid = arcid
+
+        let t = meta?.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.title = t.isEmpty ? "Untitled" : t
+        self.tags = (meta?.tags ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+
+        self.isNew = meta?.isnew ?? false
+        self.dateAdded = ArchiveMetaHelpers.dateAdded(meta)
+
+        self.artist = ArchiveMetaHelpers.artists(meta).joined(separator: ", ")
+        self.group = ArchiveMetaHelpers.groups(meta).joined(separator: ", ")
     }
 }
 
@@ -569,11 +688,20 @@ private struct LibraryCard: View {
                 .font(.callout)
                 .lineLimit(2)
 
-            if let line = ArchiveMetaHelpers.artistGroupLine(meta), !line.isEmpty {
-                Text(line)
+            let artists = ArchiveMetaHelpers.artists(meta)
+            if !artists.isEmpty {
+                Text("Artist: " + artists.joined(separator: ", "))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .lineLimit(1)
+            }
+
+            let groups = ArchiveMetaHelpers.groups(meta)
+            if !groups.isEmpty {
+                Text("Group: " + groups.joined(separator: ", "))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
         }
         .padding(10)
@@ -1062,6 +1190,16 @@ private enum ArchiveMetaHelpers {
         if let d = meta.dateAdded { return d }
         guard let tags = meta.tags else { return nil }
         return parseDateAddedTag(tags)
+    }
+
+    static func artists(_ meta: ArchiveMetadata?) -> [String] {
+        guard let tags = meta?.tags else { return [] }
+        return values(in: tags, namespace: "artist")
+    }
+
+    static func groups(_ meta: ArchiveMetadata?) -> [String] {
+        guard let tags = meta?.tags else { return [] }
+        return values(in: tags, namespace: "group")
     }
 
     static func artistGroupLine(_ meta: ArchiveMetadata?) -> String? {

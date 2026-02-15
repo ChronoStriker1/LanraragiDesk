@@ -12,9 +12,10 @@ This is a personal project intended to be published on GitHub (not the Mac App S
   - Default sort: **Newest added first** (`date_added desc`), with an automatic fallback to Title if the server rejects it
   - Cover overlays: **NEW**, **Date added**, **Page count**
   - Hover a cover to show the selection checkbox (top-left)
-  - Shows **Artist** and **Group** (when present) under the title
+  - Shows **Artist** and **Group** (when present) under the title (on separate lines)
   - Hover a cover to see full **Title**, **Summary**, and grouped **Tags** (click tags to add them to search)
-  - Search + tag suggestions (shown under the search field)
+  - Search + tag suggestions (shown under the search field; results update when you press Search)
+  - List view uses a table with columns: Select, Title, New, Date, Artist, Group, Tags (sortable and re-orderable)
   - Filters: New only, Untagged only, Category (server-backed)
   - Right-click: open Reader, edit metadata, copy archive id
 - **Duplicates**
