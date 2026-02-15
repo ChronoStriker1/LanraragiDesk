@@ -221,6 +221,7 @@ struct RootView: View {
         .padding(18)
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .debugFrameNumber(1)
     }
 
     @ViewBuilder

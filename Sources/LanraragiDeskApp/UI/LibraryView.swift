@@ -165,6 +165,7 @@ struct LibraryView: View {
         .padding(18)
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .debugFrameNumber(1)
     }
 
     @ViewBuilder
@@ -214,6 +215,7 @@ struct LibraryView: View {
             }
             .background(.thinMaterial)
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .debugFrameNumber(2)
 
         case .list:
             List {
@@ -254,6 +256,7 @@ struct LibraryView: View {
             }
             .listStyle(.inset)
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .debugFrameNumber(2)
         }
     }
 

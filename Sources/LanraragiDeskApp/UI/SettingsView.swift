@@ -71,6 +71,7 @@ struct SettingsView: View {
                 }
                 .padding(8)
             }
+            .debugFrameNumber(1)
 
             GroupBox("Reader") {
                 VStack(alignment: .leading, spacing: 12) {
@@ -92,6 +93,7 @@ struct SettingsView: View {
                 }
                 .padding(8)
             }
+            .debugFrameNumber(2)
 
             GroupBox("Performance") {
                 VStack(alignment: .leading, spacing: 12) {
@@ -111,6 +113,7 @@ struct SettingsView: View {
                 }
                 .padding(8)
             }
+            .debugFrameNumber(3)
 
             GroupBox("Tag suggestions") {
                 VStack(alignment: .leading, spacing: 12) {
@@ -138,6 +141,7 @@ struct SettingsView: View {
                 }
                 .padding(8)
             }
+            .debugFrameNumber(4)
 
             GroupBox("Server actions") {
                 VStack(alignment: .leading, spacing: 12) {
@@ -162,6 +166,7 @@ struct SettingsView: View {
                 }
                 .padding(8)
             }
+            .debugFrameNumber(5)
 
             Spacer(minLength: 0)
         }
