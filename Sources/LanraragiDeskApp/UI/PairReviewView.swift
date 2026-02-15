@@ -508,27 +508,28 @@ private struct ArchiveComparePanel: View {
                 onDelete: onDelete
             )
 
-            ArchiveSideDetails(meta: meta, other: other)
+            ScrollView(.vertical) {
+                SyncedScrollBridge(
+                    id: scrollID,
+                    offsetY: $scrollY,
+                    activeID: $scrollActiveID
+                )
+                .frame(width: 1, height: 1)
+                .opacity(0.001)
+                .allowsHitTesting(false)
 
-            if !collapsed {
-                ScrollView(.vertical) {
-                    SyncedScrollBridge(
-                        id: scrollID,
-                        offsetY: $scrollY,
-                        activeID: $scrollActiveID
-                    )
-                    .frame(width: 1, height: 1)
-                    .opacity(0.001)
-                    .allowsHitTesting(false)
+                ArchiveSideDetails(meta: meta, other: other)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
+                if !collapsed {
                     ArchiveSideTags(tagRows: tagRows, showingLeft: showingLeft)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.top, 2)
+                        .padding(.top, 10)
                         .padding(.trailing, 4)
                 }
-                .scrollIndicators(.visible)
-                .frame(maxHeight: .infinity, alignment: .top)
             }
+            .scrollIndicators(.visible)
+            .frame(maxHeight: .infinity, alignment: .top)
         }
         .padding(collapsed ? 8 : 12)
         .background(.quaternary.opacity(0.35))
@@ -746,14 +747,19 @@ private struct ArchiveSideDetails: View {
             MetaRow(label: "Pages", value: stringOrDash(meta?.pagecount.map(String.init)), different: meta?.pagecount != other?.pagecount)
             MetaRow(label: "Extension", value: stringOrDash(meta?.fileExtension), different: normalized(meta?.fileExtension) != normalized(other?.fileExtension))
             MetaRow(label: "Size", value: stringOrDash(sizeString(meta?.size)), different: meta?.size != other?.size)
-            MetaRow(label: "Filename", value: stringOrDash(meta?.filename), different: normalized(meta?.filename) != normalized(other?.filename), lineLimit: 2)
-            MetaRow(label: "Added", value: stringOrDash(addedString(from: meta?.tags)), different: addedString(from: meta?.tags) != addedString(from: other?.tags))
-            MetaRow(label: "Summary", value: stringOrDash(meta?.summary), different: normalized(meta?.summary) != normalized(other?.summary), lineLimit: 4)
+            MetaRow(label: "Filename", value: stringOrDash(meta?.filename), different: normalized(meta?.filename) != normalized(other?.filename))
+            MetaRow(
+                label: "Added",
+                value: stringOrDash(addedString(from: meta?.tags)),
+                different: addedString(from: meta?.tags) != addedString(from: other?.tags),
+                lineLimit: 1
+            )
+            MetaRow(label: "Summary", value: stringOrDash(meta?.summary), different: normalized(meta?.summary) != normalized(other?.summary))
             MetaRow(
                 label: "Source",
                 value: stringOrDash(sourceString(from: meta?.tags)),
                 different: normalized(sourceString(from: meta?.tags)) != normalized(sourceString(from: other?.tags)),
-                lineLimit: 3
+                lineLimit: nil
             )
         }
         .font(.caption)
@@ -813,7 +819,7 @@ private struct MetaRow: View {
     let label: String
     let value: String
     let different: Bool
-    var lineLimit: Int = 1
+    var lineLimit: Int? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -823,6 +829,7 @@ private struct MetaRow: View {
 
             Text(value)
                 .lineLimit(lineLimit)
+                .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 3)
