@@ -55,6 +55,7 @@ struct LibraryView: View {
             if vm.arcids.isEmpty {
                 vm.refresh(profile: profile)
             }
+            Task { await vm.loadCategories(profile: profile) }
         }
         .onChange(of: vm.sort) { _, _ in
             vm.refresh(profile: profile)
@@ -63,6 +64,9 @@ struct LibraryView: View {
             vm.refresh(profile: profile)
         }
         .onChange(of: vm.untaggedOnly) { _, _ in
+            vm.refresh(profile: profile)
+        }
+        .onChange(of: vm.categoryID) { _, _ in
             vm.refresh(profile: profile)
         }
     }
@@ -152,11 +156,41 @@ struct LibraryView: View {
                     }
 
                     HStack(spacing: 10) {
-                        TextField("Category (optional)", text: $vm.category)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(maxWidth: 280)
-                            .onSubmit { vm.refresh(profile: profile) }
+                        Picker("Category", selection: $vm.categoryID) {
+                            Text("All categories").tag("")
+
+                            let pinned = vm.categories.filter { $0.pinned }
+                            let unpinned = vm.categories.filter { !$0.pinned }
+
+                            if !pinned.isEmpty {
+                                Divider()
+                                ForEach(pinned, id: \.id) { c in
+                                    Label(c.name, systemImage: "pin.fill").tag(c.id)
+                                }
+                            }
+
+                            if !unpinned.isEmpty {
+                                Divider()
+                                ForEach(unpinned, id: \.id) { c in
+                                    Text(c.name).tag(c.id)
+                                }
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .frame(maxWidth: 340, alignment: .leading)
+
+                        if vm.isLoadingCategories {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                        }
                         Spacer()
+                    }
+
+                    if let s = vm.categoriesStatusText {
+                        Text("Categories unavailable: \(s)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
                     }
                 }
                 .padding(.top, 6)
@@ -271,9 +305,10 @@ struct LibraryView: View {
     }
 
     private func refreshSuggestions() async {
-        let (prefix, _) = currentToken()
-        let q = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard q.count >= 2 else {
+        let info = currentTokenInfo()
+        let q = info.lookupPrefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        let minChars = info.hasTagPrefix ? 1 : 2
+        guard q.count >= minChars else {
             await MainActor.run { tagSuggestions = [] }
             return
         }
@@ -287,18 +322,18 @@ struct LibraryView: View {
     }
 
     private func applySuggestion(_ value: String) {
-        let (prefix, range) = currentToken()
-        let trimmedPrefix = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedPrefix.isEmpty else {
+        let info = currentTokenInfo()
+        let trimmedRaw = info.raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedRaw.isEmpty else {
             vm.query = value + " "
             tagSuggestions = []
             return
         }
 
-        let isNegated = trimmedPrefix.hasPrefix("-")
-        let token = (isNegated ? "-" : "") + value
+        let preservedTagPrefix = info.hasTagPrefix ? "tag:" : ""
+        let token = (info.isNegated ? "-" : "") + preservedTagPrefix + value
 
-        if let range {
+        if let range = info.range {
             let head = String(vm.query[..<range.lowerBound])
             vm.query = head + token + " "
         } else {
@@ -307,16 +342,51 @@ struct LibraryView: View {
         tagSuggestions = []
     }
 
-    private func currentToken() -> (String, Range<String.Index>?) {
+    private struct TokenInfo {
+        var raw: String
+        var range: Range<String.Index>?
+        var isNegated: Bool
+        var hasTagPrefix: Bool
+        var lookupPrefix: String
+    }
+
+    private func currentTokenInfo() -> TokenInfo {
         let q = vm.query
-        if q.isEmpty { return ("", nil) }
+        if q.isEmpty {
+            return TokenInfo(raw: "", range: nil, isNegated: false, hasTagPrefix: false, lookupPrefix: "")
+        }
 
         let separators = CharacterSet.whitespacesAndNewlines.union(.init(charactersIn: ","))
         if let r = q.rangeOfCharacter(from: separators, options: .backwards) {
             let token = String(q[r.upperBound...])
-            return (token, r.upperBound..<q.endIndex)
+            return parseToken(token, range: r.upperBound..<q.endIndex)
         }
-        return (q, nil)
+        return parseToken(q, range: nil)
+    }
+
+    private func parseToken(_ token: String, range: Range<String.Index>?) -> TokenInfo {
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        var raw = trimmed
+
+        var isNegated = false
+        if raw.hasPrefix("-") {
+            isNegated = true
+            raw.removeFirst()
+        }
+
+        var hasTagPrefix = false
+        if raw.lowercased().hasPrefix("tag:") {
+            hasTagPrefix = true
+            raw.removeFirst(4)
+        }
+
+        return TokenInfo(
+            raw: trimmed,
+            range: range,
+            isNegated: isNegated,
+            hasTagPrefix: hasTagPrefix,
+            lookupPrefix: raw
+        )
     }
 }
 
@@ -326,28 +396,76 @@ private struct LibraryCard: View {
     let profile: Profile
     let arcid: String
 
+    @State private var meta: ArchiveMetadata?
     @State private var title: String = "Loading…"
+    @State private var showDetails: Bool = false
+    @State private var hoveringCover: Bool = false
+    @State private var hoveringPopover: Bool = false
+    @State private var popoverCloseTask: Task<Void, Never>?
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .none
+        return f
+    }()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ZStack(alignment: .topLeading) {
-                CoverThumb(profile: profile, arcid: arcid, thumbnails: appModel.thumbnails, size: .init(width: 160, height: 210))
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            CoverThumb(profile: profile, arcid: arcid, thumbnails: appModel.thumbnails, size: .init(width: 160, height: 210))
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(alignment: .topLeading) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if meta?.isnew == true {
+                            CoverBadge(text: "NEW", background: .green.opacity(0.85))
+                        }
 
-                Button {
-                    appModel.selection.toggle(arcid)
-                } label: {
-                    Image(systemName: appModel.selection.contains(arcid) ? "checkmark.circle.fill" : "circle")
-                        .imageScale(.large)
-                        .foregroundStyle(appModel.selection.contains(arcid) ? .green : .secondary)
-                        .padding(8)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Circle())
+                        Button {
+                            appModel.selection.toggle(arcid)
+                        } label: {
+                            Image(systemName: appModel.selection.contains(arcid) ? "checkmark.circle.fill" : "circle")
+                                .imageScale(.large)
+                                .foregroundStyle(appModel.selection.contains(arcid) ? .green : .secondary)
+                                .padding(8)
+                                .background(.ultraThinMaterial)
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Select for batch operations")
+                    }
+                    .padding(8)
                 }
-                .buttonStyle(.plain)
-                .help("Select for batch operations")
-                .padding(8)
-            }
+                .overlay(alignment: .topTrailing) {
+                    if let d = meta?.dateAdded {
+                        CoverBadge(text: Self.dateFormatter.string(from: d))
+                            .padding(8)
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    if let pages = meta?.pagecount, pages > 0 {
+                        HStack {
+                            Spacer(minLength: 0)
+                            CoverBadge(text: "\(pages) pages")
+                            Spacer(minLength: 0)
+                        }
+                        .padding(8)
+                    }
+                }
+                .onHover { hovering in
+                    hoveringCover = hovering
+                    updatePopoverVisibility()
+                }
+                .popover(isPresented: $showDetails) {
+                    ArchiveHoverDetailsView(
+                        title: meta?.title ?? title,
+                        summary: meta?.summary ?? "",
+                        tags: meta?.tags ?? ""
+                    )
+                    .onHover { hovering in
+                        hoveringPopover = hovering
+                        updatePopoverVisibility()
+                    }
+                }
 
             Text(title)
                 .font(.callout)
@@ -365,8 +483,30 @@ private struct LibraryCard: View {
                 let meta = try await appModel.archives.metadata(profile: profile, arcid: arcid)
                 let t = meta.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 title = t.isEmpty ? "Untitled" : t
+                self.meta = meta
             } catch {
                 title = "Untitled"
+                self.meta = nil
+            }
+        }
+    }
+
+    private func updatePopoverVisibility() {
+        popoverCloseTask?.cancel()
+
+        if hoveringCover || hoveringPopover {
+            showDetails = true
+            return
+        }
+
+        // Give the cursor time to move from the cover to the popover without it collapsing immediately.
+        popoverCloseTask = Task {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            if Task.isCancelled { return }
+            await MainActor.run {
+                if !(hoveringCover || hoveringPopover) {
+                    showDetails = false
+                }
             }
         }
     }
@@ -378,8 +518,20 @@ private struct LibraryRow: View {
     let profile: Profile
     let arcid: String
 
+    @State private var meta: ArchiveMetadata?
     @State private var title: String = "Loading…"
     @State private var subtitle: String = ""
+    @State private var showDetails: Bool = false
+    @State private var hoveringCover: Bool = false
+    @State private var hoveringPopover: Bool = false
+    @State private var popoverCloseTask: Task<Void, Never>?
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .short
+        f.timeStyle = .none
+        return f
+    }()
 
     var body: some View {
         HStack(spacing: 12) {
@@ -394,6 +546,39 @@ private struct LibraryRow: View {
 
             CoverThumb(profile: profile, arcid: arcid, thumbnails: appModel.thumbnails, size: .init(width: 54, height: 72))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(alignment: .topLeading) {
+                    if meta?.isnew == true {
+                        CoverBadge(text: "NEW", background: .green.opacity(0.85), font: .caption2.weight(.bold))
+                            .padding(4)
+                    }
+                }
+                .overlay(alignment: .topTrailing) {
+                    if let d = meta?.dateAdded {
+                        CoverBadge(text: Self.dateFormatter.string(from: d), font: .caption2.monospacedDigit().weight(.bold))
+                            .padding(4)
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    if let pages = meta?.pagecount, pages > 0 {
+                        CoverBadge(text: "\(pages)", font: .caption2.monospacedDigit().weight(.bold))
+                            .padding(4)
+                    }
+                }
+                .onHover { hovering in
+                    hoveringCover = hovering
+                    updatePopoverVisibility()
+                }
+                .popover(isPresented: $showDetails) {
+                    ArchiveHoverDetailsView(
+                        title: meta?.title ?? title,
+                        summary: meta?.summary ?? "",
+                        tags: meta?.tags ?? ""
+                    )
+                    .onHover { hovering in
+                        hoveringPopover = hovering
+                        updatePopoverVisibility()
+                    }
+                }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
@@ -417,10 +602,104 @@ private struct LibraryRow: View {
                 let ext = meta.fileExtension?.uppercased() ?? ""
                 let pages = meta.pagecount ?? 0
                 subtitle = [pages > 0 ? "\(pages) pages" : nil, ext.isEmpty ? nil : ext].compactMap { $0 }.joined(separator: " • ")
+                self.meta = meta
             } catch {
                 title = "Untitled"
                 subtitle = ""
+                self.meta = nil
             }
         }
+    }
+
+    private func updatePopoverVisibility() {
+        popoverCloseTask?.cancel()
+
+        if hoveringCover || hoveringPopover {
+            showDetails = true
+            return
+        }
+
+        popoverCloseTask = Task {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            if Task.isCancelled { return }
+            await MainActor.run {
+                if !(hoveringCover || hoveringPopover) {
+                    showDetails = false
+                }
+            }
+        }
+    }
+}
+
+private struct CoverBadge: View {
+    let text: String
+    var background: Color = .black.opacity(0.7)
+    var foreground: Color = .white
+    var font: Font = .caption.monospacedDigit().weight(.bold)
+
+    var body: some View {
+        Text(text)
+            .font(font)
+            .foregroundStyle(foreground)
+            .lineLimit(1)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(background)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .allowsHitTesting(false)
+    }
+}
+
+private struct ArchiveHoverDetailsView: View {
+    let title: String
+    let summary: String
+    let tags: String
+
+    var body: some View {
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(title.isEmpty ? "Untitled" : title)
+                    .font(.headline)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Summary")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(summary)
+                            .font(.callout)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text("No summary.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Tags")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if !tags.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(tags)
+                            .font(.callout)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text("No tags.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
+        }
+        .frame(width: 520, height: 340)
     }
 }

@@ -194,6 +194,35 @@ public final class LANraragiClient: @unchecked Sendable {
         return try await getJSON(path: "/api/database/stats", queryItems: queryItems)
     }
 
+    public func listCategories() async throws -> [Category] {
+        let data = try await getData(path: "/api/categories")
+        let obj = try JSONSerialization.jsonObject(with: data)
+
+        // Common shapes:
+        // - [{"id":"...", "name":"...", "pinned":true}, ...]
+        // - {"categories":[...]}
+        // - {"id":"name", ...} (fallback; pinned not representable)
+        if let arr = obj as? [Any] {
+            return parseCategoriesArray(arr)
+        }
+        if let dict = obj as? [String: Any] {
+            if let arr = dict["categories"] as? [Any] {
+                return parseCategoriesArray(arr)
+            }
+            // Fallback: mapping of id -> name
+            var out: [Category] = []
+            out.reserveCapacity(dict.count)
+            for (k, v) in dict {
+                if let name = v as? String {
+                    out.append(Category(id: k, name: name, pinned: false))
+                }
+            }
+            return out
+        }
+
+        return []
+    }
+
     public func listPlugins() async throws -> [PluginInfo] {
         let data = try await getData(path: "/api/plugins")
         let obj = try JSONSerialization.jsonObject(with: data)
@@ -212,6 +241,39 @@ public final class LANraragiClient: @unchecked Sendable {
         }
 
         return []
+    }
+
+    private func parseCategoriesArray(_ arr: [Any]) -> [Category] {
+        var out: [Category] = []
+        out.reserveCapacity(arr.count)
+
+        for item in arr {
+            if let dict = item as? [String: Any] {
+                let id = (dict["id"] as? String) ?? ""
+                let name = (dict["name"] as? String) ?? ""
+                let pinned: Bool = {
+                    if let b = dict["pinned"] as? Bool { return b }
+                    if let i = dict["pinned"] as? Int { return i != 0 }
+                    if let s = dict["pinned"] as? String {
+                        switch s.lowercased() {
+                        case "true", "1", "yes": return true
+                        default: return false
+                        }
+                    }
+                    return false
+                }()
+
+                out.append(Category(id: id, name: name, pinned: pinned))
+                continue
+            }
+
+            // Some servers might return category names as plain strings.
+            if let name = item as? String {
+                out.append(Category(id: name, name: name, pinned: false))
+            }
+        }
+
+        return out
     }
 
     public func queuePlugin(pluginID: String, arcid: String, arg: String? = nil) async throws -> MinionJob {
