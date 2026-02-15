@@ -144,7 +144,7 @@ final class DuplicateScanViewModel: ObservableObject {
             return
         }
 
-        // Keep the Scan tab list fresh; newest decision should appear first.
+        // Keep the Manage tab list fresh; newest decision should appear first.
         let now = Int64(Date().timeIntervalSince1970)
         let notPair = IndexStore.NotDuplicatePair(arcidA: pair.arcidA, arcidB: pair.arcidB, createdAt: now)
         notMatches.removeAll { $0 == notPair }

@@ -7,11 +7,11 @@ struct RootView: View {
 
     @State private var editingProfile: Profile?
     @State private var showingSetup = false
-    @State private var tab: Tab = .scan
+    @State private var tab: Tab = .manage
     @State private var showNotMatchesPanel: Bool = false
 
     enum Tab: Hashable {
-        case scan
+        case manage
         case review
     }
 
@@ -49,7 +49,7 @@ struct RootView: View {
                 tab = .review
             }
             if appModel.duplicates.result == nil {
-                tab = .scan
+                tab = .manage
             }
         }
     }
@@ -58,7 +58,7 @@ struct RootView: View {
     private var content: some View {
         if let profile = appModel.selectedProfile {
             VStack(alignment: .leading, spacing: 18) {
-                if tab == .scan {
+                if tab == .manage {
                     header(profile: profile)
                 }
                 tabs(profile: profile)
@@ -82,8 +82,8 @@ struct RootView: View {
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .tag(Tab.scan)
-                .tabItem { Label("Scan", systemImage: "magnifyingglass") }
+                .tag(Tab.manage)
+                .tabItem { Label("Manage", systemImage: "slider.horizontal.3") }
 
             if appModel.duplicates.result != nil {
                 reviewTab(profile: profile)
@@ -157,7 +157,7 @@ struct RootView: View {
                 Text("Find Duplicate Archives")
                     .font(.title2)
                     .bold()
-                Text("Click scan. The app will update its local index if needed, then show you likely duplicates to review and delete manually.")
+                Text("Click Find Duplicates. The app will update its local index if needed, then show you likely duplicates to review and delete manually.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -166,10 +166,10 @@ struct RootView: View {
 
             HStack(spacing: 12) {
                 Button {
-                    tab = .scan
+                    tab = .manage
                     appModel.duplicates.start(profile: profile)
                 } label: {
-                    Text("Scan For Duplicates")
+                    Text("Find Duplicates")
                         .frame(minWidth: 180)
                 }
                 .buttonStyle(.borderedProminent)
