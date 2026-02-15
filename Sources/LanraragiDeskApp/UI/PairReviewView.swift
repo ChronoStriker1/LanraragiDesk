@@ -20,6 +20,9 @@ struct PairReviewView: View {
     let deleteArchive: (String) async throws -> Void
 
     @AppStorage("review.hoverPagePreview") private var hoverPagePreview: Bool = true
+    // Temporary UI aid so the user can refer to specific regions precisely.
+    // Remove once layout is finalized.
+    @AppStorage("review.debugNumberedAreas") private var debugNumberedAreas: Bool = true
 
     @State private var selection: DuplicateScanResult.Pair?
     @State private var query: String = ""
@@ -54,9 +57,15 @@ struct PairReviewView: View {
                 pairList
                     // Exactly two covers wide, per user request.
                     .frame(width: ReviewLayout.pairListWidth)
+                    .overlay(alignment: .topLeading) {
+                        if debugNumberedAreas { ReviewAreaBadge(2) }
+                    }
 
                 pairDetail
                     .frame(minWidth: 520)
+                    .overlay(alignment: .topLeading) {
+                        if debugNumberedAreas { ReviewAreaBadge(3) }
+                    }
             }
         }
         .onChange(of: query) { _, _ in selection = nil }
@@ -106,6 +115,9 @@ struct PairReviewView: View {
         .padding(14)
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(alignment: .topLeading) {
+            if debugNumberedAreas { ReviewAreaBadge(1) }
+        }
     }
 
     private var filteredPairs: [DuplicateScanResult.Pair] {
@@ -270,7 +282,8 @@ struct PairReviewView: View {
                 },
                 goNext: {
                     self.selection = next
-                }
+                },
+                debugNumberedAreas: debugNumberedAreas
             )
         )
     }
@@ -329,6 +342,7 @@ private struct PairCompareView: View {
     let deleteArchive: (String) async throws -> Void
     let reportError: (String) -> Void
     let goNext: () -> Void
+    let debugNumberedAreas: Bool
 
     @State private var confirmDeleteArcid: String?
     @State private var metaA: ArchiveMetadata?
@@ -340,6 +354,9 @@ private struct PairCompareView: View {
         VStack(alignment: .leading, spacing: 8) {
             topBar
                 .animation(.snappy(duration: 0.2), value: isDetailsCollapsed)
+                .overlay(alignment: .topLeading) {
+                    if debugNumberedAreas { ReviewAreaBadge(4) }
+                }
 
             SyncedPagesGridView(
                 profile: profile,
@@ -351,6 +368,9 @@ private struct PairCompareView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .frame(minHeight: ReviewLayout.minPagesViewportHeight)
             .layoutPriority(1)
+            .overlay(alignment: .topLeading) {
+                if debugNumberedAreas { ReviewAreaBadge(7) }
+            }
         }
         .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -428,9 +448,15 @@ private struct PairCompareView: View {
             )
             .id(pair.arcidA)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .topLeading) {
+                if debugNumberedAreas { ReviewAreaBadge(5) }
+            }
 
             Divider()
                 .padding(.vertical, 10)
+                .overlay(alignment: .center) {
+                    if debugNumberedAreas { ReviewAreaBadge(6) }
+                }
 
             ArchiveComparePanel(
                 profile: profile,
@@ -449,7 +475,33 @@ private struct PairCompareView: View {
             )
             .id(pair.arcidB)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .topLeading) {
+                if debugNumberedAreas { ReviewAreaBadge(8) }
+            }
         }
+    }
+}
+
+private struct ReviewAreaBadge: View {
+    let n: Int
+
+    init(_ n: Int) { self.n = n }
+
+    var body: some View {
+        Text("\(n)")
+            .font(.system(size: 12, weight: .bold, design: .rounded))
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(.ultraThinMaterial)
+            .clipShape(Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 1)
+            }
+            .padding(8)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 
