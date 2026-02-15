@@ -124,7 +124,7 @@ It is intentionally pragmatic and may be blunt.
   - Default sort tries newest-first and falls back gracefully with banner.
   - Search suggestions do not spam network (debounced).
   - Cover overlays: NEW/date/page count.
-  - Hover popover shows full title/summary/tags; clicking a tag adds it to search.
+  - Hover popover shows full title/summary/tags; clicking a tag appends the raw tag token into the search field (search does not auto-run).
 
 ## Process
 

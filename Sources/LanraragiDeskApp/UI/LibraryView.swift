@@ -266,10 +266,10 @@ struct LibraryView: View {
         let t = rawTag.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
 
-        let token = "tag:\(t)"
+        // Insert the raw tag token (ex: "female:ahegao" or "vanilla") without adding "tag:".
+        let token = t
         let needsSpace = !vm.query.isEmpty && !vm.query.hasSuffix(" ")
         vm.query = vm.query + (needsSpace ? " " : "") + token + " "
-        vm.refresh(profile: profile)
     }
 
     private func handleSearchSubmit() {
@@ -503,34 +503,36 @@ private struct LibraryCard: View {
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(alignment: .topLeading) {
                     if meta?.isnew == true {
-                        CoverBadge(text: "NEW", background: .green.opacity(0.65))
+                        CoverBadge(text: "NEW", background: .green.opacity(0.55))
                             .padding(8)
                     }
                 }
                 .overlay(alignment: .topTrailing) {
-                    VStack(alignment: .trailing, spacing: 6) {
-                        Button {
-                            appModel.selection.toggle(arcid)
-                        } label: {
-                            Image(systemName: appModel.selection.contains(arcid) ? "checkmark.circle.fill" : "circle")
-                                .imageScale(.large)
-                                .foregroundStyle(appModel.selection.contains(arcid) ? .green : .white)
-                                .padding(8)
-                                .background(.black.opacity(0.22))
-                                .clipShape(Circle())
-                                .shadow(color: .black.opacity(0.35), radius: 2, x: 0, y: 1)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Select for batch operations")
-                        .opacity(hoveringCover ? 1 : 0)
-                        .animation(.easeInOut(duration: 0.12), value: hoveringCover)
-                        .zIndex(100)
-
+                    ZStack(alignment: .topTrailing) {
                         if let d = ArchiveMetaHelpers.dateAdded(meta) {
                             CoverBadge(text: Self.dateFormatter.string(from: d))
+                                .padding(8)
+                        }
+
+                        // Always positioned top-right; on hover it overlays other badges.
+                        if hoveringCover {
+                            Button {
+                                appModel.selection.toggle(arcid)
+                            } label: {
+                                Image(systemName: appModel.selection.contains(arcid) ? "checkmark.circle.fill" : "circle")
+                                    .imageScale(.large)
+                                    .foregroundStyle(appModel.selection.contains(arcid) ? .green : .white)
+                                    .padding(8)
+                                    .background(.black.opacity(0.22))
+                                    .clipShape(Circle())
+                                    .shadow(color: .black.opacity(0.35), radius: 2, x: 0, y: 1)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Select for batch operations")
+                            .padding(8)
+                            .zIndex(200)
                         }
                     }
-                    .padding(8)
                 }
                 .overlay(alignment: .bottom) {
                     if let pages = meta?.pagecount, pages > 0 {
@@ -565,6 +567,13 @@ private struct LibraryCard: View {
             Text(title)
                 .font(.callout)
                 .lineLimit(2)
+
+            if let line = ArchiveMetaHelpers.artistGroupLine(meta), !line.isEmpty {
+                Text(line)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
         }
         .padding(10)
         .background(.quaternary.opacity(0.35))
@@ -635,34 +644,35 @@ private struct LibraryRow: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(alignment: .topLeading) {
                     if meta?.isnew == true {
-                        CoverBadge(text: "NEW", background: .green.opacity(0.65), font: .caption2.weight(.bold))
+                        CoverBadge(text: "NEW", background: .green.opacity(0.55), font: .caption2.weight(.bold))
                             .padding(4)
                     }
                 }
                 .overlay(alignment: .topTrailing) {
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Button {
-                            appModel.selection.toggle(arcid)
-                        } label: {
-                            Image(systemName: appModel.selection.contains(arcid) ? "checkmark.circle.fill" : "circle")
-                                .imageScale(.medium)
-                                .foregroundStyle(appModel.selection.contains(arcid) ? .green : .white)
-                                .padding(6)
-                                .background(.black.opacity(0.22))
-                                .clipShape(Circle())
-                                .shadow(color: .black.opacity(0.35), radius: 1, x: 0, y: 1)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Select for batch operations")
-                        .opacity(hoveringCover ? 1 : 0)
-                        .animation(.easeInOut(duration: 0.12), value: hoveringCover)
-                        .zIndex(100)
-
+                    ZStack(alignment: .topTrailing) {
                         if let d = ArchiveMetaHelpers.dateAdded(meta) {
                             CoverBadge(text: Self.dateFormatter.string(from: d), font: .caption2.monospacedDigit().weight(.bold))
+                                .padding(4)
+                        }
+
+                        if hoveringCover {
+                            Button {
+                                appModel.selection.toggle(arcid)
+                            } label: {
+                                Image(systemName: appModel.selection.contains(arcid) ? "checkmark.circle.fill" : "circle")
+                                    .imageScale(.medium)
+                                    .foregroundStyle(appModel.selection.contains(arcid) ? .green : .white)
+                                    .padding(6)
+                                    .background(.black.opacity(0.22))
+                                    .clipShape(Circle())
+                                    .shadow(color: .black.opacity(0.35), radius: 1, x: 0, y: 1)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Select for batch operations")
+                            .padding(4)
+                            .zIndex(200)
                         }
                     }
-                    .padding(4)
                 }
                 .overlay(alignment: .bottom) {
                     if let pages = meta?.pagecount, pages > 0 {
@@ -694,6 +704,12 @@ private struct LibraryRow: View {
                 Text(title)
                     .font(.callout)
                     .lineLimit(1)
+                if let line = ArchiveMetaHelpers.artistGroupLine(meta), !line.isEmpty {
+                    Text(line)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
                 if !subtitle.isEmpty {
                     Text(subtitle)
                         .font(.caption)
@@ -1044,6 +1060,49 @@ private enum ArchiveMetaHelpers {
         if let d = meta.dateAdded { return d }
         guard let tags = meta.tags else { return nil }
         return parseDateAddedTag(tags)
+    }
+
+    static func artistGroupLine(_ meta: ArchiveMetadata?) -> String? {
+        guard let tags = meta?.tags else { return nil }
+        let artists = values(in: tags, namespace: "artist")
+        let groups = values(in: tags, namespace: "group")
+
+        var parts: [String] = []
+        if !artists.isEmpty {
+            parts.append("Artist: " + artists.joined(separator: ", "))
+        }
+        if !groups.isEmpty {
+            parts.append("Group: " + groups.joined(separator: ", "))
+        }
+        return parts.joined(separator: "  •  ")
+    }
+
+    private static func values(in tags: String, namespace: String) -> [String] {
+        let ns = namespace.lowercased()
+        var out: [String] = []
+        out.reserveCapacity(2)
+
+        for raw in tags.split(separator: ",") {
+            let tok = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let idx = tok.firstIndex(of: ":") else { continue }
+            let lhs = tok[..<idx].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard lhs == ns else { continue }
+            let rhs = tok[tok.index(after: idx)...].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !rhs.isEmpty {
+                out.append(rhs)
+            }
+        }
+
+        // Keep order stable but de-dupe.
+        var seen: Set<String> = []
+        var uniq: [String] = []
+        uniq.reserveCapacity(out.count)
+        for v in out {
+            if seen.insert(v.lowercased()).inserted {
+                uniq.append(v)
+            }
+        }
+        return uniq
     }
 
     private static func parseDateAddedTag(_ tags: String) -> Date? {
