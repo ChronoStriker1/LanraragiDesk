@@ -4,9 +4,16 @@ import LanraragiKit
 
 @MainActor
 final class AppModel: ObservableObject {
+    struct LibrarySearchRequest: Equatable {
+        let id: UUID
+        let profileID: Profile.ID
+        let query: String
+    }
+
     let profileStore: ProfileStore
     @Published var selectedProfileID: Profile.ID?
     @Published var profileEditorMode: ProfileEditorMode?
+    @Published var librarySearchRequest: LibrarySearchRequest?
 
     @Published var connectionStatus: ConnectionStatus = .idle
     @Published var indexing: IndexingViewModel
@@ -94,5 +101,16 @@ final class AppModel: ObservableObject {
         } catch {
             connectionStatus = .failed(String(describing: error))
         }
+    }
+
+    func requestLibrarySearch(profileID: Profile.ID, query: String) {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        librarySearchRequest = LibrarySearchRequest(id: UUID(), profileID: profileID, query: trimmed)
+    }
+
+    func consumeLibrarySearchRequest(id: UUID) {
+        guard librarySearchRequest?.id == id else { return }
+        librarySearchRequest = nil
     }
 }

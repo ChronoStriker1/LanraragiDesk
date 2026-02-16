@@ -45,8 +45,11 @@ It is intentionally pragmatic and may be blunt.
   - Added top counters from server info (`total_archives`, `total_pages_read`) plus distinct tag count.
   - Replaced the SwiftUI cloud with a WebKit/jQCloud renderer to reduce CPU and match LANraragi cloud visuals.
   - Cloud is capped to top 1200 tags by weight; detailed list still stages in batches to avoid UI/system stalls.
+  - Clicking a tag in Statistics now switches to Library and executes a search for that tag.
   - Files:
     - `Sources/LanraragiDeskApp/UI/StatisticsView.swift`
+    - `Sources/LanraragiDeskApp/UI/RootView.swift`
+    - `Sources/LanraragiDeskApp/UI/LibraryView.swift`
     - `Packages/LanraragiKit/Sources/LanraragiKit/Models/ServerInfo.swift`
     - `Packages/LanraragiKit/Tests/LanraragiKitTests/ServerInfoDecodingTests.swift`
 

@@ -45,6 +45,7 @@ This is a personal project intended to be published on GitHub (not the Mac App S
   - Cloud rendering is capped to the top 1200 tags by weight for responsiveness
   - Detailed stats list sorted by weight (excluding `source` and `date_added`, matching LANraragi)
   - Header counters from server info (`total_archives`, `total_pages_read`, and distinct tag count)
+  - Clicking a tag in cloud/details jumps to **Library** and runs a search for that tag
   - Local filter field for quickly finding tags in the cloud and detailed list
 
 ## Setup

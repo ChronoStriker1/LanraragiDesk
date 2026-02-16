@@ -348,14 +348,7 @@ struct StatisticsView: View {
     private func openTagSearchToken(_ token: String) {
         let cleanToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanToken.isEmpty else { return }
-
-        guard var comps = URLComponents(url: profile.baseURL, resolvingAgainstBaseURL: false) else { return }
-        if comps.path.isEmpty { comps.path = "/" }
-        comps.queryItems = [URLQueryItem(name: "filter", value: cleanToken)]
-
-        if let url = comps.url {
-            NSWorkspace.shared.open(url)
-        }
+        appModel.requestLibrarySearch(profileID: profile.id, query: cleanToken)
     }
 }
 

@@ -83,6 +83,18 @@ struct LibraryView: View {
         .onChange(of: vm.categoryID) { _, _ in
             vm.refresh(profile: profile)
         }
+        .onReceive(appModel.$librarySearchRequest) { request in
+            guard let request else { return }
+            guard request.profileID == profile.id else { return }
+
+            let normalized = normalizeLANraragiQuery(request.query)
+            queryDraft = normalized
+            vm.query = normalized
+            vm.refresh(profile: profile)
+            searchFocused = false
+            tagSuggestions = []
+            appModel.consumeLibrarySearchRequest(id: request.id)
+        }
     }
 
     private var header: some View {

@@ -46,6 +46,11 @@ struct RootView: View {
                 section = .library
             }
         }
+        .onReceive(appModel.$librarySearchRequest) { request in
+            guard let request else { return }
+            guard request.profileID == appModel.selectedProfileID else { return }
+            section = .library
+        }
         .sheet(item: $appModel.profileEditorMode) { mode in
             ProfileEditorView(mode: mode)
         }
