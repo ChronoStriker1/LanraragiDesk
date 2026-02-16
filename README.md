@@ -40,6 +40,8 @@ This is a personal project intended to be published on GitHub (not the Mac App S
   - List server plugins and queue them for selected archives
 - **Activity**
   - Local activity log with filtering and search
+- **Window chrome**
+  - Sidebar toggle is fixed in the titlebar next to the macOS traffic-light controls, at traffic-light button size
 - **Statistics** (optional; enable in Settings)
   - Sidebar page that mirrors LANraragi’s `/stats` behavior
   - Tag cloud from `/api/database/stats?minweight=<n>` rendered with a WebKit/jQCloud view (cloud-like layout, lower CPU than the old SwiftUI flow layout)

@@ -74,6 +74,8 @@ struct RootView: View {
                 detail(profile: profile)
             }
             .frame(minWidth: 980, minHeight: 640)
+            .toolbar(removing: .sidebarToggle)
+            .background(TitlebarSidebarToggleHost())
         } else {
             ContentUnavailableView(
                 "Connect To LANraragi",
@@ -357,5 +359,79 @@ private struct SidebarVibrancy: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
         // No-op; system handles reduced transparency automatically.
+    }
+}
+
+private struct TitlebarSidebarToggleHost: NSViewRepresentable {
+    func makeNSView(context: Context) -> TitlebarSidebarToggleNSView {
+        TitlebarSidebarToggleNSView()
+    }
+
+    func updateNSView(_ nsView: TitlebarSidebarToggleNSView, context: Context) {
+        nsView.installIfNeeded()
+    }
+}
+
+private final class TitlebarSidebarToggleNSView: NSView {
+    private static let toggleIdentifier = NSUserInterfaceItemIdentifier("LanraragiDesk.TitlebarSidebarToggle")
+    private weak var toggleButton: NSButton?
+    private weak var observedWindow: NSWindow?
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        installIfNeeded()
+        registerWindowObservers()
+    }
+
+    func installIfNeeded() {
+        guard let window else { return }
+        guard let mini = window.standardWindowButton(.miniaturizeButton),
+              let miniSuperview = mini.superview else { return }
+
+        if let existing = miniSuperview.subviews.compactMap({ $0 as? NSButton }).first(where: { $0.identifier == Self.toggleIdentifier }) {
+            toggleButton = existing
+            return
+        }
+
+        let button = NSButton(frame: .zero)
+        button.identifier = Self.toggleIdentifier
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.title = ""
+        button.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: "Toggle Sidebar")
+        button.imageScaling = .scaleProportionallyDown
+        button.bezelStyle = .texturedRounded
+        button.controlSize = mini.controlSize
+        button.target = nil
+        button.action = #selector(NSSplitViewController.toggleSidebar(_:))
+        button.toolTip = "Toggle Sidebar"
+
+        miniSuperview.addSubview(button)
+        NSLayoutConstraint.activate([
+            button.leadingAnchor.constraint(equalTo: mini.trailingAnchor, constant: 6),
+            button.centerYAnchor.constraint(equalTo: mini.centerYAnchor),
+            button.widthAnchor.constraint(equalTo: mini.widthAnchor),
+            button.heightAnchor.constraint(equalTo: mini.heightAnchor)
+        ])
+
+        toggleButton = button
+    }
+
+    private func registerWindowObservers() {
+        guard window !== observedWindow else { return }
+        NotificationCenter.default.removeObserver(self)
+        observedWindow = window
+
+        guard let window else { return }
+        let center = NotificationCenter.default
+        center.addObserver(self, selector: #selector(windowGeometryDidChange), name: NSWindow.didResizeNotification, object: window)
+        center.addObserver(self, selector: #selector(windowGeometryDidChange), name: NSWindow.didMoveNotification, object: window)
+    }
+
+    @objc private func windowGeometryDidChange(_ notification: Notification) {
+        installIfNeeded()
     }
 }

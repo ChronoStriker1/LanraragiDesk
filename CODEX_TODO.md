@@ -40,6 +40,12 @@ It is intentionally pragmatic and may be blunt.
     - `Sources/LanraragiDeskApp/Services/TagSuggestionStore.swift`
     - `Sources/LanraragiDeskApp/UI/LibraryView.swift`
 
+- Sidebar toggle placement:
+  - Removed the default moving split-view sidebar toggle from toolbar.
+  - Added a fixed titlebar toggle anchored next to macOS traffic-light controls (same button size as minimize).
+  - File:
+    - `Sources/LanraragiDeskApp/UI/RootView.swift`
+
 - Statistics page behavior + performance:
   - Statistics now mirrors LANraragi `/stats`: weighted word cloud + detailed weighted list.
   - Detailed list excludes `source` and `date_added` namespaces (matching LANraragi `stats.js`).
