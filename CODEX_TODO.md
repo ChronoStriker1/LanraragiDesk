@@ -43,7 +43,8 @@ It is intentionally pragmatic and may be blunt.
   - Statistics now mirrors LANraragi `/stats`: weighted word cloud + detailed weighted list.
   - Detailed list excludes `source` and `date_added` namespaces (matching LANraragi `stats.js`).
   - Added top counters from server info (`total_archives`, `total_pages_read`) plus distinct tag count.
-  - Cloud and detailed sections render in staged batches with hard caps to avoid UI/system stalls.
+  - Replaced the SwiftUI cloud with a WebKit/jQCloud renderer to reduce CPU and match LANraragi cloud visuals.
+  - Cloud is capped to top 1200 tags by weight; detailed list still stages in batches to avoid UI/system stalls.
   - Files:
     - `Sources/LanraragiDeskApp/UI/StatisticsView.swift`
     - `Packages/LanraragiKit/Sources/LanraragiKit/Models/ServerInfo.swift`
@@ -163,8 +164,9 @@ It is intentionally pragmatic and may be blunt.
 
 - Statistics page:
   - Settings checkbox should conditionally add/remove Statistics item in sidebar.
-  - Statistics should continue mirroring LANraragi (`/api/database/stats`) including weighted cloud + detailed list behavior.
+  - Statistics should continue mirroring LANraragi (`/api/database/stats`) including jQCloud-like cloud behavior and detailed list behavior.
   - Verify large libraries stay responsive while cloud/details stage in.
+  - Verify clicking a cloud word opens browser search for that tag token.
   - Verify top counters are populated when server exposes `total_archives` and `total_pages_read`.
   - Files:
     - `Sources/LanraragiDeskApp/UI/SettingsView.swift`

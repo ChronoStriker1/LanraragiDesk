@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import LanraragiKit
+import WebKit
 
 struct StatisticsView: View {
     @EnvironmentObject private var appModel: AppModel
@@ -14,19 +15,14 @@ struct StatisticsView: View {
 
     @State private var allWords: [Word] = []
     @State private var detailedWords: [Word] = []
-    @State private var minObservedWeight: Int = 0
-    @State private var maxObservedWeight: Int = 1
-    @State private var renderedCloudCount: Int = 0
     @State private var renderedDetailCount: Int = 0
     @State private var stageTask: Task<Void, Never>?
 
     @State private var showDetailedStats: Bool = false
 
-    private let maxRenderableCloudWords: Int = 2500
+    private let maxRenderableCloudWords: Int = 1200
     private let maxRenderableDetailWords: Int = 8000
-    private let firstCloudBatchSize: Int = 220
     private let firstDetailBatchSize: Int = 320
-    private let stageCloudBatchSize: Int = 220
     private let stageDetailBatchSize: Int = 320
 
     struct Word: Identifiable, Hashable {
@@ -136,8 +132,7 @@ struct StatisticsView: View {
                 Spacer()
             }
 
-            let cloudRendered = min(renderedCloudCount, min(allWords.count, maxRenderableCloudWords))
-            Text("Tag cloud: showing \(cloudVisibleWords.count) tags (\(cloudRendered) rendered of \(allWords.count) total).")
+            Text("Tag cloud: showing \(cloudVisibleWords.count) tags of \(allWords.count) total.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -165,19 +160,18 @@ struct StatisticsView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             } else {
-                FlowLayout(spacing: 7, lineSpacing: 7) {
-                    ForEach(cloudVisibleWords) { word in
-                        Button {
-                            openTagSearch(word)
-                        } label: {
-                            Text(word.tag)
-                                .font(.system(size: fontSize(for: word.weight), weight: .semibold, design: .rounded))
-                                .foregroundStyle(tint(forNamespace: word.namespace))
-                        }
-                        .buttonStyle(.plain)
-                        .help("\(word.tag) (\(word.weight))")
-                    }
+                StatisticsCloudWebView(
+                    words: cloudVisibleWords,
+                    baseURL: profile.baseURL
+                ) { token in
+                    openTagSearchToken(token)
                 }
+                .frame(height: 500)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(.quaternary.opacity(0.45), lineWidth: 1)
+                )
             }
         }
     }
@@ -228,7 +222,7 @@ struct StatisticsView: View {
     private var cloudVisibleWords: [Word] {
         let needle = filterText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if needle.isEmpty {
-            let limit = min(renderedCloudCount, min(allWords.count, maxRenderableCloudWords))
+            let limit = min(allWords.count, maxRenderableCloudWords)
             return Array(allWords.prefix(limit))
         }
         let matched = allWords.lazy.filter { $0.tag.lowercased().contains(needle) }
@@ -273,13 +267,10 @@ struct StatisticsView: View {
             let info = try? await infoReq
 
             let mapped = mapWords(from: loaded.tags)
-            allWords = mapped.words
-            detailedWords = mapped.words.filter { $0.namespace != "source" && $0.namespace != "date_added" }
-            minObservedWeight = mapped.minWeight
-            maxObservedWeight = mapped.maxWeight
+            allWords = mapped
+            detailedWords = mapped.filter { $0.namespace != "source" && $0.namespace != "date_added" }
             serverInfo = info
 
-            renderedCloudCount = min(firstCloudBatchSize, min(allWords.count, maxRenderableCloudWords))
             if showDetailedStats {
                 renderedDetailCount = min(firstDetailBatchSize, min(detailedWords.count, maxRenderableDetailWords))
             } else {
@@ -293,7 +284,6 @@ struct StatisticsView: View {
         } catch {
             allWords = []
             detailedWords = []
-            renderedCloudCount = 0
             renderedDetailCount = 0
             statusText = "Failed: \(ErrorPresenter.short(error))"
             appModel.activity.add(.init(kind: .error, title: "Statistics load failed", detail: String(describing: error)))
@@ -302,39 +292,31 @@ struct StatisticsView: View {
 
     private func stageRender() {
         stageTask?.cancel()
-        let cloudCap = min(allWords.count, maxRenderableCloudWords)
         let detailCap = min(detailedWords.count, maxRenderableDetailWords)
-        let cloudPending = renderedCloudCount < cloudCap
         let detailPending = showDetailedStats && renderedDetailCount < detailCap
-        guard cloudPending || detailPending else { return }
+        guard detailPending else { return }
 
         stageTask = Task {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 90_000_000)
                 if Task.isCancelled { return }
                 await MainActor.run {
-                    if renderedCloudCount < cloudCap {
-                        renderedCloudCount = min(cloudCap, renderedCloudCount + stageCloudBatchSize)
-                    }
                     if showDetailedStats && renderedDetailCount < detailCap {
                         renderedDetailCount = min(detailCap, renderedDetailCount + stageDetailBatchSize)
                     }
                 }
-                let detailDone = !showDetailedStats || renderedDetailCount >= detailCap
-                if renderedCloudCount >= cloudCap && detailDone {
+                if !showDetailedStats || renderedDetailCount >= detailCap {
                     return
                 }
             }
         }
     }
 
-    private func mapWords(from tags: [TagStat]) -> (words: [Word], minWeight: Int, maxWeight: Int) {
+    private func mapWords(from tags: [TagStat]) -> [Word] {
         var out: [Word] = []
         out.reserveCapacity(tags.count)
 
         var seen: Set<String> = []
-        var minW = Int.max
-        var maxW = Int.min
 
         for t in tags {
             let ns = (t.namespace ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -347,9 +329,6 @@ struct StatisticsView: View {
             if !seen.insert(tag).inserted { continue }
 
             let weight = max(0, t.weight ?? t.count ?? 0)
-            minW = min(minW, weight)
-            maxW = max(maxW, weight)
-
             out.append(Word(id: tag, namespace: ns, text: tx, tag: tag, weight: weight))
         }
 
@@ -358,38 +337,21 @@ struct StatisticsView: View {
             return a.tag.localizedCaseInsensitiveCompare(b.tag) == .orderedAscending
         }
 
-        if minW == Int.max { minW = 0 }
-        if maxW == Int.min { maxW = 1 }
-        return (out, minW, maxW)
-    }
-
-    private func fontSize(for weight: Int) -> CGFloat {
-        if maxObservedWeight <= minObservedWeight {
-            return 13
-        }
-        let t = CGFloat(weight - minObservedWeight) / CGFloat(maxObservedWeight - minObservedWeight)
-        return 11 + (24 * sqrt(max(0, min(1, t))))
-    }
-
-    private func tint(forNamespace namespace: String) -> Color {
-        switch namespace {
-        case "artist": return .blue
-        case "group": return .orange
-        case "character": return .pink
-        case "series": return .indigo
-        case "language": return .green
-        case "source": return .teal
-        default: return .primary
-        }
+        return out
     }
 
     private func openTagSearch(_ word: Word) {
         let token = word.namespace.isEmpty ? word.text : "\(word.namespace):\(word.text)"
-        guard !token.isEmpty else { return }
+        openTagSearchToken(token)
+    }
+
+    private func openTagSearchToken(_ token: String) {
+        let cleanToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanToken.isEmpty else { return }
 
         guard var comps = URLComponents(url: profile.baseURL, resolvingAgainstBaseURL: false) else { return }
         if comps.path.isEmpty { comps.path = "/" }
-        comps.queryItems = [URLQueryItem(name: "filter", value: token)]
+        comps.queryItems = [URLQueryItem(name: "filter", value: cleanToken)]
 
         if let url = comps.url {
             NSWorkspace.shared.open(url)
@@ -418,5 +380,219 @@ private struct StatPill: View {
         .padding(.vertical, 8)
         .background(.quaternary.opacity(0.3))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+private struct StatisticsCloudWebView: NSViewRepresentable {
+    let words: [StatisticsView.Word]
+    let baseURL: URL
+    let onTagTap: (String) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onTagTap: onTagTap)
+    }
+
+    func makeNSView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        config.defaultWebpagePreferences.allowsContentJavaScript = true
+        config.suppressesIncrementalRendering = true
+        config.userContentController.add(context.coordinator, name: Coordinator.messageName)
+
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.navigationDelegate = context.coordinator
+        webView.setValue(false, forKey: "drawsBackground")
+        webView.allowsMagnification = false
+        webView.loadHTMLString(Coordinator.htmlTemplate, baseURL: baseURL)
+        context.coordinator.currentBaseURL = baseURL
+        return webView
+    }
+
+    func updateNSView(_ webView: WKWebView, context: Context) {
+        if context.coordinator.currentBaseURL != baseURL {
+            context.coordinator.currentBaseURL = baseURL
+            context.coordinator.lastWordsSignature = nil
+            context.coordinator.ready = false
+            webView.loadHTMLString(Coordinator.htmlTemplate, baseURL: baseURL)
+        }
+
+        context.coordinator.push(words: words, into: webView)
+    }
+
+    static func dismantleNSView(_ nsView: WKWebView, coordinator: Coordinator) {
+        nsView.configuration.userContentController.removeScriptMessageHandler(forName: Coordinator.messageName)
+        nsView.navigationDelegate = nil
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+        static let messageName = "tagTap"
+
+        static let htmlTemplate = """
+        <!doctype html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1">
+          <link rel="stylesheet" href="/css/vendor/jqcloud.min.css">
+          <style>
+            html, body {
+              margin: 0;
+              width: 100%;
+              height: 100%;
+              overflow: hidden;
+              background: transparent;
+            }
+            #tagCloud {
+              width: 100%;
+              height: 500px;
+            }
+            #tagCloud .jqcloud-word {
+              cursor: pointer;
+              user-select: none;
+              text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+            }
+            #tagCloud .ns-artist { color: #6ea8ff !important; }
+            #tagCloud .ns-group { color: #ffa94d !important; }
+            #tagCloud .ns-character { color: #ff75c3 !important; }
+            #tagCloud .ns-series { color: #9b8cff !important; }
+            #tagCloud .ns-language { color: #6fda8b !important; }
+            #tagCloud .ns-source { color: #4fd1c5 !important; }
+          </style>
+          <script src="/js/vendor/jquery.min.js"></script>
+          <script src="/js/vendor/jqcloud.min.js"></script>
+          <script>
+            window.__cloudReady = false;
+
+            function decodeWords(base64Payload) {
+              try {
+                return JSON.parse(atob(base64Payload));
+              } catch (_) {
+                return [];
+              }
+            }
+
+            function namespaceClass(namespaceValue) {
+              const safe = String(namespaceValue || "").replace(/[^a-z0-9_-]/gi, "");
+              return safe.length ? "ns-" + safe : "";
+            }
+
+            function buildWordItems(words) {
+              return words.map((word) => ({
+                text: word.text,
+                weight: Math.max(1, Number(word.weight || 1)),
+                html: {
+                  class: ("jqcloud-word " + namespaceClass(word.namespace)).trim(),
+                  title: word.text + " (" + word.weight + ")",
+                  "data-token": word.token
+                }
+              }));
+            }
+
+            function renderFallback(words) {
+              const host = document.getElementById("tagCloud");
+              if (!host) return;
+              host.innerHTML = words.map((w) => "<span class='jqcloud-word' data-token='" +
+                String(w.token).replace(/'/g, "&#39;") + "'>" +
+                String(w.text).replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</span>").join(" ");
+            }
+
+            window.renderCloudFromBase64 = function(base64Payload) {
+              const sourceWords = decodeWords(base64Payload);
+              const host = $("#tagCloud");
+              if (!host.length) return;
+
+              if (!window.jQuery || !$.fn || !$.fn.jQCloud) {
+                renderFallback(sourceWords);
+                return;
+              }
+
+              const cloudWords = buildWordItems(sourceWords);
+              try { host.jQCloud("destroy"); } catch (_) {}
+              host.empty();
+              host.jQCloud(cloudWords, {
+                autoResize: true,
+                removeOverflowing: false,
+                delay: 18
+              });
+            };
+
+            $(document).on("click.statsCloud", "#tagCloud .jqcloud-word", function(event) {
+              event.preventDefault();
+              const token = this.getAttribute("data-token") || this.textContent || "";
+              if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.tagTap) {
+                window.webkit.messageHandlers.tagTap.postMessage(token);
+              }
+              return false;
+            });
+
+            window.addEventListener("load", function() {
+              window.__cloudReady = true;
+            });
+          </script>
+        </head>
+        <body>
+          <div id="tagCloud"></div>
+        </body>
+        </html>
+        """
+
+        struct CloudWordPayload: Encodable {
+            let token: String
+            let text: String
+            let namespace: String
+            let weight: Int
+        }
+
+        let onTagTap: (String) -> Void
+        var currentBaseURL: URL?
+        var lastWordsSignature: Int?
+        var ready: Bool = false
+        var pendingPayload: String?
+
+        init(onTagTap: @escaping (String) -> Void) {
+            self.onTagTap = onTagTap
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            ready = true
+            if let pendingPayload {
+                runRender(payloadBase64: pendingPayload, in: webView)
+                self.pendingPayload = nil
+            }
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard message.name == Self.messageName else { return }
+            guard let token = message.body as? String else { return }
+            onTagTap(token)
+        }
+
+        func push(words: [StatisticsView.Word], into webView: WKWebView) {
+            var hasher = Hasher()
+            hasher.combine(words.count)
+            for word in words {
+                hasher.combine(word.id)
+                hasher.combine(word.weight)
+            }
+            let signature = hasher.finalize()
+            guard signature != lastWordsSignature else { return }
+            lastWordsSignature = signature
+
+            let payloadWords = words.map {
+                CloudWordPayload(token: $0.tag, text: $0.tag, namespace: $0.namespace, weight: max(1, $0.weight))
+            }
+            guard let payloadData = try? JSONEncoder().encode(payloadWords) else { return }
+            let payloadBase64 = payloadData.base64EncodedString()
+
+            if ready {
+                runRender(payloadBase64: payloadBase64, in: webView)
+            } else {
+                pendingPayload = payloadBase64
+            }
+        }
+
+        private func runRender(payloadBase64: String, in webView: WKWebView) {
+            let js = "window.renderCloudFromBase64('\(payloadBase64)');"
+            webView.evaluateJavaScript(js, completionHandler: nil)
+        }
     }
 }
