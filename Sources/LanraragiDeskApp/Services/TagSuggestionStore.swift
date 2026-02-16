@@ -35,11 +35,13 @@ actor TagSuggestionStore {
     }
 
     private var cacheByBaseURL: [String: CacheEntry] = [:]
+    private var lastErrorByBaseURL: [String: String] = [:]
 
     func refresh(profile: Profile, settings: Settings) async throws {
         let baseKey = profile.baseURL.absoluteString
         let entry = try await fetchFromServer(profile: profile, settings: settings)
         cacheByBaseURL[baseKey] = entry
+        lastErrorByBaseURL[baseKey] = nil
         try saveToDisk(baseURL: profile.baseURL, entry: entry)
     }
 
@@ -51,40 +53,89 @@ actor TagSuggestionStore {
             try await ensureLoaded(profile: profile, settings: settings)
         } catch {
             // No suggestions available.
+            let baseKey = profile.baseURL.absoluteString
+            lastErrorByBaseURL[baseKey] = ErrorPresenter.short(error)
         }
 
         let baseKey = profile.baseURL.absoluteString
         guard let entry = cacheByBaseURL[baseKey] else { return [] }
 
         let needle = trimmed.lowercased()
-        var out: [Suggestion] = []
-        out.reserveCapacity(min(limit, 40))
+        let allowContainsMatch = needle.count >= 2
+        // Score matches so plain-text typing can still find namespaced tags:
+        // 0: full token prefix, 1: value-after-namespace prefix, 2: contains.
+        var ranked: [(Int, Suggestion)] = []
+        ranked.reserveCapacity(min(entry.tags.count, 256))
 
         for s in entry.tags {
-            if s.value.lowercased().hasPrefix(needle) {
-                out.append(s)
-                if out.count >= limit { break }
+            let lower = s.value.lowercased()
+            if lower.hasPrefix(needle) {
+                ranked.append((0, s))
+                continue
+            }
+
+            if let idx = lower.firstIndex(of: ":") {
+                let rhs = lower[lower.index(after: idx)...]
+                if rhs.hasPrefix(needle) {
+                    ranked.append((1, s))
+                    continue
+                }
+            }
+
+            if allowContainsMatch, lower.contains(needle) {
+                ranked.append((2, s))
             }
         }
 
-        return out
+        ranked.sort { a, b in
+            if a.0 != b.0 { return a.0 < b.0 }
+            if a.1.weight != b.1.weight { return a.1.weight > b.1.weight }
+            return a.1.value.localizedCaseInsensitiveCompare(b.1.value) == .orderedAscending
+        }
+        return Array(ranked.prefix(limit).map(\.1))
+    }
+
+    func prewarm(profile: Profile, settings: Settings) async {
+        do {
+            try await ensureLoaded(profile: profile, settings: settings)
+        } catch {
+            let baseKey = profile.baseURL.absoluteString
+            lastErrorByBaseURL[baseKey] = ErrorPresenter.short(error)
+        }
+    }
+
+    func lastError(profile: Profile) -> String? {
+        lastErrorByBaseURL[profile.baseURL.absoluteString]
     }
 
     private func ensureLoaded(profile: Profile, settings: Settings) async throws {
         let baseKey = profile.baseURL.absoluteString
         if let entry = cacheByBaseURL[baseKey], isFresh(entry: entry, settings: settings) {
+            lastErrorByBaseURL[baseKey] = nil
             return
         }
 
-        if let disk = loadFromDisk(baseURL: profile.baseURL), isFreshDisk(disk: disk, settings: settings) {
+        let disk = loadFromDisk(baseURL: profile.baseURL)
+        if let disk, isFreshDisk(disk: disk, settings: settings) {
             let tags = disk.tags.map { Suggestion(value: $0.value, weight: $0.weight) }
             cacheByBaseURL[baseKey] = CacheEntry(fetchedAt: disk.fetchedAt, minWeight: disk.minWeight, tags: tags)
+            lastErrorByBaseURL[baseKey] = nil
             return
         }
 
-        let entry = try await fetchFromServer(profile: profile, settings: settings)
-        cacheByBaseURL[baseKey] = entry
-        try saveToDisk(baseURL: profile.baseURL, entry: entry)
+        do {
+            let entry = try await fetchFromServer(profile: profile, settings: settings)
+            cacheByBaseURL[baseKey] = entry
+            lastErrorByBaseURL[baseKey] = nil
+            try saveToDisk(baseURL: profile.baseURL, entry: entry)
+        } catch {
+            // Fallback to stale on-disk cache when online refresh fails.
+            if let disk {
+                let tags = disk.tags.map { Suggestion(value: $0.value, weight: $0.weight) }
+                cacheByBaseURL[baseKey] = CacheEntry(fetchedAt: disk.fetchedAt, minWeight: disk.minWeight, tags: tags)
+            }
+            throw error
+        }
     }
 
     private func isFresh(entry: CacheEntry, settings: Settings) -> Bool {

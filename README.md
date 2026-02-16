@@ -14,7 +14,8 @@ This is a personal project intended to be published on GitHub (not the Mac App S
   - Hover a cover to show the selection checkbox (top-left)
   - Shows **Artist** and **Group** (when present) under the title (on separate lines)
   - Hover a cover to see full **Title**, **Summary**, and grouped **Tags** (click tags to add them to search)
-  - Search + tag suggestions (shown under the search field; results update when you press Search)
+  - Search + tag suggestions (debounced + cached, with prefix/namespace/contains matching)
+  - Search supports multi-term filter normalization for LANraragi syntax (comma-separated tokens; wildcard tokens pass through)
   - List view uses a table with columns: Select, Title, New, Date, Artist, Group, Tags (sortable and re-orderable)
   - Filters: New only, Untagged only, Category (server-backed)
   - Right-click: open Reader, edit metadata, copy archive id
@@ -39,8 +40,9 @@ This is a personal project intended to be published on GitHub (not the Mac App S
 - **Activity**
   - Local activity log with filtering and search
 - **Statistics** (optional; enable in Settings)
-  - Sidebar page that mirrors LANraragi’s statistics tag table (`/api/database/stats`)
-  - Filterable, sortable table of tags with count/weight
+  - Sidebar page that mirrors LANraragi’s tag cloud (`/api/database/stats`)
+  - Staged rendering with a cap for responsiveness on large libraries
+  - Local filter field for quickly finding tags in the cloud
 
 ## Setup
 
@@ -88,6 +90,7 @@ Then build/run the `LanraragiDesk` scheme.
 
 - “Not a match” decisions are stored locally and are not written back to LANraragi.
 - Network concurrency is configurable in **Settings → Performance** so scans don’t monopolize your Mac.
+- Thumbnail crop/fill is configurable in **Settings → Thumbnails** (off by default).
 
 ## Dev
 

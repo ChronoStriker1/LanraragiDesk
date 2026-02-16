@@ -28,6 +28,8 @@ struct CoverThumb: View {
     @State private var errorText: String?
     @State private var task: Task<Void, Never>?
 
+    @AppStorage("thumbs.cropToFill") private var cropToFill: Bool = false
+
     init(
         profile: Profile,
         arcid: String,
@@ -50,9 +52,16 @@ struct CoverThumb: View {
             if let image {
                 Image(nsImage: image)
                     .resizable()
-                    .scaledToFit()
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .padding(contentInset)
+                    .if(cropToFill) { v in
+                        v.scaledToFill()
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .clipped()
+                    }
+                    .if(!cropToFill) { v in
+                        v.scaledToFit()
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .padding(contentInset)
+                    }
             } else if let errorText {
                 Text(errorText)
                     .font(.caption2)
@@ -65,6 +74,10 @@ struct CoverThumb: View {
             }
         }
         .frame(width: size.width, height: size.height)
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 1)
+        }
         .task(id: arcid) {
             // When switching between pairs, the view may be reused; reload for the new arcid.
             let cacheKey = CoverThumbCache.key(arcid: arcid, size: size, contentInset: contentInset)
@@ -106,5 +119,16 @@ struct CoverThumb: View {
     private func fetch() async throws -> NSImage? {
         let bytes = try await thumbnails.thumbnailBytes(profile: profile, arcid: arcid)
         return await MainActor.run { NSImage(data: bytes) }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func `if`<Content: View>(_ condition: Bool, transform: (Self) -> Content) -> some View {
+        if condition {
+            transform(self)
+        } else {
+            self
+        }
     }
 }

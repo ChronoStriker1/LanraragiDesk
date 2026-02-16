@@ -30,6 +30,29 @@ It is intentionally pragmatic and may be blunt.
     - `Packages/LanraragiKit/Sources/LanraragiKit/Models/DatabaseStats.swift`
     - `Packages/LanraragiKit/Tests/LanraragiKitTests/DatabaseStatsDecodingTests.swift`
 
+- Library search + autocomplete behavior:
+  - Suggestions now support prefix, post-namespace prefix, and contains matching.
+  - If a stats refresh fails, stale disk cache is still used so suggestions can continue working.
+  - Added visible suggestion status text to surface failures instead of silently returning empty.
+  - Query submission normalizes separators for LANraragi-style multi-term search while preserving wildcard tokens.
+  - Files:
+    - `Sources/LanraragiDeskApp/Services/TagSuggestionStore.swift`
+    - `Sources/LanraragiDeskApp/UI/LibraryView.swift`
+
+- Statistics page performance:
+  - Reworked Statistics from a heavy full table to a staged word-cloud renderer.
+  - Rendering is batched and capped to avoid large UI/system stalls on big tag datasets.
+  - Files:
+    - `Sources/LanraragiDeskApp/UI/StatisticsView.swift`
+    - `Sources/LanraragiDeskApp/UI/Components/FlowLayout.swift`
+
+- Thumbnail presentation:
+  - Added `Settings -> Thumbnails -> Crop thumbnails to fill` toggle (off by default).
+  - Cover previews now keep a consistent framed size even when not cropped.
+  - Files:
+    - `Sources/LanraragiDeskApp/UI/SettingsView.swift`
+    - `Sources/LanraragiDeskApp/UI/Components/CoverThumb.swift`
+
 - Performance setting expectations:
   - `network.maxConnectionsPerHost` affects URLSession `httpMaximumConnectionsPerHost` only.
   - App-level limiters are still hard-coded (`AsyncLimiter(limit: 4)` in loaders and `IndexerConfig(concurrency: 4)` for indexing).
@@ -42,7 +65,6 @@ It is intentionally pragmatic and may be blunt.
 ## High Priority: Missing From Requested Plan
 
 - Library (search and quality):
-  - Tag completion UI exists, but matching is prefix-only and tokenization is simple.
   - Add a small "help" on LANraragi query syntax and negation (`-tag:`).
   - Category selector is now server-backed (pinned categories show as buttons).
   - Tag suggestions are shown under the search field; hover popover tag chips can be clicked to add to search.

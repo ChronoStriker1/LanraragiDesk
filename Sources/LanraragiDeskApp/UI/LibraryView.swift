@@ -12,6 +12,8 @@ struct LibraryView: View {
     @StateObject private var vm = LibraryViewModel()
     @State private var queryDraft: String = ""
     @State private var tagSuggestions: [TagSuggestionStore.Suggestion] = []
+    @State private var tagSuggestionStatusText: String?
+    @State private var tagSuggestionsLoading: Bool = false
     @State private var suggestionTask: Task<Void, Never>?
     @State private var editingMeta: EditorRoute?
     @FocusState private var searchFocused: Bool
@@ -67,6 +69,7 @@ struct LibraryView: View {
                 vm.refresh(profile: profile)
             }
             Task { await vm.loadCategories(profile: profile) }
+            Task { await prewarmTagSuggestions() }
         }
         .onChange(of: vm.sort) { _, _ in
             vm.refresh(profile: profile)
@@ -110,32 +113,29 @@ struct LibraryView: View {
 
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 6) {
-                    TextField("Search…", text: $queryDraft)
-                        .textFieldStyle(.roundedBorder)
-                        .focused($searchFocused)
-                        .onSubmit { handleSearchSubmit() }
-                        .onChange(of: queryDraft) { _, _ in
-                            queueSuggestionRefresh()
+                    HStack(spacing: 10) {
+                        TextField("Search…", text: $queryDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .focused($searchFocused)
+                            .onSubmit { handleSearchSubmit() }
+                            .onChange(of: queryDraft) { _, _ in
+                                queueSuggestionRefresh()
+                            }
+                            .frame(maxWidth: .infinity)
+
+                        Button("Search") { handleSearchSubmit() }
+
+                        Button("Clear") {
+                            queryDraft = ""
+                            vm.query = ""
+                            vm.refresh(profile: profile)
                         }
-                        .frame(width: 520)
+                        .disabled(queryDraft.isEmpty)
+                    }
 
                     tagSuggestionList
                 }
                 .zIndex(10)
-
-                Button("Search") {
-                    vm.query = queryDraft
-                    vm.refresh(profile: profile)
-                }
-
-                Button("Clear") {
-                    queryDraft = ""
-                    vm.query = ""
-                    vm.refresh(profile: profile)
-                }
-                .disabled(queryDraft.isEmpty)
-
-                Spacer()
             }
 
             DisclosureGroup("Filters") {
@@ -206,8 +206,14 @@ struct LibraryView: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 4)
+            } else if tagSuggestionsLoading {
+                Text("Loading suggestions…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
             } else if tagSuggestions.isEmpty {
-                Text("No suggestions.")
+                Text(tagSuggestionStatusText ?? "No suggestions.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -223,6 +229,8 @@ struct LibraryView: View {
                                     Text(s.value)
                                         .font(.callout)
                                         .foregroundStyle(.primary)
+                                        .lineLimit(nil)
+                                        .fixedSize(horizontal: false, vertical: true)
                                     Spacer()
                                     Text("\(s.weight)")
                                         .font(.caption2.monospacedDigit())
@@ -241,29 +249,33 @@ struct LibraryView: View {
                 }
                 .scrollIndicators(.visible)
                 .frame(maxHeight: 170)
+
+                if let tagSuggestionStatusText, !tagSuggestionStatusText.isEmpty {
+                    Text(tagSuggestionStatusText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         }
-        .frame(width: 520, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var pinnedCategoryButtons: some View {
         let pinned = vm.categories.filter { $0.pinned }
 
-        return ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                CategoryChip(title: "All", selected: vm.categoryID.isEmpty) {
-                    vm.categoryID = ""
-                }
-                ForEach(pinned, id: \.id) { c in
-                    CategoryChip(title: c.name, selected: vm.categoryID == c.id, pinned: true) {
-                        vm.categoryID = c.id
-                    }
+        return FlowLayout(spacing: 8, lineSpacing: 8) {
+            CategoryChip(title: "All", selected: vm.categoryID.isEmpty) {
+                vm.categoryID = ""
+            }
+            ForEach(pinned, id: \.id) { c in
+                CategoryChip(title: c.name, selected: vm.categoryID == c.id, pinned: true) {
+                    vm.categoryID = c.id
                 }
             }
-            .padding(.vertical, 2)
         }
-        .scrollIndicators(.hidden)
-        .frame(maxWidth: 360, alignment: .leading)
+        .padding(.vertical, 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var unpinnedCategoryLabel: String {
@@ -280,12 +292,18 @@ struct LibraryView: View {
 
         // Insert the raw tag token (ex: "female:ahegao" or "vanilla") without adding "tag:".
         let token = t
-        let needsSpace = !queryDraft.isEmpty && !queryDraft.hasSuffix(" ")
-        queryDraft = queryDraft + (needsSpace ? " " : "") + token + " "
+        let needsComma = !queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix(",")
+        queryDraft = queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+            + (needsComma ? ", " : "")
+            + token
+            + ", "
     }
 
     private func handleSearchSubmit() {
-        vm.query = queryDraft
+        let normalized = normalizeLANraragiQuery(queryDraft)
+        queryDraft = normalized
+        vm.query = normalized
         vm.refresh(profile: profile)
     }
 
@@ -467,11 +485,16 @@ struct LibraryView: View {
     }
 
     private func refreshSuggestions() async {
+        await MainActor.run {
+            tagSuggestionsLoading = true
+            tagSuggestionStatusText = nil
+        }
         let info = currentTokenInfo(queryDraft)
         let q = info.lookupPrefix.trimmingCharacters(in: .whitespacesAndNewlines)
         let minChars = 1
         guard q.count >= minChars else {
             await MainActor.run { tagSuggestions = [] }
+            await MainActor.run { tagSuggestionsLoading = false }
             return
         }
 
@@ -480,14 +503,19 @@ struct LibraryView: View {
         let settings = TagSuggestionStore.Settings(minWeight: minWeight, ttlSeconds: ttlHours * 60 * 60)
 
         let sugg = await appModel.tagSuggestions.suggestions(profile: profile, settings: settings, prefix: q, limit: 20)
-        await MainActor.run { tagSuggestions = sugg }
+        let err = await appModel.tagSuggestions.lastError(profile: profile)
+        await MainActor.run {
+            tagSuggestions = sugg
+            tagSuggestionStatusText = err
+            tagSuggestionsLoading = false
+        }
     }
 
     private func applySuggestion(_ value: String) {
         let info = currentTokenInfo(queryDraft)
         let trimmedRaw = info.raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedRaw.isEmpty else {
-            queryDraft = value + " "
+            queryDraft = value + ", "
             tagSuggestions = []
             return
         }
@@ -497,9 +525,9 @@ struct LibraryView: View {
 
         if let range = info.range {
             let head = String(queryDraft[..<range.lowerBound])
-            queryDraft = head + token + " "
+            queryDraft = head + token + ", "
         } else {
-            queryDraft = token + " "
+            queryDraft = token + ", "
         }
         tagSuggestions = []
     }
@@ -549,6 +577,73 @@ struct LibraryView: View {
             hasTagPrefix: hasTagPrefix,
             lookupPrefix: raw
         )
+    }
+
+    private func prewarmTagSuggestions() async {
+        let minWeight = UserDefaults.standard.integer(forKey: "tags.minWeight")
+        let ttlHours = max(1, UserDefaults.standard.integer(forKey: "tags.ttlHours"))
+        let settings = TagSuggestionStore.Settings(minWeight: minWeight, ttlSeconds: ttlHours * 60 * 60)
+        await appModel.tagSuggestions.prewarm(profile: profile, settings: settings)
+    }
+
+    // LANraragi expects multiple terms/tags to be comma-separated (the web UI treats commas as separators).
+    // To make the app behave closer to the web UI, we normalize whitespace-separated tokens into commas
+    // (except inside quoted strings).
+    private func normalizeLANraragiQuery(_ input: String) -> String {
+        let s = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return "" }
+
+        var tokens: [String] = []
+        tokens.reserveCapacity(8)
+
+        var buf = ""
+        var inQuotes = false
+
+        func flushBuf() {
+            let piece = buf.trimmingCharacters(in: .whitespacesAndNewlines)
+            buf = ""
+            guard !piece.isEmpty else { return }
+
+            if piece.contains("\"") {
+                // Leave quoted expressions untouched.
+                tokens.append(piece)
+                return
+            }
+
+            // Split by whitespace so `a b c` becomes `a, b, c`.
+            let parts = piece
+                .split(whereSeparator: { $0.isWhitespace })
+                .map { String($0) }
+                .filter { !$0.isEmpty }
+
+            if parts.isEmpty {
+                return
+            }
+            if parts.count == 1 {
+                tokens.append(parts[0])
+                return
+            }
+            tokens.append(contentsOf: parts)
+        }
+
+        for ch in s {
+            if ch == "\"" {
+                inQuotes.toggle()
+                buf.append(ch)
+                continue
+            }
+            if (ch == "," || ch == ";" || ch.isNewline), !inQuotes {
+                flushBuf()
+                continue
+            }
+            buf.append(ch)
+        }
+        flushBuf()
+
+        return tokens
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: ", ")
     }
 }
 
@@ -686,14 +781,16 @@ private struct LibraryCard: View {
 
             Text(title)
                 .font(.callout)
-                .lineLimit(2)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
 
             let artists = ArchiveMetaHelpers.artists(meta)
             if !artists.isEmpty {
                 Text("Artist: " + artists.joined(separator: ", "))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             let groups = ArchiveMetaHelpers.groups(meta)
@@ -701,9 +798,11 @@ private struct LibraryCard: View {
                 Text("Group: " + groups.joined(separator: ", "))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .frame(width: 182, alignment: .topLeading)
         .padding(10)
         .background(.quaternary.opacity(0.35))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -1033,11 +1132,7 @@ private struct TagGroupsView: View {
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
 
-                            LazyVGrid(
-                                columns: [GridItem(.adaptive(minimum: 170), spacing: 8, alignment: .leading)],
-                                alignment: .leading,
-                                spacing: 8
-                            ) {
+                            VStack(alignment: .leading, spacing: 8) {
                                 ForEach(items, id: \.self) { t in
                                     TagChip(text: t.display) {
                                         onSelectTag(t.rawToken)
@@ -1064,6 +1159,7 @@ private struct TagChip: View {
             .multilineTextAlignment(.leading)
             .lineLimit(nil)
             .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(.quaternary.opacity(0.35))
@@ -1100,7 +1196,8 @@ private struct CategoryChip: View {
                         .imageScale(.small)
                 }
                 Text(title)
-                    .lineLimit(1)
+                    .lineLimit(nil)
+                    .multilineTextAlignment(.leading)
             }
             .font(.callout)
             .padding(.horizontal, 10)
