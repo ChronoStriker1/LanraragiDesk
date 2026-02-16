@@ -15,7 +15,7 @@ This is a personal project intended to be published on GitHub (not the Mac App S
   - Shows **Artist** and **Group** (when present) under the title (on separate lines)
   - Hover a cover to see full **Title**, **Summary**, and grouped **Tags** (click tags to add them to search)
   - Search + tag suggestions (debounced + cached, with prefix/namespace/contains matching)
-  - Search supports multi-term filter normalization for LANraragi syntax (comma-separated tokens; wildcard tokens pass through)
+  - Search follows LANraragi tokenization (comma-separated tokens; spaces preserved inside a term; wildcard tokens pass through)
   - List view uses a table with columns: Select, Title, New, Date, Artist, Group, Tags (sortable and re-orderable)
   - Filters: New only, Untagged only, Category (server-backed)
   - Right-click: open Reader, edit metadata, copy archive id

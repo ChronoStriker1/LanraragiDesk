@@ -34,7 +34,7 @@ It is intentionally pragmatic and may be blunt.
   - Suggestions now support prefix, post-namespace prefix, and contains matching.
   - If a stats refresh fails, stale disk cache is still used so suggestions can continue working.
   - Added visible suggestion status text to surface failures instead of silently returning empty.
-  - Query submission normalizes separators for LANraragi-style multi-term search while preserving wildcard tokens.
+  - Query submission normalizes explicit separators for LANraragi-style multi-term search while preserving spaces inside each term and preserving wildcard tokens.
   - Files:
     - `Sources/LanraragiDeskApp/Services/TagSuggestionStore.swift`
     - `Sources/LanraragiDeskApp/UI/LibraryView.swift`

@@ -546,7 +546,7 @@ struct LibraryView: View {
             return TokenInfo(raw: "", range: nil, isNegated: false, hasTagPrefix: false, lookupPrefix: "")
         }
 
-        let separators = CharacterSet.whitespacesAndNewlines.union(.init(charactersIn: ","))
+        let separators = CharacterSet(charactersIn: ",;\n\r")
         if let r = q.rangeOfCharacter(from: separators, options: .backwards) {
             let token = String(q[r.upperBound...])
             return parseToken(token, range: r.upperBound..<q.endIndex)
@@ -586,44 +586,22 @@ struct LibraryView: View {
         await appModel.tagSuggestions.prewarm(profile: profile, settings: settings)
     }
 
-    // LANraragi expects multiple terms/tags to be comma-separated (the web UI treats commas as separators).
-    // To make the app behave closer to the web UI, we normalize whitespace-separated tokens into commas
-    // (except inside quoted strings).
+    // LANraragi treats commas as token delimiters. Spaces are valid inside a token.
+    // We normalize only explicit separators (; and newlines) to commas and trim comma spacing.
     private func normalizeLANraragiQuery(_ input: String) -> String {
         let s = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !s.isEmpty else { return "" }
 
-        var tokens: [String] = []
-        tokens.reserveCapacity(8)
-
         var buf = ""
         var inQuotes = false
+        var parts: [String] = []
+        parts.reserveCapacity(8)
 
         func flushBuf() {
             let piece = buf.trimmingCharacters(in: .whitespacesAndNewlines)
             buf = ""
             guard !piece.isEmpty else { return }
-
-            if piece.contains("\"") {
-                // Leave quoted expressions untouched.
-                tokens.append(piece)
-                return
-            }
-
-            // Split by whitespace so `a b c` becomes `a, b, c`.
-            let parts = piece
-                .split(whereSeparator: { $0.isWhitespace })
-                .map { String($0) }
-                .filter { !$0.isEmpty }
-
-            if parts.isEmpty {
-                return
-            }
-            if parts.count == 1 {
-                tokens.append(parts[0])
-                return
-            }
-            tokens.append(contentsOf: parts)
+            parts.append(piece)
         }
 
         for ch in s {
@@ -640,7 +618,7 @@ struct LibraryView: View {
         }
         flushBuf()
 
-        return tokens
+        return parts
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: ", ")
