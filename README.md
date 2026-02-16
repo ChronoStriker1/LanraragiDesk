@@ -42,7 +42,7 @@ This is a personal project intended to be published on GitHub (not the Mac App S
 - **Statistics** (optional; enable in Settings)
   - Sidebar page that mirrors LANraragi’s `/stats` behavior
   - Tag cloud from `/api/database/stats?minweight=<n>` rendered with a WebKit/jQCloud view (cloud-like layout, lower CPU than the old SwiftUI flow layout)
-  - Cloud rendering is capped to the top 1200 tags by weight for responsiveness
+  - Cloud rendering is capped to the top 1000 tags by weight for responsiveness
   - Detailed stats list sorted by weight (excluding `source` and `date_added`, matching LANraragi)
   - Header counters from server info (`total_archives`, `total_pages_read`, and distinct tag count)
   - Clicking a tag in cloud/details jumps to **Library** and runs a search for that tag

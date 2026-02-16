@@ -44,7 +44,7 @@ It is intentionally pragmatic and may be blunt.
   - Detailed list excludes `source` and `date_added` namespaces (matching LANraragi `stats.js`).
   - Added top counters from server info (`total_archives`, `total_pages_read`) plus distinct tag count.
   - Replaced the SwiftUI cloud with a WebKit/jQCloud renderer to reduce CPU and match LANraragi cloud visuals.
-  - Cloud is capped to top 1200 tags by weight; detailed list still stages in batches to avoid UI/system stalls.
+  - Cloud is capped to top 1000 tags by weight; detailed list still stages in batches to avoid UI/system stalls.
   - Clicking a tag in Statistics now switches to Library and executes a search for that tag.
   - Files:
     - `Sources/LanraragiDeskApp/UI/StatisticsView.swift`

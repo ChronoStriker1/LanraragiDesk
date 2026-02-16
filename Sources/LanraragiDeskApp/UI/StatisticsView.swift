@@ -20,7 +20,7 @@ struct StatisticsView: View {
 
     @State private var showDetailedStats: Bool = false
 
-    private let maxRenderableCloudWords: Int = 1200
+    private let maxRenderableCloudWords: Int = 1000
     private let maxRenderableDetailWords: Int = 8000
     private let firstDetailBatchSize: Int = 320
     private let stageDetailBatchSize: Int = 320
