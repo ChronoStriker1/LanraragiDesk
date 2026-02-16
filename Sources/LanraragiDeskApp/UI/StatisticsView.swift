@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import LanraragiKit
 
@@ -5,24 +6,33 @@ struct StatisticsView: View {
     @EnvironmentObject private var appModel: AppModel
     let profile: Profile
 
-    @State private var minWeight: Int = 1
+    @State private var minWeight: Int = 2
     @State private var filterText: String = ""
     @State private var isLoading: Bool = false
     @State private var statusText: String?
+    @State private var serverInfo: ServerInfo?
 
     @State private var allWords: [Word] = []
+    @State private var detailedWords: [Word] = []
     @State private var minObservedWeight: Int = 0
     @State private var maxObservedWeight: Int = 1
-    @State private var renderedCount: Int = 0
+    @State private var renderedCloudCount: Int = 0
+    @State private var renderedDetailCount: Int = 0
     @State private var stageTask: Task<Void, Never>?
 
-    private let maxRenderableWords: Int = 2500
-    private let firstBatchSize: Int = 220
-    private let stageBatchSize: Int = 220
+    @State private var showDetailedStats: Bool = false
+
+    private let maxRenderableCloudWords: Int = 2500
+    private let maxRenderableDetailWords: Int = 8000
+    private let firstCloudBatchSize: Int = 220
+    private let firstDetailBatchSize: Int = 320
+    private let stageCloudBatchSize: Int = 220
+    private let stageDetailBatchSize: Int = 320
 
     struct Word: Identifiable, Hashable {
         let id: String
         let namespace: String
+        let text: String
         let tag: String
         let weight: Int
     }
@@ -31,12 +41,12 @@ struct StatisticsView: View {
         VStack(alignment: .leading, spacing: 14) {
             header
 
-            if isLoading {
+            if isLoading && allWords.isEmpty {
                 ProgressView("Loading tag statistics…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(.thinMaterial)
                     .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            } else if visibleWords.isEmpty {
+            } else if allWords.isEmpty {
                 ContentUnavailableView(
                     "No Statistics Yet",
                     systemImage: "chart.bar.xaxis",
@@ -47,19 +57,10 @@ struct StatisticsView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             } else {
                 ScrollView(.vertical) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        statsSummary
-
-                        FlowLayout(spacing: 8, lineSpacing: 8) {
-                            ForEach(visibleWords) { word in
-                                StatisticsWordChip(
-                                    text: word.tag,
-                                    weight: word.weight,
-                                    fontSize: fontSize(for: word.weight),
-                                    tint: tint(forNamespace: word.namespace)
-                                )
-                            }
-                        }
+                    VStack(alignment: .leading, spacing: 14) {
+                        statsHeaderCard
+                        cloudSection
+                        detailedSection
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(14)
@@ -74,12 +75,26 @@ struct StatisticsView: View {
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .task(id: profile.id) {
-            minWeight = max(0, UserDefaults.standard.integer(forKey: "tags.minWeight"))
+            let defaults = UserDefaults.standard
+            if defaults.object(forKey: "tags.minWeight") == nil {
+                minWeight = 2
+                defaults.set(2, forKey: "tags.minWeight")
+            } else {
+                minWeight = max(0, defaults.integer(forKey: "tags.minWeight"))
+            }
             await refresh()
         }
         .onDisappear {
             stageTask?.cancel()
             stageTask = nil
+        }
+        .onChange(of: showDetailedStats) { _, expanded in
+            guard expanded else { return }
+            let detailCap = min(detailedWords.count, maxRenderableDetailWords)
+            if renderedDetailCount == 0 && detailCap > 0 {
+                renderedDetailCount = min(firstDetailBatchSize, detailCap)
+            }
+            stageRender()
         }
         .debugFrameNumber(1)
     }
@@ -102,7 +117,7 @@ struct StatisticsView: View {
 
             TextField("Filter tags…", text: $filterText)
                 .textFieldStyle(.roundedBorder)
-                .frame(width: 260)
+                .frame(width: 280)
                 .disabled(isLoading)
 
             Button("Refresh") {
@@ -112,32 +127,123 @@ struct StatisticsView: View {
         }
     }
 
-    private var statsSummary: some View {
-        let total = allWords.count
-        let visible = visibleWords.count
-        let rendered = min(renderedCount, min(total, maxRenderableWords))
-        return VStack(alignment: .leading, spacing: 4) {
-            Text("Tag cloud")
-                .font(.headline)
-            Text("Showing \(visible) tags (\(rendered) rendered of \(total) total).")
+    private var statsHeaderCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 18) {
+                StatPill(systemImage: "books.vertical.fill", title: "Archives", value: serverInfo?.total_archives.map(String.init) ?? "—")
+                StatPill(systemImage: "tags.fill", title: "Different tags", value: String(allWords.count))
+                StatPill(systemImage: "book.fill", title: "Pages read", value: serverInfo?.total_pages_read.map(String.init) ?? "—")
+                Spacer()
+            }
+
+            let cloudRendered = min(renderedCloudCount, min(allWords.count, maxRenderableCloudWords))
+            Text("Tag cloud: showing \(cloudVisibleWords.count) tags (\(cloudRendered) rendered of \(allWords.count) total).")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            if total > maxRenderableWords && filterText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text("Rendering is capped to \(maxRenderableWords) tags for responsiveness.")
+
+            if allWords.count > maxRenderableCloudWords && filterText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text("Cloud rendering is capped to \(maxRenderableCloudWords) tags for responsiveness.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let statusText, !statusText.isEmpty {
+                Text(statusText)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
         }
     }
 
-    private var visibleWords: [Word] {
+    private var cloudSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Tag Cloud")
+                .font(.headline)
+
+            if cloudVisibleWords.isEmpty {
+                Text("No tags to display.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                FlowLayout(spacing: 7, lineSpacing: 7) {
+                    ForEach(cloudVisibleWords) { word in
+                        Button {
+                            openTagSearch(word)
+                        } label: {
+                            Text(word.tag)
+                                .font(.system(size: fontSize(for: word.weight), weight: .semibold, design: .rounded))
+                                .foregroundStyle(tint(forNamespace: word.namespace))
+                        }
+                        .buttonStyle(.plain)
+                        .help("\(word.tag) (\(word.weight))")
+                    }
+                }
+            }
+        }
+    }
+
+    private var detailedSection: some View {
+        Group {
+            if !detailedWords.isEmpty {
+                DisclosureGroup("Detailed Stats", isExpanded: $showDetailedStats) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if detailedVisibleWords.isEmpty {
+                            Text("No matching tags.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 8, alignment: .leading)], alignment: .leading, spacing: 8) {
+                                ForEach(detailedVisibleWords) { word in
+                                    Button {
+                                        openTagSearch(word)
+                                    } label: {
+                                        HStack(spacing: 8) {
+                                            Text(word.tag)
+                                                .lineLimit(nil)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                                            Text("(\(word.weight))")
+                                                .font(.caption.monospacedDigit().weight(.bold))
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("\(word.tag) (\(word.weight))")
+                                }
+                            }
+                        }
+
+                        Text("(Detailed stats exclude namespaces `source` and `date_added`, matching LANraragi stats.)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 8)
+                }
+            }
+        }
+    }
+
+    private var cloudVisibleWords: [Word] {
         let needle = filterText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if needle.isEmpty {
-            let limit = min(renderedCount, min(allWords.count, maxRenderableWords))
+            let limit = min(renderedCloudCount, min(allWords.count, maxRenderableCloudWords))
             return Array(allWords.prefix(limit))
         }
         let matched = allWords.lazy.filter { $0.tag.lowercased().contains(needle) }
-        return Array(matched.prefix(maxRenderableWords))
+        return Array(matched.prefix(maxRenderableCloudWords))
+    }
+
+    private var detailedVisibleWords: [Word] {
+        guard showDetailedStats else { return [] }
+        let needle = filterText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if needle.isEmpty {
+            let limit = min(renderedDetailCount, min(detailedWords.count, maxRenderableDetailWords))
+            return Array(detailedWords.prefix(limit))
+        }
+        let matched = detailedWords.lazy.filter { $0.tag.lowercased().contains(needle) }
+        return Array(matched.prefix(maxRenderableDetailWords))
     }
 
     private func refresh() async {
@@ -160,19 +266,35 @@ struct StatisticsView: View {
                 maxConnectionsPerHost: AppSettings.maxConnectionsPerHost(defaultValue: 8)
             ))
 
-            let loaded = try await client.getDatabaseStats(minWeight: minWeight)
+            async let statsReq = client.getDatabaseStats(minWeight: minWeight)
+            async let infoReq = client.getServerInfo()
+
+            let loaded = try await statsReq
+            let info = try? await infoReq
+
             let mapped = mapWords(from: loaded.tags)
             allWords = mapped.words
+            detailedWords = mapped.words.filter { $0.namespace != "source" && $0.namespace != "date_added" }
             minObservedWeight = mapped.minWeight
             maxObservedWeight = mapped.maxWeight
-            renderedCount = min(firstBatchSize, min(allWords.count, maxRenderableWords))
+            serverInfo = info
+
+            renderedCloudCount = min(firstCloudBatchSize, min(allWords.count, maxRenderableCloudWords))
+            if showDetailedStats {
+                renderedDetailCount = min(firstDetailBatchSize, min(detailedWords.count, maxRenderableDetailWords))
+            } else {
+                renderedDetailCount = 0
+            }
+
             statusText = "Loaded \(allWords.count) tags."
             appModel.activity.add(.init(kind: .action, title: "Loaded statistics", detail: "tags \(allWords.count)"))
 
             stageRender()
         } catch {
             allWords = []
-            renderedCount = 0
+            detailedWords = []
+            renderedCloudCount = 0
+            renderedDetailCount = 0
             statusText = "Failed: \(ErrorPresenter.short(error))"
             appModel.activity.add(.init(kind: .error, title: "Statistics load failed", detail: String(describing: error)))
         }
@@ -180,17 +302,28 @@ struct StatisticsView: View {
 
     private func stageRender() {
         stageTask?.cancel()
-        let cap = min(allWords.count, maxRenderableWords)
-        guard renderedCount < cap else { return }
+        let cloudCap = min(allWords.count, maxRenderableCloudWords)
+        let detailCap = min(detailedWords.count, maxRenderableDetailWords)
+        let cloudPending = renderedCloudCount < cloudCap
+        let detailPending = showDetailedStats && renderedDetailCount < detailCap
+        guard cloudPending || detailPending else { return }
 
         stageTask = Task {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 90_000_000)
                 if Task.isCancelled { return }
                 await MainActor.run {
-                    renderedCount = min(cap, renderedCount + stageBatchSize)
+                    if renderedCloudCount < cloudCap {
+                        renderedCloudCount = min(cloudCap, renderedCloudCount + stageCloudBatchSize)
+                    }
+                    if showDetailedStats && renderedDetailCount < detailCap {
+                        renderedDetailCount = min(detailCap, renderedDetailCount + stageDetailBatchSize)
+                    }
                 }
-                if renderedCount >= cap { return }
+                let detailDone = !showDetailedStats || renderedDetailCount >= detailCap
+                if renderedCloudCount >= cloudCap && detailDone {
+                    return
+                }
             }
         }
     }
@@ -204,7 +337,7 @@ struct StatisticsView: View {
         var maxW = Int.min
 
         for t in tags {
-            let ns = (t.namespace ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let ns = (t.namespace ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             let tx = (t.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let tag: String = {
                 if !ns.isEmpty, !tx.isEmpty { return "\(ns):\(tx)" }
@@ -217,7 +350,7 @@ struct StatisticsView: View {
             minW = min(minW, weight)
             maxW = max(maxW, weight)
 
-            out.append(Word(id: tag, namespace: ns.lowercased(), tag: tag, weight: weight))
+            out.append(Word(id: tag, namespace: ns, text: tx, tag: tag, weight: weight))
         }
 
         out.sort { a, b in
@@ -234,10 +367,8 @@ struct StatisticsView: View {
         if maxObservedWeight <= minObservedWeight {
             return 13
         }
-
         let t = CGFloat(weight - minObservedWeight) / CGFloat(maxObservedWeight - minObservedWeight)
-        // Similar spirit to jQCloud classes: smaller floor, larger cap.
-        return 11 + (26 * sqrt(max(0, min(1, t))))
+        return 11 + (24 * sqrt(max(0, min(1, t))))
     }
 
     private func tint(forNamespace namespace: String) -> Color {
@@ -251,28 +382,41 @@ struct StatisticsView: View {
         default: return .primary
         }
     }
+
+    private func openTagSearch(_ word: Word) {
+        let token = word.namespace.isEmpty ? word.text : "\(word.namespace):\(word.text)"
+        guard !token.isEmpty else { return }
+
+        guard var comps = URLComponents(url: profile.baseURL, resolvingAgainstBaseURL: false) else { return }
+        if comps.path.isEmpty { comps.path = "/" }
+        comps.queryItems = [URLQueryItem(name: "filter", value: token)]
+
+        if let url = comps.url {
+            NSWorkspace.shared.open(url)
+        }
+    }
 }
 
-private struct StatisticsWordChip: View {
-    let text: String
-    let weight: Int
-    let fontSize: CGFloat
-    let tint: Color
+private struct StatPill: View {
+    let systemImage: String
+    let title: String
+    let value: String
 
     var body: some View {
-        HStack(spacing: 6) {
-            Text(text)
-                .font(.system(size: fontSize, weight: .semibold, design: .rounded))
-                .lineLimit(nil)
-                .multilineTextAlignment(.leading)
-            Text("(\(weight))")
-                .font(.caption2.monospacedDigit())
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
                 .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(value)
+                    .font(.headline.monospacedDigit())
+                Text(title)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
-        .foregroundStyle(tint)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(.quaternary.opacity(0.28))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.quaternary.opacity(0.3))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }

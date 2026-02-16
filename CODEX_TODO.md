@@ -39,12 +39,15 @@ It is intentionally pragmatic and may be blunt.
     - `Sources/LanraragiDeskApp/Services/TagSuggestionStore.swift`
     - `Sources/LanraragiDeskApp/UI/LibraryView.swift`
 
-- Statistics page performance:
-  - Reworked Statistics from a heavy full table to a staged word-cloud renderer.
-  - Rendering is batched and capped to avoid large UI/system stalls on big tag datasets.
+- Statistics page behavior + performance:
+  - Statistics now mirrors LANraragi `/stats`: weighted word cloud + detailed weighted list.
+  - Detailed list excludes `source` and `date_added` namespaces (matching LANraragi `stats.js`).
+  - Added top counters from server info (`total_archives`, `total_pages_read`) plus distinct tag count.
+  - Cloud and detailed sections render in staged batches with hard caps to avoid UI/system stalls.
   - Files:
     - `Sources/LanraragiDeskApp/UI/StatisticsView.swift`
-    - `Sources/LanraragiDeskApp/UI/Components/FlowLayout.swift`
+    - `Packages/LanraragiKit/Sources/LanraragiKit/Models/ServerInfo.swift`
+    - `Packages/LanraragiKit/Tests/LanraragiKitTests/ServerInfoDecodingTests.swift`
 
 - Thumbnail presentation:
   - Added `Settings -> Thumbnails -> Crop thumbnails to fill` toggle (off by default).
@@ -159,8 +162,10 @@ It is intentionally pragmatic and may be blunt.
   - Hover popover shows full title/summary/tags; clicking a tag appends the raw tag token into the search field (search does not auto-run).
 
 - Statistics page:
-  - Add a Settings checkbox that conditionally adds a Statistics item to the sidebar.
-  - Statistics should mirror LANraragi’s tag statistics table (`/api/database/stats`) and respect the Tag Suggestions min-weight setting.
+  - Settings checkbox should conditionally add/remove Statistics item in sidebar.
+  - Statistics should continue mirroring LANraragi (`/api/database/stats`) including weighted cloud + detailed list behavior.
+  - Verify large libraries stay responsive while cloud/details stage in.
+  - Verify top counters are populated when server exposes `total_archives` and `total_pages_read`.
   - Files:
     - `Sources/LanraragiDeskApp/UI/SettingsView.swift`
     - `Sources/LanraragiDeskApp/UI/RootView.swift`

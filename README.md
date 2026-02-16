@@ -40,9 +40,11 @@ This is a personal project intended to be published on GitHub (not the Mac App S
 - **Activity**
   - Local activity log with filtering and search
 - **Statistics** (optional; enable in Settings)
-  - Sidebar page that mirrors LANraragi’s tag cloud (`/api/database/stats`)
-  - Staged rendering with a cap for responsiveness on large libraries
-  - Local filter field for quickly finding tags in the cloud
+  - Sidebar page that mirrors LANraragi’s `/stats` behavior
+  - Tag cloud from `/api/database/stats?minweight=<n>` (staged + capped rendering for responsiveness)
+  - Detailed stats list sorted by weight (excluding `source` and `date_added`, matching LANraragi)
+  - Header counters from server info (`total_archives`, `total_pages_read`, and distinct tag count)
+  - Local filter field for quickly finding tags in the cloud and detailed list
 
 ## Setup
 
