@@ -325,7 +325,7 @@ struct LibraryView: View {
         case .grid:
             ScrollView {
                 LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 170), spacing: 12, alignment: .top)],
+                    columns: [GridItem(.adaptive(minimum: LibraryCard.outerCardWidth), spacing: 12, alignment: .top)],
                     alignment: .leading,
                     spacing: 12
                 ) {
@@ -681,6 +681,8 @@ private struct LibraryListRow: Identifiable, Hashable {
 }
 
 private struct LibraryCard: View {
+    static let outerCardWidth: CGFloat = 202
+
     @EnvironmentObject private var appModel: AppModel
 
     let profile: Profile

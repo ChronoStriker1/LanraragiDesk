@@ -8,6 +8,7 @@ This is a personal project intended to be published on GitHub (not the Mac App S
 
 - **Library**
   - Grid or list layout
+  - Grid card sizing is aligned with column sizing to prevent overlapping card frames
   - Server-side paging (scales to large libraries)
   - Default sort: **Newest added first** (`date_added desc`), with an automatic fallback to Title if the server rejects it
   - Cover overlays: **NEW**, **Date added**, **Page count**

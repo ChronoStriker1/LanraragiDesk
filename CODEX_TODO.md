@@ -35,6 +35,7 @@ It is intentionally pragmatic and may be blunt.
   - If a stats refresh fails, stale disk cache is still used so suggestions can continue working.
   - Added visible suggestion status text to surface failures instead of silently returning empty.
   - Query submission normalizes explicit separators for LANraragi-style multi-term search while preserving spaces inside each term and preserving wildcard tokens.
+  - Grid card overlap fix: library grid column minimum now matches card outer width to prevent frame overlap between neighboring cards.
   - Files:
     - `Sources/LanraragiDeskApp/Services/TagSuggestionStore.swift`
     - `Sources/LanraragiDeskApp/UI/LibraryView.swift`
