@@ -9,13 +9,16 @@ struct BatchView: View {
     @State private var addTagsText: String = ""
     @State private var removeTagsText: String = ""
     @State private var running: Bool = false
+    @State private var batchCancelRequested: Bool = false
     @State private var progressText: String?
     @State private var errors: [String] = []
     @State private var task: Task<Void, Never>?
     @State private var selectedPluginID: String?
     @State private var pluginArgText: String = ""
     @State private var pluginRunning: Bool = false
+    @State private var pluginCancelRequested: Bool = false
     @State private var pluginRunStatus: String?
+    @State private var pluginTask: Task<Void, Never>?
     @State private var showPluginSettings: Bool = false
     @State private var selectedArchiveNames: [String: String] = [:]
     @State private var selectedNamesTask: Task<Void, Never>?
@@ -35,7 +38,7 @@ struct BatchView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 Button("Clear Selection") { appModel.selection.clear() }
-                    .disabled(appModel.selection.count == 0 || running)
+                    .disabled(appModel.selection.count == 0 || running || pluginRunning)
             }
 
             GroupBox("Selected archives") {
@@ -147,14 +150,10 @@ struct BatchView: View {
                         .buttonStyle(.borderedProminent)
                         .disabled(running || pluginRunning || appModel.selection.count == 0 || (parseTags(addTagsText).isEmpty && parseTags(removeTagsText).isEmpty))
 
-                        Button("Cancel", role: .destructive) {
-                            task?.cancel()
-                            task = nil
-                            running = false
-                            progressText = "Cancelled."
-                            appModel.activity.add(.init(kind: .warning, title: "Batch cancelled"))
+                        Button(batchCancelRequested ? "Stopping…" : "Cancel", role: .destructive) {
+                            requestBatchCancel()
                         }
-                        .disabled(!running)
+                        .disabled(!running || batchCancelRequested)
 
                         Spacer()
                     }
@@ -229,6 +228,11 @@ struct BatchView: View {
                         .buttonStyle(.borderedProminent)
                         .disabled(running || pluginRunning || selectedPluginID == nil || appModel.selection.count == 0)
 
+                        Button(pluginCancelRequested ? "Stopping…" : "Cancel", role: .destructive) {
+                            requestPluginCancel()
+                        }
+                        .disabled(!pluginRunning || pluginCancelRequested)
+
                         Spacer()
                     }
 
@@ -270,6 +274,7 @@ struct BatchView: View {
         .debugFrameNumber(1)
         .onDisappear {
             task?.cancel()
+            pluginTask?.cancel()
             selectedNamesTask?.cancel()
             previewTask?.cancel()
         }
@@ -295,6 +300,7 @@ struct BatchView: View {
         if arcids.isEmpty { return }
 
         running = true
+        batchCancelRequested = false
         errors = []
         progressText = "Starting…"
         appModel.activity.add(.init(kind: .action, title: "Batch started", detail: "\(arcids.count) archives"))
@@ -303,9 +309,10 @@ struct BatchView: View {
         task = Task {
             var done = 0
             for arcid in arcids {
-                if Task.isCancelled { break }
+                if await MainActor.run(body: { batchCancelRequested }) { break }
                 do {
                     let meta = try await appModel.archives.metadata(profile: profile, arcid: arcid)
+                    if await MainActor.run(body: { batchCancelRequested }) { break }
                     let oldTags = meta.tags ?? ""
                     let newTags = applyTagEdits(old: oldTags, add: add, remove: remove)
                     if normalizeTags(oldTags) == normalizeTags(newTags) {
@@ -334,19 +341,23 @@ struct BatchView: View {
                 }
             }
 
+            let cancelledByRequest = await MainActor.run { batchCancelRequested }
+            let wasCancelled = cancelledByRequest || Task.isCancelled
+
             await MainActor.run {
                 running = false
-                if Task.isCancelled {
+                if wasCancelled {
                     progressText = "Cancelled."
                 } else if errors.isEmpty {
                     progressText = "Done."
                 } else {
                     progressText = "Done with \(errors.count) errors."
                 }
+                batchCancelRequested = false
                 task = nil
             }
 
-            if Task.isCancelled {
+            if wasCancelled {
                 appModel.activity.add(.init(kind: .warning, title: "Batch cancelled"))
             } else if errors.isEmpty {
                 appModel.activity.add(.init(kind: .action, title: "Batch completed", detail: "\(arcids.count) archives"))
@@ -354,6 +365,13 @@ struct BatchView: View {
                 appModel.activity.add(.init(kind: .warning, title: "Batch completed with errors", detail: "\(errors.count) errors"))
             }
         }
+    }
+
+    private func requestBatchCancel() {
+        guard running, !batchCancelRequested else { return }
+        batchCancelRequested = true
+        progressText = "Stopping after current archive save finishes…"
+        appModel.activity.add(.init(kind: .warning, title: "Batch cancel requested"))
     }
 
     private func parseTags(_ s: String) -> [String] {
@@ -402,14 +420,16 @@ struct BatchView: View {
         guard !arcids.isEmpty else { return }
 
         pluginRunning = true
+        pluginCancelRequested = false
         pluginRunStatus = "Running plugin on \(arcids.count) archives…"
         appModel.activity.add(.init(kind: .action, title: "Plugin batch queued", detail: "\(pluginID) on \(arcids.count) archives"))
 
-        Task {
+        pluginTask?.cancel()
+        pluginTask = Task {
             var ok = 0
             var fail = 0
             for (index, arcid) in arcids.enumerated() {
-                if Task.isCancelled { break }
+                if await MainActor.run(body: { pluginCancelRequested }) { break }
                 do {
                     let prePluginMeta = try? await appModel.archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
                     let preSignature = prePluginMeta.map {
@@ -461,11 +481,30 @@ struct BatchView: View {
                 }
             }
 
+            let cancelledByRequest = await MainActor.run { pluginCancelRequested }
+
             await MainActor.run {
                 pluginRunning = false
-                pluginRunStatus = "Done. Success \(ok), failed \(fail)."
+                if cancelledByRequest {
+                    pluginRunStatus = "Cancelled. Success \(ok), failed \(fail)."
+                } else {
+                    pluginRunStatus = "Done. Success \(ok), failed \(fail)."
+                }
+                pluginCancelRequested = false
+                pluginTask = nil
+            }
+
+            if cancelledByRequest {
+                appModel.activity.add(.init(kind: .warning, title: "Plugin batch cancelled", detail: "\(pluginID)"))
             }
         }
+    }
+
+    private func requestPluginCancel() {
+        guard pluginRunning, !pluginCancelRequested else { return }
+        pluginCancelRequested = true
+        pluginRunStatus = "Stopping after current archive operation finishes…"
+        appModel.activity.add(.init(kind: .warning, title: "Plugin batch cancel requested"))
     }
 
     private var selectedArcidsSorted: [String] {
