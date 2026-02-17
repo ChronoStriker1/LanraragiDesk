@@ -144,27 +144,6 @@ struct BatchView: View {
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
-
-                    if running || !batchLiveEvents.isEmpty {
-                        if let batchCurrentArchive {
-                            Text("Current: \(batchCurrentArchive)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 4) {
-                                ForEach(batchLiveEvents, id: \.self) { event in
-                                    Text(event)
-                                        .font(.caption2.monospaced())
-                                        .foregroundStyle(.secondary)
-                                        .textSelection(.enabled)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                            }
-                        }
-                        .frame(maxHeight: 120)
-                    }
                 }
                 .padding(8)
             }
@@ -270,52 +249,66 @@ struct BatchView: View {
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
+                }
+                .padding(8)
+            }
+            .debugFrameNumber(4)
 
-                    if pluginRunning || !pluginLiveEvents.isEmpty {
-                        if let pluginCurrentArchive {
-                            Text("Current: \(pluginCurrentArchive)")
+            GroupBox("Live log") {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 10) {
+                        if let batchCurrentArchive, running {
+                            Text("Tag batch: \(batchCurrentArchive)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
+                        if let pluginCurrentArchive, pluginRunning {
+                            Text("Plugin batch: \(pluginCurrentArchive)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        Button("Clear") {
+                            batchLiveEvents = []
+                            pluginLiveEvents = []
+                            liveEvents = []
+                            errors = []
+                        }
+                        .disabled(liveEvents.isEmpty && errors.isEmpty)
+                    }
+
+                    if liveEvents.isEmpty && errors.isEmpty {
+                        Text("No live events yet.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
                         ScrollView {
                             LazyVStack(alignment: .leading, spacing: 4) {
-                                ForEach(pluginLiveEvents, id: \.self) { event in
+                                ForEach(liveEvents, id: \.self) { event in
                                     Text(event)
                                         .font(.caption2.monospaced())
                                         .foregroundStyle(.secondary)
                                         .textSelection(.enabled)
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                 }
+                                ForEach(errors, id: \.self) { e in
+                                    Text("[ERROR] \(e)")
+                                        .font(.caption2.monospaced())
+                                        .foregroundStyle(.red)
+                                        .textSelection(.enabled)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
                             }
+                            .padding(.trailing, 4)
                         }
-                        .frame(maxHeight: 130)
                     }
                 }
                 .padding(8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .debugFrameNumber(4)
-
-            if !errors.isEmpty {
-                GroupBox("Errors") {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(errors, id: \.self) { e in
-                                Text(e)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .textSelection(.enabled)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(8)
-                    }
-                    .frame(maxHeight: 220)
-                }
-                .debugFrameNumber(3)
-            }
-
-            Spacer(minLength: 0)
+            .debugFrameNumber(3)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(18)
@@ -504,6 +497,8 @@ struct BatchView: View {
         guard !arcids.isEmpty else { return }
 
         if previewBeforeQueue {
+            pluginRunStatus = "Generating preview for \(arcids.count) archives…"
+            appendPluginLiveEvent("Preview started for \(pluginID) on \(arcids.count) archives")
             generatePreview(executePlugin: true)
             appModel.activity.add(.init(kind: .action, title: "Plugin batch preview generated", detail: "\(pluginID) on sample of \(arcids.count) selected"))
             return
@@ -749,6 +744,9 @@ struct BatchView: View {
                     let filename = archiveDisplayName(metadata: meta, arcid: arcid)
                     await MainActor.run {
                         selectedArchiveNames[arcid] = filename
+                        if executePlugin {
+                            appendPluginLiveEvent("Previewing \(filename)")
+                        }
                     }
 
                     let originalTitle = (meta.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -810,6 +808,20 @@ struct BatchView: View {
                         detail: details.joined(separator: "\n"),
                         kind: .normal
                     ))
+                    if executePlugin {
+                        await MainActor.run {
+                            appendPluginLiveEvent(metadataChangeLiveMessage(
+                                prefix: "Preview",
+                                arcid: arcid,
+                                beforeTitle: originalTitle,
+                                beforeTags: originalTags,
+                                beforeSummary: originalSummary,
+                                afterTitle: previewTitle,
+                                afterTags: previewTags,
+                                afterSummary: previewSummary
+                            ))
+                        }
+                    }
                 } catch {
                     rows.append(.init(
                         arcid: arcid,
@@ -817,6 +829,11 @@ struct BatchView: View {
                         detail: "Preview failed: \(ErrorPresenter.short(error))",
                         kind: .error
                     ))
+                    if executePlugin {
+                        await MainActor.run {
+                            appendPluginLiveEvent("Preview failed for \(displayName(for: arcid)): \(ErrorPresenter.short(error))")
+                        }
+                    }
                 }
             }
 
@@ -830,6 +847,10 @@ struct BatchView: View {
                     previewStatus = "Preview generated for \(rows.count) archives\(suffix). Plugin delay between runs: \(delayDisplay(delaySeconds))s."
                 } else {
                     previewStatus = "Preview generated for \(rows.count) archives\(suffix)."
+                }
+                if executePlugin {
+                    appendPluginLiveEvent("Preview completed for \(rows.count) archives\(suffix)")
+                    pluginRunStatus = "Preview complete for \(rows.count) archives\(suffix)."
                 }
             }
         }
@@ -1236,21 +1257,12 @@ struct BatchView: View {
             afterTitle: afterTitle,
             afterTags: afterTags,
             afterSummary: afterSummary
-        ).map { truncatedLiveField($0) }
+        )
 
         if lines.count == 1, lines[0] == "No metadata changes." {
             return "\(prefix) \(displayName(for: arcid)) • No metadata changes."
         }
         return "\(prefix) \(displayName(for: arcid)) • \(lines.joined(separator: " | "))"
-    }
-
-    private func truncatedLiveField(_ value: String, maxLength: Int = 180) -> String {
-        let compact = value
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard compact.count > maxLength else { return compact }
-        let end = compact.index(compact.startIndex, offsetBy: maxLength - 1)
-        return String(compact[..<end]) + "…"
     }
 
     private func uniqueTagCSV(_ value: String) -> String {
@@ -1268,17 +1280,13 @@ struct BatchView: View {
     private func appendBatchLiveEvent(_ message: String) {
         let entry = "[\(timeStamp())] \(message)"
         batchLiveEvents.insert(entry, at: 0)
-        if batchLiveEvents.count > 120 {
-            batchLiveEvents.removeLast(batchLiveEvents.count - 120)
-        }
+        liveEvents.insert("[\(timeStamp())] [TAG] \(message)", at: 0)
     }
 
     private func appendPluginLiveEvent(_ message: String) {
         let entry = "[\(timeStamp())] \(message)"
         pluginLiveEvents.insert(entry, at: 0)
-        if pluginLiveEvents.count > 160 {
-            pluginLiveEvents.removeLast(pluginLiveEvents.count - 160)
-        }
+        liveEvents.insert("[\(timeStamp())] [PLUGIN] \(message)", at: 0)
     }
 
     private func timeStamp() -> String {
@@ -1355,6 +1363,11 @@ struct BatchView: View {
         get { runState.pluginLiveEvents }
         nonmutating set { runState.pluginLiveEvents = newValue }
     }
+
+    private var liveEvents: [String] {
+        get { runState.liveEvents }
+        nonmutating set { runState.liveEvents = newValue }
+    }
 }
 
 @MainActor
@@ -1375,6 +1388,7 @@ private final class BatchRunState: ObservableObject {
     var pluginTask: Task<Void, Never>?
     @Published var pluginCurrentArchive: String?
     @Published var pluginLiveEvents: [String] = []
+    @Published var liveEvents: [String] = []
 }
 
 private struct BatchPreviewRow: Identifiable {
