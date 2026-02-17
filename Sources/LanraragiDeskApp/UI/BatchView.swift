@@ -76,46 +76,48 @@ struct BatchView: View {
             }
             .debugFrameNumber(5)
 
-            GroupBox("Preview (sample)") {
-                VStack(alignment: .leading, spacing: 10) {
-                    if !previewBeforeQueue {
-                        Text("Preview is disabled. Enable \"Preview Before Queue\" in Plugin operations to run a sample preview.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+            if previewBeforeQueue || previewRunning || !previewRows.isEmpty || previewStatus != nil {
+                GroupBox("Preview") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if !previewBeforeQueue {
+                            Text("Preview is disabled. Enable \"Preview Before Queue\" in Plugin operations to run a sample preview.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
 
-                    if let previewStatus {
-                        Text(previewStatus)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                        if let previewStatus {
+                            Text(previewStatus)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
 
-                    if !previewRows.isEmpty {
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 8) {
-                                ForEach(previewRows) { row in
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(row.filename)
-                                            .font(.caption.weight(.semibold))
-                                            .lineLimit(1)
-                                        Text(row.detail)
-                                            .font(.caption2)
-                                            .foregroundStyle(row.kind == .error ? .red : .secondary)
-                                            .textSelection(.enabled)
+                        if !previewRows.isEmpty {
+                            ScrollView {
+                                LazyVStack(alignment: .leading, spacing: 8) {
+                                    ForEach(previewRows) { row in
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(row.filename)
+                                                .font(.caption.weight(.semibold))
+                                                .lineLimit(1)
+                                            Text(row.detail)
+                                                .font(.caption2)
+                                                .foregroundStyle(row.kind == .error ? .red : .secondary)
+                                                .textSelection(.enabled)
+                                        }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(8)
+                                        .background(Color.primary.opacity(0.06))
+                                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                                     }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(8)
-                                    .background(Color.primary.opacity(0.06))
-                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                                 }
                             }
+                            .frame(maxHeight: 220)
                         }
-                        .frame(maxHeight: 220)
                     }
+                    .padding(8)
                 }
-                .padding(8)
+                .debugFrameNumber(6)
             }
-            .debugFrameNumber(6)
 
             GroupBox("Tag operations") {
                 VStack(alignment: .leading, spacing: 12) {
