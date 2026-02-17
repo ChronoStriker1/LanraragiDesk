@@ -27,6 +27,7 @@ struct BatchView: View {
     @State private var previewStatus: String?
     @State private var previewRunning: Bool = false
     @State private var previewTask: Task<Void, Never>?
+    @State private var previewBeforeQueue: Bool = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -82,24 +83,10 @@ struct BatchView: View {
 
             GroupBox("Preview (sample)") {
                 VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Button(previewRunning ? "Generating…" : "Generate Preview") {
-                            generatePreview()
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(previewRunning || running || pluginRunning || selectedArcidsSorted.isEmpty)
-
-                        if !previewRows.isEmpty || previewStatus != nil {
-                            Button("Clear") {
-                                previewTask?.cancel()
-                                previewTask = nil
-                                previewRows = []
-                                previewStatus = nil
-                            }
-                            .buttonStyle(.borderless)
-                            .disabled(previewRunning)
-                        }
-                        Spacer()
+                    if !previewBeforeQueue {
+                        Text("Preview is disabled. Enable \"Preview Before Queue\" in Plugin operations to run a sample preview.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
 
                     if let previewStatus {
@@ -223,6 +210,11 @@ struct BatchView: View {
                         .disabled(running || pluginRunning)
 
                     HStack {
+                        Toggle("Preview Before Queue", isOn: $previewBeforeQueue)
+                            .toggleStyle(.checkbox)
+                            .font(.caption)
+                            .disabled(running || pluginRunning || previewRunning)
+
                         HStack(spacing: 8) {
                             Text("Delay (sec)")
                                 .font(.caption)
@@ -240,7 +232,7 @@ struct BatchView: View {
                             runPluginBatch()
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(running || pluginRunning || selectedPluginID == nil || appModel.selection.count == 0)
+                        .disabled(running || pluginRunning || previewRunning || selectedPluginID == nil || appModel.selection.count == 0)
 
                         Button(pluginCancelRequested ? "Stopping…" : "Cancel", role: .destructive) {
                             requestPluginCancel()
@@ -308,6 +300,11 @@ struct BatchView: View {
         }
         .onChange(of: pluginArgText) { _, _ in invalidatePreview() }
         .onChange(of: pluginDelayText) { _, _ in invalidatePreview() }
+        .onChange(of: previewBeforeQueue) { _, _ in
+            if !previewBeforeQueue {
+                invalidatePreview()
+            }
+        }
     }
 
     private func run() {
@@ -438,6 +435,13 @@ struct BatchView: View {
         guard let pluginID = selectedPluginID else { return }
         let arcids = selectedArcidsSorted
         guard !arcids.isEmpty else { return }
+
+        if previewBeforeQueue {
+            generatePreview()
+            appModel.activity.add(.init(kind: .action, title: "Plugin batch preview generated", detail: "\(pluginID) on sample of \(arcids.count) selected"))
+            return
+        }
+
         let delaySeconds = sanitizedDelaySeconds(from: pluginDelayText)
 
         pluginRunning = true
