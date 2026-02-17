@@ -18,6 +18,7 @@
 		4CF1B22A3D290E0F65F546D7 /* NotMatchesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99C7CE21E9CCBADBAD7844A7 /* NotMatchesView.swift */; };
 		4F936559E518E116AD570EFD /* ActivityEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58F7CF159983299EE64C06C5 /* ActivityEvent.swift */; };
 		5113E07D4F781D2AA690F2D9 /* DuplicateScanViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54B3E61F93FAE6A29E18E911 /* DuplicateScanViewModel.swift */; };
+		54CAC87A9D887290E80BC354 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 93E25149182F74702F91FEA0 /* Assets.xcassets */; };
 		56699C58563F360A17193162 /* DebugFrameNumber.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA0092A389E3EFF8BEBF77C7 /* DebugFrameNumber.swift */; };
 		58B951D7DC8BBF39CCCFC850 /* CoverThumb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72C4199C56747CD950398BF5 /* CoverThumb.swift */; };
 		5B9F2A7E4BF06F067B673D03 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55DB22001120CA1D977F2D22 /* SettingsView.swift */; };
@@ -75,6 +76,7 @@
 		8BFCDFAA8ABFDE74C7D3EC0D /* ConnectionHeaderCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionHeaderCard.swift; sourceTree = "<group>"; };
 		92B6686EDCF99DFFC6D32B78 /* ArchiveLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArchiveLoader.swift; sourceTree = "<group>"; };
 		93C3DC7516031BE8557B0B91 /* IndexingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IndexingViewModel.swift; sourceTree = "<group>"; };
+		93E25149182F74702F91FEA0 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		99C7CE21E9CCBADBAD7844A7 /* NotMatchesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotMatchesView.swift; sourceTree = "<group>"; };
 		99CBA245A79722298EB8ADD5 /* AppPaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPaths.swift; sourceTree = "<group>"; };
 		A9EC55E639FCDA50A382AA2A /* ReaderDirection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderDirection.swift; sourceTree = "<group>"; };
@@ -144,6 +146,7 @@
 		5E873D8DBDF0DD97FB21A28E /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				93E25149182F74702F91FEA0 /* Assets.xcassets */,
 				76F557803B708694C1EF5904 /* Info.plist */,
 			);
 			path = Resources;
@@ -235,6 +238,7 @@
 			buildConfigurationList = FDF1369023BE674EBC025E66 /* Build configuration list for PBXNativeTarget "LanraragiDesk" */;
 			buildPhases = (
 				B8AFA0A619ED38F07B712DF9 /* Sources */,
+				474F3AA8FFAD38AC61157D85 /* Resources */,
 				0AE0D1317BE1E0340D920335 /* Frameworks */,
 			);
 			buildRules = (
@@ -279,6 +283,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		474F3AA8FFAD38AC61157D85 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				54CAC87A9D887290E80BC354 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		B8AFA0A619ED38F07B712DF9 /* Sources */ = {
