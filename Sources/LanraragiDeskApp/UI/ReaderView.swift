@@ -94,6 +94,13 @@ struct ReaderView: View {
                     }
 
                     Text("Current zoom: \(Int(zoomPercent.rounded()))%")
+
+                    Divider()
+
+                    Button("Open in LANraragi") {
+                        openInLANraragi()
+                    }
+                    .keyboardShortcut("o", modifiers: [.command, .shift])
                 } label: {
                     Image(systemName: "rectangle.3.group")
                         .imageScale(.medium)
@@ -162,6 +169,10 @@ struct ReaderView: View {
 
     private var readingDirection: ReaderDirection {
         ReaderDirection(rawValue: readingDirectionRaw) ?? .ltr
+    }
+
+    private var currentProfile: Profile? {
+        appModel.profileStore.profiles.first(where: { $0.id == route.profileID })
     }
 
     private var fitMode: ReaderFitMode {
@@ -314,40 +325,74 @@ struct ReaderView: View {
     }
 
     private var autoAdvanceToolbarControl: some View {
-        HStack(spacing: 6) {
-            Button {
-                autoAdvanceEnabled.toggle()
-            } label: {
-                Image(systemName: autoAdvanceEnabled ? "clock.badge.checkmark" : "clock")
-                    .imageScale(.medium)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) {
+                Button {
+                    autoAdvanceEnabled.toggle()
+                } label: {
+                    Image(systemName: autoAdvanceEnabled ? "clock.badge.checkmark" : "clock")
+                        .imageScale(.medium)
+                }
+                .buttonStyle(.borderless)
+                .help("Toggle auto page turn")
+
+                Slider(
+                    value: $autoAdvanceSeconds,
+                    in: Self.autoAdvanceMinSeconds...Self.autoAdvanceMaxSeconds,
+                    step: 1
+                )
+                .frame(width: 84)
+                .controlSize(.small)
+
+                Text("\(autoAdvanceDisplayedSeconds)s")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 36, alignment: .trailing)
+                    .lineLimit(1)
             }
-            .buttonStyle(.borderless)
-            .help("Toggle auto page turn")
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(.quaternary.opacity(0.3))
+            .clipShape(Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 1)
+            }
+            .frame(width: 164, alignment: .leading)
+            .help("Auto page turn")
 
-            Slider(
-                value: $autoAdvanceSeconds,
-                in: Self.autoAdvanceMinSeconds...Self.autoAdvanceMaxSeconds,
-                step: 1
-            )
-            .frame(width: 84)
-            .controlSize(.small)
+            HStack(spacing: 6) {
+                Button {
+                    autoAdvanceEnabled.toggle()
+                } label: {
+                    Image(systemName: autoAdvanceEnabled ? "clock.badge.checkmark" : "clock")
+                        .imageScale(.medium)
+                }
+                .buttonStyle(.borderless)
+                .help("Toggle auto page turn")
 
-            Text("\(autoAdvanceDisplayedSeconds)s")
+                Menu("\(autoAdvanceDisplayedSeconds)s") {
+                    Button("Slower ( +5s )") {
+                        autoAdvanceSeconds = min(Self.autoAdvanceMaxSeconds, autoAdvanceSeconds + 5)
+                    }
+                    Button("Faster ( -5s )") {
+                        autoAdvanceSeconds = max(Self.autoAdvanceMinSeconds, autoAdvanceSeconds - 5)
+                    }
+                }
                 .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 36, alignment: .trailing)
-                .lineLimit(1)
+                .menuStyle(.borderlessButton)
+                .help("Adjust auto page turn delay")
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(.quaternary.opacity(0.3))
+            .clipShape(Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 1)
+            }
+            .help("Auto page turn")
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(.quaternary.opacity(0.3))
-        .clipShape(Capsule())
-        .overlay {
-            Capsule()
-                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 1)
-        }
-        .frame(width: 164, alignment: .leading)
-        .help("Auto page turn")
     }
 
     private func loadArchive() async {
@@ -364,7 +409,7 @@ struct ReaderView: View {
         loadTask?.cancel()
         prefetchTask?.cancel()
 
-        guard let profile = appModel.profileStore.profiles.first(where: { $0.id == route.profileID }) else {
+        guard let profile = currentProfile else {
             errorText = "Profile not found"
             return
         }
@@ -389,7 +434,7 @@ struct ReaderView: View {
         imageBPixelSize = nil
         errorText = nil
 
-        guard let profile = appModel.profileStore.profiles.first(where: { $0.id == route.profileID }) else {
+        guard let profile = currentProfile else {
             errorText = "Profile not found"
             return
         }
@@ -585,6 +630,18 @@ struct ReaderView: View {
         if clamped != autoAdvanceSeconds {
             autoAdvanceSeconds = clamped
         }
+    }
+
+    private func openInLANraragi() {
+        guard
+            let profile = currentProfile,
+            var comps = URLComponents(url: profile.baseURL, resolvingAgainstBaseURL: false)
+        else { return }
+        comps.path = "/reader"
+        comps.queryItems = [URLQueryItem(name: "id", value: route.arcid)]
+        guard let url = comps.url else { return }
+        NSWorkspace.shared.open(url)
+        appModel.activity.add(.init(kind: .action, title: "Opened in LANraragi", detail: route.arcid, component: "Reader"))
     }
 }
 

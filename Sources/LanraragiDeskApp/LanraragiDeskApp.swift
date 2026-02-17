@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 @main
 struct LanraragiDeskApp: App {
@@ -13,6 +14,7 @@ struct LanraragiDeskApp: App {
         .windowToolbarStyle(.unifiedCompact(showsTitle: false))
         .commands {
             ReaderZoomCommands()
+            ReaderOpenInLANraragiCommands(appModel: appModel)
         }
 
         Window("Reader", id: "reader") {
@@ -26,6 +28,29 @@ struct LanraragiDeskApp: App {
             }
         }
         .windowToolbarStyle(.unifiedCompact(showsTitle: false))
+    }
+}
+
+private struct ReaderOpenInLANraragiCommands: Commands {
+    @ObservedObject var appModel: AppModel
+
+    var body: some Commands {
+        CommandGroup(after: .toolbar) {
+            Button("Open in LANraragi") {
+                guard
+                    let route = appModel.activeReaderRoute,
+                    let profile = appModel.profileStore.profiles.first(where: { $0.id == route.profileID }),
+                    var comps = URLComponents(url: profile.baseURL, resolvingAgainstBaseURL: false)
+                else { return }
+                comps.path = "/reader"
+                comps.queryItems = [URLQueryItem(name: "id", value: route.arcid)]
+                guard let url = comps.url else { return }
+                NSWorkspace.shared.open(url)
+                appModel.activity.add(.init(kind: .action, title: "Opened in LANraragi", detail: route.arcid, component: "Reader"))
+            }
+            .keyboardShortcut("o", modifiers: [.command, .shift])
+            .disabled(appModel.activeReaderRoute == nil)
+        }
     }
 }
 

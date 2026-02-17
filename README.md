@@ -45,9 +45,11 @@ macOS (Apple Silicon-first) LANraragi desktop client for managing a LANraragi se
   - Keyboard navigation
   - Left/Right arrow key page navigation (in addition to click zones and move commands)
   - Optional auto-advance timer (off by default)
+  - Open current archive directly in LANraragi (`/reader?id=<arcid>`)
   - Two-page spread, fit modes, zoom controls
   - View zoom controls include Increase, Decrease, and Reset (`Cmd+=`, `Cmd+-`, `Cmd+0`)
   - Left-to-right / right-to-left “Next page” behavior (configured in Settings)
+  - Reader toolbar adapts for narrow windows to keep page-turn and auto-advance controls accessible
 - **Metadata editor**
   - Edit title/tags/summary
   - Save uses LANraragi-compatible metadata update payloads (title/tags/summary are always sent)
@@ -150,5 +152,5 @@ See `CONTRIBUTING.md` (includes a rule to keep Markdown docs updated alongside c
 - [x] Optional statistics page that mirrors LANraragi stats
 - [x] Plugins: job status tracking UI (running/finished/failed)
 - [ ] Activity: structured entries + export/severity UX
-- [ ] Reader: add optional "Open in LANraragi" action and complete narrow-window verification
+- [x] Reader: add optional "Open in LANraragi" action and complete narrow-window verification
 - [ ] Duplicates: better "Not a match" management (search/undo) and additional error-path UX polish
