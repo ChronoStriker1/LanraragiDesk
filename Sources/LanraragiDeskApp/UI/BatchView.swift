@@ -13,6 +13,8 @@ struct BatchView: View {
     @State private var progressText: String?
     @State private var errors: [String] = []
     @State private var task: Task<Void, Never>?
+    @State private var batchCurrentArchive: String?
+    @State private var batchLiveEvents: [String] = []
     @State private var selectedPluginID: String?
     @State private var pluginArgText: String = ""
     @State private var pluginDelayText: String = "4"
@@ -21,6 +23,8 @@ struct BatchView: View {
     @State private var pluginCancelRequested: Bool = false
     @State private var pluginRunStatus: String?
     @State private var pluginTask: Task<Void, Never>?
+    @State private var pluginCurrentArchive: String?
+    @State private var pluginLiveEvents: [String] = []
     @State private var showPluginSettings: Bool = false
     @State private var selectedArchiveNames: [String: String] = [:]
     @State private var selectedNamesTask: Task<Void, Never>?
@@ -152,6 +156,27 @@ struct BatchView: View {
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
+
+                    if running || !batchLiveEvents.isEmpty {
+                        if let batchCurrentArchive {
+                            Text("Current: \(batchCurrentArchive)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 4) {
+                                ForEach(batchLiveEvents, id: \.self) { event in
+                                    Text(event)
+                                        .font(.caption2.monospaced())
+                                        .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 120)
+                    }
                 }
                 .padding(8)
             }
@@ -257,6 +282,27 @@ struct BatchView: View {
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
+
+                    if pluginRunning || !pluginLiveEvents.isEmpty {
+                        if let pluginCurrentArchive {
+                            Text("Current: \(pluginCurrentArchive)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 4) {
+                                ForEach(pluginLiveEvents, id: \.self) { event in
+                                    Text(event)
+                                        .font(.caption2.monospaced())
+                                        .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 130)
+                    }
                 }
                 .padding(8)
             }
@@ -326,21 +372,30 @@ struct BatchView: View {
 
         running = true
         batchCancelRequested = false
+        batchCurrentArchive = nil
+        batchLiveEvents = []
         errors = []
         progressText = "Starting…"
         appModel.activity.add(.init(kind: .action, title: "Batch started", detail: "\(arcids.count) archives"))
+        appendBatchLiveEvent("Started \(arcids.count) archives")
 
         task?.cancel()
         task = Task {
             var done = 0
             for arcid in arcids {
                 if await MainActor.run(body: { batchCancelRequested }) { break }
+                await MainActor.run {
+                    batchCurrentArchive = displayName(for: arcid)
+                }
                 do {
                     let meta = try await appModel.archives.metadata(profile: profile, arcid: arcid)
                     if await MainActor.run(body: { batchCancelRequested }) { break }
                     let oldTags = meta.tags ?? ""
                     let newTags = applyTagEdits(old: oldTags, add: add, remove: remove)
                     if normalizeTags(oldTags) == normalizeTags(newTags) {
+                        await MainActor.run {
+                            appendBatchLiveEvent("No changes for \(displayName(for: arcid))")
+                        }
                         done += 1
                         await MainActor.run {
                             progressText = "Processed \(done)/\(arcids.count)…"
@@ -355,9 +410,15 @@ struct BatchView: View {
                         tags: newTags,
                         summary: meta.summary ?? ""
                     )
+                    await MainActor.run {
+                        appendBatchLiveEvent("Saved \(displayName(for: arcid))")
+                    }
                 } catch {
                     let msg = "\(arcid): \(ErrorPresenter.short(error))"
-                    await MainActor.run { errors.append(msg) }
+                    await MainActor.run {
+                        errors.append(msg)
+                        appendBatchLiveEvent("Failed \(displayName(for: arcid)): \(ErrorPresenter.short(error))")
+                    }
                 }
 
                 done += 1
@@ -371,6 +432,7 @@ struct BatchView: View {
 
             await MainActor.run {
                 running = false
+                batchCurrentArchive = nil
                 if wasCancelled {
                     progressText = "Cancelled."
                 } else if errors.isEmpty {
@@ -456,8 +518,11 @@ struct BatchView: View {
 
         pluginRunning = true
         pluginCancelRequested = false
+        pluginCurrentArchive = nil
+        pluginLiveEvents = []
         pluginRunStatus = "Running plugin on \(arcids.count) archives…"
         appModel.activity.add(.init(kind: .action, title: "Plugin batch queued", detail: "\(pluginID) on \(arcids.count) archives"))
+        appendPluginLiveEvent("Started \(pluginID) on \(arcids.count) archives")
 
         pluginTask?.cancel()
         pluginTask = Task {
@@ -465,6 +530,10 @@ struct BatchView: View {
             var fail = 0
             for (index, arcid) in arcids.enumerated() {
                 if await MainActor.run(body: { pluginCancelRequested }) { break }
+                await MainActor.run {
+                    pluginCurrentArchive = displayName(for: arcid)
+                    appendPluginLiveEvent("Processing \(displayName(for: arcid))")
+                }
                 do {
                     let prePluginMeta = try? await appModel.archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
                     let preSignature = prePluginMeta.map {
@@ -477,12 +546,22 @@ struct BatchView: View {
                         ? "\(pluginID) • \(arcid) • job \(job.job)"
                         : "\(pluginID) • \(arcid) • executed (no job id returned)"
                     appModel.activity.add(.init(kind: .action, title: "Plugin job queued", detail: detail))
+                    await MainActor.run {
+                        if job.job > 0 {
+                            appendPluginLiveEvent("Queued job \(job.job) for \(displayName(for: arcid))")
+                        } else {
+                            appendPluginLiveEvent("Ran without job id for \(displayName(for: arcid))")
+                        }
+                    }
 
                     if job.job > 0 {
                         let state = await pluginsVM.waitForJobCompletion(profile: profile, jobID: job.job)
                         if state == .failed {
                             fail += 1
                             appModel.activity.add(.init(kind: .warning, title: "Plugin job failed", detail: "\(pluginID) • \(arcid) • job \(job.job)"))
+                            await MainActor.run {
+                                appendPluginLiveEvent("Job \(job.job) failed for \(displayName(for: arcid))")
+                            }
                         } else {
                             let changed = await refreshMetadataAfterPluginBatch(profile: profile, arcid: arcid, previousSignature: preSignature)
                             if !changed {
@@ -495,6 +574,9 @@ struct BatchView: View {
                                 )
                             }
                             ok += 1
+                            await MainActor.run {
+                                appendPluginLiveEvent("Finished \(displayName(for: arcid))")
+                            }
                         }
                     } else {
                         let changed = await refreshMetadataAfterPluginBatch(profile: profile, arcid: arcid, previousSignature: preSignature)
@@ -508,10 +590,16 @@ struct BatchView: View {
                             )
                         }
                         ok += 1
+                        await MainActor.run {
+                            appendPluginLiveEvent("Finished \(displayName(for: arcid))")
+                        }
                     }
                 } catch {
                     fail += 1
                     appModel.activity.add(.init(kind: .error, title: "Plugin queue failed", detail: "\(pluginID) • \(arcid)\n\(error)"))
+                    await MainActor.run {
+                        appendPluginLiveEvent("Failed \(displayName(for: arcid)): \(ErrorPresenter.short(error))")
+                    }
                 }
                 await MainActor.run {
                     pluginRunStatus = "Processed \(index + 1)/\(arcids.count) • Success \(ok) • Failed \(fail)…"
@@ -528,6 +616,7 @@ struct BatchView: View {
 
             await MainActor.run {
                 pluginRunning = false
+                pluginCurrentArchive = nil
                 if cancelledByRequest {
                     pluginRunStatus = "Cancelled. Success \(ok), failed \(fail)."
                 } else {
@@ -1044,6 +1133,32 @@ struct BatchView: View {
         }
         return out.joined(separator: ", ")
     }
+
+    private func appendBatchLiveEvent(_ message: String) {
+        let entry = "[\(timeStamp())] \(message)"
+        batchLiveEvents.insert(entry, at: 0)
+        if batchLiveEvents.count > 120 {
+            batchLiveEvents.removeLast(batchLiveEvents.count - 120)
+        }
+    }
+
+    private func appendPluginLiveEvent(_ message: String) {
+        let entry = "[\(timeStamp())] \(message)"
+        pluginLiveEvents.insert(entry, at: 0)
+        if pluginLiveEvents.count > 160 {
+            pluginLiveEvents.removeLast(pluginLiveEvents.count - 160)
+        }
+    }
+
+    private func timeStamp() -> String {
+        Self.liveTimeFormatter.string(from: Date())
+    }
+
+    private static let liveTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        return f
+    }()
 }
 
 private struct BatchPreviewRow: Identifiable {
