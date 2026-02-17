@@ -437,7 +437,7 @@ struct BatchView: View {
         guard !arcids.isEmpty else { return }
 
         if previewBeforeQueue {
-            generatePreview()
+            generatePreview(executePlugin: true)
             appModel.activity.add(.init(kind: .action, title: "Plugin batch preview generated", detail: "\(pluginID) on sample of \(arcids.count) selected"))
             return
         }
@@ -593,7 +593,7 @@ struct BatchView: View {
         previewStatus = nil
     }
 
-    private func generatePreview(sampleSize: Int = 10) {
+    private func generatePreview(sampleSize: Int = 10, executePlugin: Bool = false) {
         previewTask?.cancel()
         guard let profile = appModel.selectedProfile else { return }
         let arcids = Array(selectedArcidsSorted.prefix(sampleSize))
@@ -621,24 +621,53 @@ struct BatchView: View {
                         selectedArchiveNames[arcid] = filename
                     }
 
+                    let originalTitle = (meta.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    let originalTags = (meta.tags ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    let originalSummary = (meta.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+
+                    var previewTitle = originalTitle
+                    var previewTags = originalTags
+                    var previewSummary = originalSummary
                     var details: [String] = []
                     if hasTagOps {
-                        let oldTags = meta.tags ?? ""
-                        let newTags = applyTagEdits(old: oldTags, add: add, remove: remove)
-                        let changed = normalizeTags(oldTags) != normalizeTags(newTags)
-                        details.append(changed ? "Tags would change to: \(newTags)" : "Tags unchanged.")
+                        previewTags = applyTagEdits(old: previewTags, add: add, remove: remove)
                     }
                     if let pluginID {
                         let pluginArg = pluginArgText.trimmingCharacters(in: .whitespacesAndNewlines)
                         if pluginArg.isEmpty {
-                            details.append("Plugin \(pluginID) would run.")
+                            details.append("Plugin \(pluginID) selected.")
                         } else {
-                            details.append("Plugin \(pluginID) would run with arg: \(pluginArg)")
+                            details.append("Plugin \(pluginID) arg: \(pluginArg)")
+                        }
+
+                        if executePlugin {
+                            let raw = try await pluginsVM.run(
+                                profile: profile,
+                                pluginID: pluginID,
+                                arcid: arcid,
+                                arg: pluginArgText
+                            )
+                            if let patch = parsePluginMetadataPatch(from: raw) {
+                                previewTitle = patch.title ?? previewTitle
+                                previewSummary = patch.summary ?? previewSummary
+                                if let patchTags = patch.tags {
+                                    previewTags = mergeTagCSV(base: previewTags, additions: patchTags)
+                                }
+                            }
+                            details.append("Plugin preview executed without saving.")
+                        } else {
+                            details.append("Plugin output not fetched in this preview.")
                         }
                     }
-                    if details.isEmpty {
-                        details.append("No operations selected.")
-                    }
+
+                    details.append(contentsOf: summarizeMetadataChanges(
+                        beforeTitle: originalTitle,
+                        beforeTags: originalTags,
+                        beforeSummary: originalSummary,
+                        afterTitle: previewTitle,
+                        afterTags: previewTags,
+                        afterSummary: previewSummary
+                    ))
 
                     rows.append(.init(
                         arcid: arcid,
@@ -928,6 +957,35 @@ struct BatchView: View {
         }
 
         return await MainActor.run { pluginCancelRequested }
+    }
+
+    private func summarizeMetadataChanges(
+        beforeTitle: String,
+        beforeTags: String,
+        beforeSummary: String,
+        afterTitle: String,
+        afterTags: String,
+        afterSummary: String
+    ) -> [String] {
+        var lines: [String] = []
+        if beforeTitle != afterTitle {
+            lines.append("Title: \(previewText(beforeTitle)) -> \(previewText(afterTitle))")
+        }
+        if normalizeTags(beforeTags) != normalizeTags(afterTags) {
+            lines.append("Tags: \(previewText(beforeTags)) -> \(previewText(afterTags))")
+        }
+        if beforeSummary != afterSummary {
+            lines.append("Summary: \(previewText(beforeSummary)) -> \(previewText(afterSummary))")
+        }
+        if lines.isEmpty {
+            lines.append("No metadata changes.")
+        }
+        return lines
+    }
+
+    private func previewText(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "(empty)" : trimmed
     }
 }
 
