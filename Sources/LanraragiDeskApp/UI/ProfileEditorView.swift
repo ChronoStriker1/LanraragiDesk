@@ -51,7 +51,7 @@ struct ProfileEditorView: View {
     }
 
     private var canSave: Bool {
-        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && URL(string: baseURLString) != nil
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && normalizedBaseURL != nil
     }
 
     private func loadInitial() {
@@ -70,7 +70,7 @@ struct ProfileEditorView: View {
     }
 
     private func save() {
-        guard let url = URL(string: baseURLString) else { return }
+        guard let url = normalizedBaseURL else { return }
 
         let profile: Profile
         switch mode {
@@ -86,5 +86,20 @@ struct ProfileEditorView: View {
         if !apiKey.isEmpty {
             try? KeychainService.setString(apiKey, account: "apiKey.\(profile.id.uuidString)")
         }
+    }
+
+    private var normalizedBaseURL: URL? {
+        let trimmed = baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        guard var components = URLComponents(string: trimmed) else { return nil }
+        guard let scheme = components.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
+        guard components.host != nil else { return nil }
+        components.scheme = scheme
+        components.query = nil
+        components.fragment = nil
+        if components.path.isEmpty {
+            components.path = "/"
+        }
+        return components.url
     }
 }
