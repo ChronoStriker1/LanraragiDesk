@@ -277,7 +277,7 @@ struct BatchView: View {
                                 .foregroundStyle(.secondary)
                         }
 
-                        Button(pluginRunning ? "Queueing…" : "Queue Plugin") {
+                        Button(pluginRunning ? "Queueing…" : "Queue Batch") {
                             runPluginBatch()
                         }
                         .buttonStyle(.borderedProminent)
