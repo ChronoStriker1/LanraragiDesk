@@ -15,6 +15,7 @@ struct BatchView: View {
     @State private var task: Task<Void, Never>?
     @State private var selectedPluginID: String?
     @State private var pluginArgText: String = ""
+    @State private var pluginDelayText: String = "4"
     @State private var pluginRunning: Bool = false
     @State private var pluginCancelRequested: Bool = false
     @State private var pluginRunStatus: String?
@@ -221,6 +222,16 @@ struct BatchView: View {
                         .textFieldStyle(.roundedBorder)
                         .disabled(running || pluginRunning)
 
+                    HStack(spacing: 8) {
+                        Text("Delay (sec)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextField("4", text: $pluginDelayText)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 90)
+                            .disabled(running || pluginRunning)
+                    }
+
                     HStack {
                         Button(pluginRunning ? "Queueing…" : "Queue Plugin") {
                             runPluginBatch()
@@ -288,8 +299,12 @@ struct BatchView: View {
         }
         .onChange(of: addTagsText) { _, _ in invalidatePreview() }
         .onChange(of: removeTagsText) { _, _ in invalidatePreview() }
-        .onChange(of: selectedPluginID) { _, _ in invalidatePreview() }
+        .onChange(of: selectedPluginID) { _, _ in
+            applyDefaultPluginDelayFromSelection()
+            invalidatePreview()
+        }
         .onChange(of: pluginArgText) { _, _ in invalidatePreview() }
+        .onChange(of: pluginDelayText) { _, _ in invalidatePreview() }
     }
 
     private func run() {
@@ -408,9 +423,11 @@ struct BatchView: View {
         guard let profile = appModel.selectedProfile else { return }
         await pluginsVM.load(profile: profile)
         if let selectedPluginID, pluginsVM.plugins.contains(where: { $0.id == selectedPluginID }) {
+            applyDefaultPluginDelayFromSelection()
             return
         }
         selectedPluginID = pluginsVM.plugins.first?.id
+        applyDefaultPluginDelayFromSelection()
     }
 
     private func runPluginBatch() {
@@ -418,6 +435,7 @@ struct BatchView: View {
         guard let pluginID = selectedPluginID else { return }
         let arcids = selectedArcidsSorted
         guard !arcids.isEmpty else { return }
+        let delaySeconds = sanitizedDelaySeconds(from: pluginDelayText)
 
         pluginRunning = true
         pluginCancelRequested = false
@@ -478,6 +496,12 @@ struct BatchView: View {
                 }
                 await MainActor.run {
                     pluginRunStatus = "Processed \(index + 1)/\(arcids.count) • Success \(ok) • Failed \(fail)…"
+                }
+
+                if index + 1 < arcids.count && delaySeconds > 0 {
+                    if await pauseBetweenPluginRuns(seconds: delaySeconds, done: index + 1, total: arcids.count, ok: ok, fail: fail) {
+                        break
+                    }
                 }
             }
 
@@ -602,6 +626,10 @@ struct BatchView: View {
                             details.append("Plugin \(pluginID) would run.")
                         } else {
                             details.append("Plugin \(pluginID) would run with arg: \(pluginArg)")
+                        }
+                        let delaySeconds = sanitizedDelaySeconds(from: pluginDelayText)
+                        if delaySeconds > 0 {
+                            details.append("Delay between runs: \(delayDisplay(delaySeconds))s")
                         }
                     }
                     if details.isEmpty {
@@ -824,6 +852,76 @@ struct BatchView: View {
         default:
             return nil
         }
+    }
+
+    private func applyDefaultPluginDelayFromSelection() {
+        let seconds = defaultPluginDelaySeconds(for: selectedPlugin)
+        pluginDelayText = delayDisplay(seconds)
+    }
+
+    private func defaultPluginDelaySeconds(for plugin: PluginInfo?) -> Double {
+        guard let plugin else { return 4 }
+        let candidates = plugin.parameters.filter { param in
+            let id = param.id.lowercased()
+            let name = (param.name ?? "").lowercased()
+            return id.contains("delay") || id.contains("sleep") || id.contains("wait")
+                || name.contains("delay") || name.contains("sleep") || name.contains("wait")
+        }
+
+        for param in candidates {
+            let raw = pluginOptionValueText(param)
+            let value = sanitizedDelaySeconds(from: raw)
+            if value > 0 || raw.trimmingCharacters(in: .whitespacesAndNewlines) == "0" {
+                return value
+            }
+        }
+        return 4
+    }
+
+    private func sanitizedDelaySeconds(from raw: String) -> Double {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let parsed = Double(trimmed), parsed.isFinite else { return 0 }
+        return max(0, parsed)
+    }
+
+    private func delayDisplay(_ seconds: Double) -> String {
+        if seconds.rounded() == seconds {
+            return String(Int(seconds))
+        }
+        return String(format: "%.2f", seconds)
+    }
+
+    private func pauseBetweenPluginRuns(
+        seconds: Double,
+        done: Int,
+        total: Int,
+        ok: Int,
+        fail: Int
+    ) async -> Bool {
+        guard seconds > 0 else { return false }
+        let sliceNanos: UInt64 = 200_000_000
+        let totalNanos = UInt64((seconds * 1_000_000_000).rounded())
+        var elapsedNanos: UInt64 = 0
+
+        while elapsedNanos < totalNanos {
+            let shouldStop = await MainActor.run { pluginCancelRequested }
+            if shouldStop || Task.isCancelled {
+                return true
+            }
+
+            let remaining = totalNanos - elapsedNanos
+            let step = min(sliceNanos, remaining)
+            try? await Task.sleep(nanoseconds: step)
+            elapsedNanos += step
+
+            let elapsedSeconds = Double(elapsedNanos) / 1_000_000_000
+            let remainingSeconds = max(0, seconds - elapsedSeconds)
+            await MainActor.run {
+                pluginRunStatus = "Processed \(done)/\(total) • Success \(ok) • Failed \(fail) • Waiting \(delayDisplay(remainingSeconds))s…"
+            }
+        }
+
+        return await MainActor.run { pluginCancelRequested }
     }
 }
 
