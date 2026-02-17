@@ -4,6 +4,8 @@ macOS (Apple Silicon-first) LANraragi desktop client for managing a LANraragi se
 
 This is a personal project intended to be published on GitHub (not the Mac App Store).
 
+![LanraragiDesk app icon](docs/images/app-icon.png)
+
 ## Features
 
 - **Library**
