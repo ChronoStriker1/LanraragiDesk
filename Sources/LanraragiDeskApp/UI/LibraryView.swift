@@ -12,6 +12,7 @@ struct LibraryView: View {
     @AppStorage("thumbs.cropToFill") private var cropThumbsToFill: Bool = false
 
     @StateObject private var vm = LibraryViewModel()
+    @State private var filtersExpanded: Bool = false
     @State private var queryDraft: String = ""
     @State private var tagSuggestions: [TagSuggestionStore.Suggestion] = []
     @State private var tagSuggestionStatusText: String?
@@ -197,52 +198,72 @@ struct LibraryView: View {
                 .zIndex(10)
             }
 
-            DisclosureGroup("Filters") {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 16) {
-                        Toggle("New only", isOn: $vm.newOnly)
-                        Toggle("Untagged only", isOn: $vm.untaggedOnly)
-                        Spacer()
+            VStack(alignment: .leading, spacing: 8) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        filtersExpanded.toggle()
                     }
-
-                    HStack(spacing: 10) {
-                        pinnedCategoryButtons
-
-                        Menu {
-                            Button("All categories") { vm.categoryID = "" }
-
-                            let unpinned = vm.categories.filter { !$0.pinned }
-                            if !unpinned.isEmpty {
-                                Divider()
-                            }
-
-                            ForEach(unpinned, id: \.id) { c in
-                                Button(c.name) { vm.categoryID = c.id }
-                            }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "folder")
-                                Text(unpinnedCategoryLabel)
-                            }
-                            .font(.callout)
-                        }
-                        .menuStyle(.borderlessButton)
-
-                        if vm.isLoadingCategories {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                        }
-                        Spacer()
-                    }
-
-                    if let s = vm.categoriesStatusText {
-                        Text("Categories unavailable: \(s)")
-                            .font(.caption)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: filtersExpanded ? "chevron.down" : "chevron.right")
+                            .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
+                        Text("Filters")
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        Spacer()
                     }
+                    .contentShape(Rectangle())
                 }
-                .padding(.top, 6)
+                .buttonStyle(.plain)
+
+                if filtersExpanded {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 16) {
+                            Toggle("New only", isOn: $vm.newOnly)
+                            Toggle("Untagged only", isOn: $vm.untaggedOnly)
+                            Spacer()
+                        }
+
+                        HStack(spacing: 10) {
+                            pinnedCategoryButtons
+
+                            Menu {
+                                Button("All categories") { vm.categoryID = "" }
+
+                                let unpinned = vm.categories.filter { !$0.pinned }
+                                if !unpinned.isEmpty {
+                                    Divider()
+                                }
+
+                                ForEach(unpinned, id: \.id) { c in
+                                    Button(c.name) { vm.categoryID = c.id }
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "folder")
+                                    Text(unpinnedCategoryLabel)
+                                }
+                                .font(.callout)
+                            }
+                            .menuStyle(.borderlessButton)
+
+                            if vm.isLoadingCategories {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                            }
+                            Spacer()
+                        }
+
+                        if let s = vm.categoriesStatusText {
+                            Text("Categories unavailable: \(s)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .padding(.top, 4)
+                }
             }
         }
         .padding(18)
