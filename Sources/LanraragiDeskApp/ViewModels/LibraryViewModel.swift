@@ -37,6 +37,7 @@ final class LibraryViewModel: ObservableObject {
 
     @Published private(set) var arcids: [String] = []
     @Published private(set) var isLoading: Bool = false
+    @Published private(set) var isLoadingAll: Bool = false
     @Published private(set) var errorText: String?
     @Published private(set) var bannerText: String?
 
@@ -113,6 +114,19 @@ final class LibraryViewModel: ObservableObject {
             if Task.isCancelled { return }
             errorText = ErrorPresenter.short(error)
         }
+    }
+
+    func loadAll(profile: Profile) async -> [String] {
+        guard !isLoadingAll else { return arcids }
+        isLoadingAll = true
+        defer { isLoadingAll = false }
+
+        while !reachedEnd {
+            if Task.isCancelled { break }
+            await loadMore(profile: profile)
+            if isLoading { break }
+        }
+        return arcids
     }
 
     private func apply(resp: ArchiveSearch) {

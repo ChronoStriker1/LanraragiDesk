@@ -148,6 +148,20 @@ struct LibraryView: View {
                     }
                     .frame(width: 170)
                 }
+
+                Text("\(appModel.selection.count) selected")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                Button(vm.isLoadingAll ? "Selecting…" : "Select All Results") {
+                    Task { await selectAllResults() }
+                }
+                .disabled(vm.isLoading || vm.isLoadingAll || vm.arcids.isEmpty)
+
+                Button("Clear Selection") {
+                    appModel.selection.clear()
+                }
+                .disabled(appModel.selection.count == 0)
             }
 
             HStack(spacing: 10) {
@@ -372,6 +386,12 @@ struct LibraryView: View {
         metadataEpoch &+= 1
         metaByArcid.removeAll()
         vm.refresh(profile: profile)
+    }
+
+    private func selectAllResults() async {
+        let all = await vm.loadAll(profile: profile)
+        appModel.selection.add(all)
+        appModel.activity.add(.init(kind: .action, title: "Selected all results", detail: "\(all.count) archives"))
     }
 
     @ViewBuilder

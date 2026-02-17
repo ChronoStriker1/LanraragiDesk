@@ -22,6 +22,10 @@ final class SelectionModel: ObservableObject {
         arcids.remove(arcid)
     }
 
+    func add<S: Sequence>(_ newArcids: S) where S.Element == String {
+        arcids.formUnion(newArcids)
+    }
+
     func clear() {
         arcids.removeAll()
     }

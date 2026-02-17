@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import LanraragiKit
 
@@ -30,6 +31,38 @@ struct BatchView: View {
                 Button("Clear Selection") { appModel.selection.clear() }
                     .disabled(appModel.selection.count == 0 || running)
             }
+
+            GroupBox("Selected archives") {
+                VStack(alignment: .leading, spacing: 8) {
+                    if selectedArcidsSorted.isEmpty {
+                        Text("No archives selected.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 6) {
+                                ForEach(selectedArcidsSorted, id: \.self) { arcid in
+                                    HStack(spacing: 8) {
+                                        Text(arcid)
+                                            .font(.caption.monospaced())
+                                            .textSelection(.enabled)
+                                        Spacer()
+                                        Button("Remove") {
+                                            appModel.selection.remove(arcid)
+                                        }
+                                        .buttonStyle(.borderless)
+                                        .disabled(running || pluginRunning)
+                                    }
+                                    .padding(.vertical, 2)
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 180)
+                    }
+                }
+                .padding(8)
+            }
+            .debugFrameNumber(5)
 
             GroupBox("Tag operations") {
                 VStack(alignment: .leading, spacing: 12) {
@@ -287,40 +320,197 @@ struct BatchView: View {
     private func runPluginBatch() {
         guard let profile = appModel.selectedProfile else { return }
         guard let pluginID = selectedPluginID else { return }
-        let arcids = Array(appModel.selection.arcids).sorted()
+        let arcids = selectedArcidsSorted
         guard !arcids.isEmpty else { return }
 
         pluginRunning = true
-        pluginRunStatus = "Queueing \(arcids.count) plugin jobs…"
+        pluginRunStatus = "Running plugin on \(arcids.count) archives…"
         appModel.activity.add(.init(kind: .action, title: "Plugin batch queued", detail: "\(pluginID) on \(arcids.count) archives"))
 
         Task {
             var ok = 0
             var fail = 0
-            for arcid in arcids {
+            for (index, arcid) in arcids.enumerated() {
                 if Task.isCancelled { break }
                 do {
+                    let prePluginMeta = try? await appModel.archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
+                    let preSignature = prePluginMeta.map {
+                        metadataSignature(title: $0.title ?? "", tags: $0.tags ?? "", summary: $0.summary ?? "")
+                    }
+
                     let job = try await pluginsVM.queue(profile: profile, pluginID: pluginID, arcid: arcid, arg: pluginArgText)
                     pluginsVM.trackQueuedJob(profile: profile, pluginID: pluginID, arcid: arcid, jobID: job.job)
-                    ok += 1
                     let detail = job.job > 0
                         ? "\(pluginID) • \(arcid) • job \(job.job)"
-                        : "\(pluginID) • \(arcid) • queued (no job id returned)"
+                        : "\(pluginID) • \(arcid) • executed (no job id returned)"
                     appModel.activity.add(.init(kind: .action, title: "Plugin job queued", detail: detail))
+
+                    if job.job > 0 {
+                        let state = await pluginsVM.waitForJobCompletion(profile: profile, jobID: job.job)
+                        if state == .failed {
+                            fail += 1
+                            appModel.activity.add(.init(kind: .warning, title: "Plugin job failed", detail: "\(pluginID) • \(arcid) • job \(job.job)"))
+                        } else {
+                            let changed = await refreshMetadataAfterPluginBatch(profile: profile, arcid: arcid, previousSignature: preSignature)
+                            if !changed {
+                                _ = await applyMetadataFromPluginOutputBatch(
+                                    profile: profile,
+                                    pluginID: pluginID,
+                                    arcid: arcid,
+                                    previousSignature: preSignature
+                                )
+                            }
+                            ok += 1
+                        }
+                    } else {
+                        let changed = await refreshMetadataAfterPluginBatch(profile: profile, arcid: arcid, previousSignature: preSignature)
+                        if !changed {
+                            _ = await applyMetadataFromPluginOutputBatch(
+                                profile: profile,
+                                pluginID: pluginID,
+                                arcid: arcid,
+                                previousSignature: preSignature
+                            )
+                        }
+                        ok += 1
+                    }
                 } catch {
                     fail += 1
                     appModel.activity.add(.init(kind: .error, title: "Plugin queue failed", detail: "\(pluginID) • \(arcid)\n\(error)"))
                 }
                 await MainActor.run {
-                    pluginRunStatus = "Queued \(ok) • Failed \(fail)…"
+                    pluginRunStatus = "Processed \(index + 1)/\(arcids.count) • Success \(ok) • Failed \(fail)…"
                 }
             }
 
             await MainActor.run {
                 pluginRunning = false
-                pluginRunStatus = "Done. Queued \(ok), failed \(fail)."
+                pluginRunStatus = "Done. Success \(ok), failed \(fail)."
             }
         }
+    }
+
+    private var selectedArcidsSorted: [String] {
+        Array(appModel.selection.arcids).sorted()
+    }
+
+    private func refreshMetadataAfterPluginBatch(
+        profile: Profile,
+        arcid: String,
+        previousSignature: String?
+    ) async -> Bool {
+        do {
+            for attempt in 0..<6 {
+                let latest = try await appModel.archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
+                let latestSignature = metadataSignature(title: latest.title ?? "", tags: latest.tags ?? "", summary: latest.summary ?? "")
+                if previousSignature == nil || previousSignature != latestSignature {
+                    return true
+                }
+                if attempt < 5 {
+                    try? await Task.sleep(for: .seconds(1))
+                }
+            }
+            return false
+        } catch {
+            return false
+        }
+    }
+
+    private func applyMetadataFromPluginOutputBatch(
+        profile: Profile,
+        pluginID: String,
+        arcid: String,
+        previousSignature: String?
+    ) async -> Bool {
+        do {
+            let raw = try await pluginsVM.run(profile: profile, pluginID: pluginID, arcid: arcid, arg: pluginArgText)
+            guard let patch = parsePluginMetadataPatch(from: raw) else { return false }
+
+            let current = try await appModel.archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
+            let currentTitle = (current.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let currentSummary = (current.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let currentTagsRaw = current.tags ?? ""
+
+            let titleToSave = patch.title ?? currentTitle
+            let summaryToSave = patch.summary ?? currentSummary
+            let tagsToSave: String
+            if let patchTags = patch.tags {
+                tagsToSave = mergeTagCSV(base: currentTagsRaw, additions: patchTags)
+            } else {
+                tagsToSave = currentTagsRaw
+            }
+
+            let beforeSignature = previousSignature ?? metadataSignature(title: currentTitle, tags: currentTagsRaw, summary: currentSummary)
+            let nextSignature = metadataSignature(title: titleToSave, tags: tagsToSave, summary: summaryToSave)
+            guard beforeSignature != nextSignature else { return false }
+
+            _ = try await appModel.archives.updateMetadata(
+                profile: profile,
+                arcid: arcid,
+                title: titleToSave,
+                tags: tagsToSave,
+                summary: summaryToSave
+            )
+            appModel.activity.add(.init(kind: .action, title: "Plugin output applied", detail: "\(pluginID) • \(arcid)"))
+            return true
+        } catch {
+            appModel.activity.add(.init(kind: .warning, title: "Plugin output apply failed", detail: "\(pluginID) • \(arcid)\n\(error)"))
+            return false
+        }
+    }
+
+    private func parsePluginMetadataPatch(from response: String) -> (title: String?, tags: String?, summary: String?)? {
+        guard
+            let data = response.data(using: .utf8),
+            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let payload = obj["data"] as? [String: Any]
+        else {
+            return nil
+        }
+
+        let title = (payload["title"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let summary = (payload["summary"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let newTags = (payload["new_tags"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let fullTags = (payload["tags"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let tags = [newTags, fullTags]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: ", ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let normalizedTitle = (title?.isEmpty == true) ? nil : title
+        let normalizedSummary = (summary?.isEmpty == true) ? nil : summary
+        let normalizedTags = tags.isEmpty ? nil : tags
+
+        guard normalizedTitle != nil || normalizedSummary != nil || normalizedTags != nil else {
+            return nil
+        }
+        return (normalizedTitle, normalizedTags, normalizedSummary)
+    }
+
+    private func metadataSignature(title: String, tags: String, summary: String) -> String {
+        [
+            title.trimmingCharacters(in: .whitespacesAndNewlines),
+            normalizeTags(tags),
+            summary.trimmingCharacters(in: .whitespacesAndNewlines),
+        ].joined(separator: "|||")
+    }
+
+    private func mergeTagCSV(base: String, additions: String) -> String {
+        var items = parseTags(base)
+        var seen = Set(items.map { $0.lowercased() })
+        for tag in parseTags(additions) {
+            let key = tag.lowercased()
+            if seen.insert(key).inserted {
+                items.append(tag)
+            }
+        }
+        return items.joined(separator: ", ")
     }
 
     private var selectedPlugin: PluginInfo? {
