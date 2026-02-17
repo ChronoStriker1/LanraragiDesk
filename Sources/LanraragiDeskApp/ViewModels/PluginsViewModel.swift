@@ -89,6 +89,11 @@ final class PluginsViewModel: ObservableObject {
         return try await client.queuePlugin(pluginID: pluginID, arcid: arcid, arg: arg)
     }
 
+    func run(profile: Profile, pluginID: String, arcid: String, arg: String?) async throws -> String {
+        let client = try makeClient(profile: profile)
+        return try await client.runPlugin(pluginID: pluginID, arcid: arcid, arg: arg)
+    }
+
     func trackQueuedJob(profile: Profile, pluginID: String, arcid: String, jobID: Int) {
         guard jobID > 0 else { return }
         setActiveJobsProfileIfNeeded(profile)

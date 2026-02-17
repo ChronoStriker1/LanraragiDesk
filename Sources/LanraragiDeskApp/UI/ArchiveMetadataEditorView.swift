@@ -556,6 +556,7 @@ struct ArchiveMetadataEditorView: View {
 
     private func queuePluginForArchive() {
         guard let pluginID = selectedPluginID else { return }
+        let prePluginSignature = metadataSignature(title: title, tags: tags, summary: summary)
         pluginRunning = true
         pluginRunStatus = "Queueing plugin job…"
 
@@ -578,18 +579,34 @@ struct ArchiveMetadataEditorView: View {
                     let state = await pluginsVM.waitForJobCompletion(profile: profile, jobID: job.job)
                     switch state {
                     case .finished:
-                        await refreshMetadataAfterPlugin(status: "Plugin completed. Metadata refreshed.")
+                        let changed = await refreshMetadataAfterPlugin(
+                            status: "Plugin completed. Metadata refreshed.",
+                            previousSignature: prePluginSignature
+                        )
+                        if !changed {
+                            await applyMetadataFromPluginOutput(pluginID: pluginID, previousSignature: prePluginSignature)
+                        }
                     case .failed:
                         await MainActor.run {
                             pluginRunStatus = "Plugin job \(job.job) failed."
                         }
                     case .queued, .running, .unknown:
-                        await MainActor.run {
-                            pluginRunStatus = "Plugin job \(job.job) finished with unknown state."
+                        let changed = await refreshMetadataAfterPlugin(
+                            status: "Plugin job \(job.job) ended with unknown state. Metadata refreshed.",
+                            previousSignature: prePluginSignature
+                        )
+                        if !changed {
+                            await applyMetadataFromPluginOutput(pluginID: pluginID, previousSignature: prePluginSignature)
                         }
                     }
                 } else {
-                    await refreshMetadataAfterPlugin(status: "Plugin completed. Metadata refreshed.")
+                    let changed = await refreshMetadataAfterPlugin(
+                        status: "Plugin completed. Metadata refreshed.",
+                        previousSignature: prePluginSignature
+                    )
+                    if !changed {
+                        await applyMetadataFromPluginOutput(pluginID: pluginID, previousSignature: prePluginSignature)
+                    }
                 }
             } catch {
                 await MainActor.run {
@@ -601,20 +618,146 @@ struct ArchiveMetadataEditorView: View {
         }
     }
 
-    private func refreshMetadataAfterPlugin(status: String) async {
+    private func refreshMetadataAfterPlugin(status: String, previousSignature: String? = nil) async -> Bool {
         do {
-            let updated = try await archives.metadata(profile: profile, arcid: arcid)
+            var updated: ArchiveMetadata?
+            for attempt in 0..<6 {
+                let latest = try await archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
+                updated = latest
+                if let previousSignature {
+                    let latestSignature = metadataSignature(
+                        title: latest.title ?? "",
+                        tags: latest.tags ?? "",
+                        summary: latest.summary ?? ""
+                    )
+                    if latestSignature != previousSignature {
+                        break
+                    }
+                    if attempt < 5 {
+                        try? await Task.sleep(for: .seconds(1))
+                    }
+                } else {
+                    break
+                }
+            }
+
+            guard let updated else { return false }
+            let changed = previousSignature.map {
+                metadataSignature(title: updated.title ?? "", tags: updated.tags ?? "", summary: updated.summary ?? "") != $0
+            } ?? true
             await MainActor.run {
                 apply(meta: updated)
-                pluginRunStatus = status
+                pluginRunStatus = changed ? status : "Plugin completed. No metadata changes detected."
             }
-            appModel.activity.add(.init(kind: .action, title: "Plugin metadata refreshed", detail: arcid))
+            appModel.activity.add(.init(
+                kind: .action,
+                title: changed ? "Plugin metadata refreshed" : "Plugin completed with no metadata changes",
+                detail: arcid
+            ))
+            return changed
         } catch {
             await MainActor.run {
                 pluginRunStatus = "Plugin finished, but refresh failed: \(ErrorPresenter.short(error))"
             }
             appModel.activity.add(.init(kind: .warning, title: "Plugin refresh failed", detail: "\(arcid)\n\(error)"))
+            return false
         }
+    }
+
+    private func applyMetadataFromPluginOutput(pluginID: String, previousSignature: String) async {
+        do {
+            let raw = try await pluginsVM.run(profile: profile, pluginID: pluginID, arcid: arcid, arg: pluginArgText)
+            guard let patch = parsePluginMetadataPatch(from: raw) else {
+                await MainActor.run {
+                    pluginRunStatus = "Plugin completed. No metadata changes detected."
+                }
+                return
+            }
+
+            let current = try await archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
+            let currentTitle = (current.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let currentSummary = (current.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let currentTags = MetadataTagFormatter.normalizedCSV(from: current.tags ?? "")
+
+            let titleToSave = patch.title ?? currentTitle
+            let summaryToSave = patch.summary ?? currentSummary
+            let tagsToSave: String
+            if let patchTags = patch.tags {
+                tagsToSave = MetadataTagFormatter.normalizedCSV(from: currentTags + ", " + patchTags)
+            } else {
+                tagsToSave = currentTags
+            }
+
+            let nextSignature = metadataSignature(title: titleToSave, tags: tagsToSave, summary: summaryToSave)
+            guard nextSignature != previousSignature else {
+                await MainActor.run {
+                    pluginRunStatus = "Plugin completed. No metadata changes detected."
+                }
+                return
+            }
+
+            let updated = try await archives.updateMetadata(
+                profile: profile,
+                arcid: arcid,
+                title: titleToSave,
+                tags: tagsToSave,
+                summary: summaryToSave
+            )
+
+            await MainActor.run {
+                apply(meta: updated)
+                pluginRunStatus = "Plugin output applied and metadata refreshed."
+            }
+            appModel.activity.add(.init(kind: .action, title: "Plugin output applied", detail: "\(pluginID) • \(arcid)"))
+        } catch {
+            await MainActor.run {
+                pluginRunStatus = "Plugin completed, but output apply failed: \(ErrorPresenter.short(error))"
+            }
+            appModel.activity.add(.init(kind: .warning, title: "Plugin output apply failed", detail: "\(pluginID) • \(arcid)\n\(error)"))
+        }
+    }
+
+    private func parsePluginMetadataPatch(from response: String) -> (title: String?, tags: String?, summary: String?)? {
+        guard
+            let data = response.data(using: .utf8),
+            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return nil
+        }
+        guard let payload = obj["data"] as? [String: Any] else { return nil }
+
+        let title = (payload["title"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let summary = (payload["summary"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let newTags = (payload["new_tags"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let fullTags = (payload["tags"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let tags = [newTags, fullTags]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: ", ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let normalizedTitle = (title?.isEmpty == true) ? nil : title
+        let normalizedSummary = (summary?.isEmpty == true) ? nil : summary
+        let normalizedTags = tags.isEmpty ? nil : tags
+
+        guard normalizedTitle != nil || normalizedSummary != nil || normalizedTags != nil else {
+            return nil
+        }
+
+        return (normalizedTitle, normalizedTags, normalizedSummary)
+    }
+
+    private func metadataSignature(title: String, tags: String, summary: String) -> String {
+        let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedTags = MetadataTagFormatter.normalizedCSV(from: tags)
+        let normalizedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        return [normalizedTitle, normalizedTags, normalizedSummary].joined(separator: "|||")
     }
 
     private var selectedPlugin: PluginInfo? {

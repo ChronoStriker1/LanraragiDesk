@@ -28,7 +28,12 @@ actor ArchiveLoader {
         bytesCache.totalCostLimit = 512 * 1024 * 1024 // ~512MB
     }
 
-    func metadata(profile: Profile, arcid: String) async throws -> ArchiveMetadata {
+    func metadata(profile: Profile, arcid: String, forceRefresh: Bool = false) async throws -> ArchiveMetadata {
+        if forceRefresh {
+            metaCache[arcid] = nil
+            metaInflight[arcid]?.cancel()
+            metaInflight[arcid] = nil
+        }
         if let m = metaCache[arcid] { return m }
         if let t = metaInflight[arcid] { return try await t.value }
 
@@ -63,7 +68,7 @@ actor ArchiveLoader {
         metaCache[arcid] = nil
         metaRawCache[arcid] = nil
 
-        let updated = try await metadata(profile: profile, arcid: arcid)
+        let updated = try await metadata(profile: profile, arcid: arcid, forceRefresh: true)
         return updated
     }
 
