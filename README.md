@@ -148,7 +148,7 @@ See `CONTRIBUTING.md` (includes a rule to keep Markdown docs updated alongside c
 - [x] Manual review UI + persistent "Not a match"
 - [x] Core client features (library/reader/metadata editor/batch/plugins/activity)
 - [x] Optional statistics page that mirrors LANraragi stats
-- [ ] Plugins: job status tracking UI (running/finished/failed)
+- [x] Plugins: job status tracking UI (running/finished/failed)
 - [ ] Activity: structured entries + export/severity UX
 - [ ] Reader: add optional "Open in LANraragi" action and complete narrow-window verification
 - [ ] Duplicates: better "Not a match" management (search/undo) and additional error-path UX polish
