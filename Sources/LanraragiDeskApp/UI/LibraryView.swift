@@ -862,7 +862,7 @@ private struct LibraryCard: View {
                     }
                 }
 
-                if hoveringCover {
+                if hoveringCover || appModel.selection.contains(arcid) {
                     // Keep selection as a separate button so the cover's single-click open stays reliable.
                     Button {
                         appModel.selection.toggle(arcid)
@@ -998,7 +998,7 @@ private struct LibraryRow: View {
                             CoverBadge(text: "NEW", background: .green.opacity(0.55), font: .caption2.weight(.bold))
                         }
 
-                        if hoveringCover {
+                        if hoveringCover || appModel.selection.contains(arcid) {
                             Button {
                                 appModel.selection.toggle(arcid)
                             } label: {
