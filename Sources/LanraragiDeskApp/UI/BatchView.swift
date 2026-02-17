@@ -397,7 +397,16 @@ struct BatchView: View {
                         summary: meta.summary ?? ""
                     )
                     await MainActor.run {
-                        appendBatchLiveEvent("Saved \(displayName(for: arcid))")
+                        appendBatchLiveEvent(metadataChangeLiveMessage(
+                            prefix: "Saved",
+                            arcid: arcid,
+                            beforeTitle: meta.title ?? "",
+                            beforeTags: oldTags,
+                            beforeSummary: meta.summary ?? "",
+                            afterTitle: meta.title ?? "",
+                            afterTags: newTags,
+                            afterSummary: meta.summary ?? ""
+                        ))
                     }
                 } catch {
                     let msg = "\(arcid): \(ErrorPresenter.short(error))"
@@ -559,6 +568,23 @@ struct BatchView: View {
                                     applyMode: pluginApplyMode
                                 )
                             }
+                            if let before = prePluginMeta {
+                                let latest = try? await appModel.archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
+                                if let latest {
+                                    await MainActor.run {
+                                        appendPluginLiveEvent(metadataChangeLiveMessage(
+                                            prefix: "Saved",
+                                            arcid: arcid,
+                                            beforeTitle: before.title ?? "",
+                                            beforeTags: before.tags ?? "",
+                                            beforeSummary: before.summary ?? "",
+                                            afterTitle: latest.title ?? "",
+                                            afterTags: latest.tags ?? "",
+                                            afterSummary: latest.summary ?? ""
+                                        ))
+                                    }
+                                }
+                            }
                             ok += 1
                             await MainActor.run {
                                 appendPluginLiveEvent("Finished \(displayName(for: arcid))")
@@ -574,6 +600,23 @@ struct BatchView: View {
                                 previousSignature: preSignature,
                                 applyMode: pluginApplyMode
                             )
+                        }
+                        if let before = prePluginMeta {
+                            let latest = try? await appModel.archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
+                            if let latest {
+                                await MainActor.run {
+                                    appendPluginLiveEvent(metadataChangeLiveMessage(
+                                        prefix: "Saved",
+                                        arcid: arcid,
+                                        beforeTitle: before.title ?? "",
+                                        beforeTags: before.tags ?? "",
+                                        beforeSummary: before.summary ?? "",
+                                        afterTitle: latest.title ?? "",
+                                        afterTags: latest.tags ?? "",
+                                        afterSummary: latest.summary ?? ""
+                                    ))
+                                }
+                            }
                         }
                         ok += 1
                         await MainActor.run {
@@ -1174,6 +1217,40 @@ struct BatchView: View {
     private func previewText(_ value: String) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "(empty)" : trimmed
+    }
+
+    private func metadataChangeLiveMessage(
+        prefix: String,
+        arcid: String,
+        beforeTitle: String,
+        beforeTags: String,
+        beforeSummary: String,
+        afterTitle: String,
+        afterTags: String,
+        afterSummary: String
+    ) -> String {
+        let lines = summarizeMetadataChanges(
+            beforeTitle: beforeTitle,
+            beforeTags: beforeTags,
+            beforeSummary: beforeSummary,
+            afterTitle: afterTitle,
+            afterTags: afterTags,
+            afterSummary: afterSummary
+        ).map { truncatedLiveField($0) }
+
+        if lines.count == 1, lines[0] == "No metadata changes." {
+            return "\(prefix) \(displayName(for: arcid)) • No metadata changes."
+        }
+        return "\(prefix) \(displayName(for: arcid)) • \(lines.joined(separator: " | "))"
+    }
+
+    private func truncatedLiveField(_ value: String, maxLength: Int = 180) -> String {
+        let compact = value
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard compact.count > maxLength else { return compact }
+        let end = compact.index(compact.startIndex, offsetBy: maxLength - 1)
+        return String(compact[..<end]) + "…"
     }
 
     private func uniqueTagCSV(_ value: String) -> String {
