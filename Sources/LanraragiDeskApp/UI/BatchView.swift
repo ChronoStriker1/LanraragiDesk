@@ -217,7 +217,7 @@ struct BatchView: View {
                             }
                         }
                         .pickerStyle(.menu)
-                        .frame(maxWidth: 260)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .disabled(running || pluginRunning || previewRunning)
 
                         Toggle("Preview Before Queue", isOn: $previewBeforeQueue)
@@ -1068,7 +1068,7 @@ private enum PluginApplyMode: String, CaseIterable {
         case .mergeWithExisting:
             return "Combine plugin data with existing"
         case .replaceWithPluginData:
-            return "Use plugin data as-is"
+            return "Replace current data"
         }
     }
 }
