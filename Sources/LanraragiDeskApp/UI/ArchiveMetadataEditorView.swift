@@ -35,6 +35,7 @@ struct ArchiveMetadataEditorView: View {
     @State private var pluginRunning: Bool = false
     @State private var pluginRunStatus: String?
     @State private var showPluginSettings: Bool = false
+    @State private var showSummaryEditor: Bool = false
 
     private var groupedTags: [MetadataTagFormatter.Group] {
         MetadataTagFormatter.grouped(tags: tags)
@@ -72,6 +73,24 @@ struct ArchiveMetadataEditorView: View {
                         TextField("Title", text: $title, axis: .vertical)
                             .lineLimit(1...4)
                             .textFieldStyle(.roundedBorder)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        DisclosureGroup(isExpanded: $showSummaryEditor) {
+                            borderedTextEditor($summary, minHeight: 180)
+                                .padding(.top, 4)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Text("Summary")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                if summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    Text("empty")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
                     }
 
                     VStack(alignment: .leading, spacing: 8) {
@@ -191,13 +210,6 @@ struct ArchiveMetadataEditorView: View {
 
                     }
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Summary")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        borderedTextEditor($summary, minHeight: 180)
-                    }
-
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Run plugin on this archive")
                             .font(.caption)
@@ -311,6 +323,10 @@ struct ArchiveMetadataEditorView: View {
         .onChange(of: tagQuery) { _, _ in
             Task { await refreshSuggestions() }
         }
+        .onChange(of: summary) { _, newValue in
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            showSummaryEditor = !trimmed.isEmpty
+        }
     }
 
     @ViewBuilder
@@ -359,6 +375,7 @@ struct ArchiveMetadataEditorView: View {
         loadedTitle = normalizedTitle
         loadedTags = normalizedTags
         loadedSummary = normalizedSummary
+        showSummaryEditor = !normalizedSummary.isEmpty
 
         pageCount = max(0, meta.pagecount ?? 0)
         coverPage = min(max(1, coverPage), max(1, pageCount))
