@@ -155,28 +155,44 @@ struct RootView: View {
         .accessibilityAddTraits(section == target ? .isSelected : [])
     }
 
-    @ViewBuilder
     private func detail(profile: Profile) -> some View {
-        Group {
-            switch section {
-            case .library:
-                LibraryView(profile: profile)
-                    .environmentObject(appModel)
-            case .statistics:
+        ZStack {
+            LibraryView(profile: profile)
+                .environmentObject(appModel)
+                .opacity(section == .library ? 1 : 0)
+                .allowsHitTesting(section == .library)
+                .accessibilityHidden(section != .library)
+
+            if showStatisticsPage {
                 StatisticsView(profile: profile)
                     .environmentObject(appModel)
-            case .duplicates:
-                duplicatesWorkspace(profile: profile)
-            case .settings:
-                SettingsView()
-                    .environmentObject(appModel)
-            case .activity:
-                ActivityView()
-                    .environmentObject(appModel)
-            case .batch:
-                BatchView()
-                    .environmentObject(appModel)
+                    .opacity(section == .statistics ? 1 : 0)
+                    .allowsHitTesting(section == .statistics)
+                    .accessibilityHidden(section != .statistics)
             }
+
+            duplicatesWorkspace(profile: profile)
+                .opacity(section == .duplicates ? 1 : 0)
+                .allowsHitTesting(section == .duplicates)
+                .accessibilityHidden(section != .duplicates)
+
+            ActivityView()
+                .environmentObject(appModel)
+                .opacity(section == .activity ? 1 : 0)
+                .allowsHitTesting(section == .activity)
+                .accessibilityHidden(section != .activity)
+
+            BatchView()
+                .environmentObject(appModel)
+                .opacity(section == .batch ? 1 : 0)
+                .allowsHitTesting(section == .batch)
+                .accessibilityHidden(section != .batch)
+
+            SettingsView()
+                .environmentObject(appModel)
+                .opacity(section == .settings ? 1 : 0)
+                .allowsHitTesting(section == .settings)
+                .accessibilityHidden(section != .settings)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(24)
