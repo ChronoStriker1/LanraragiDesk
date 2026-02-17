@@ -2,8 +2,6 @@
 
 macOS (Apple Silicon-first) LANraragi desktop client for managing a LANraragi server, with a deduplication workbench inspired by LRReader.
 
-This is a personal project intended to be published on GitHub (not the Mac App Store).
-
 ![LanraragiDesk app icon](docs/images/app-icon.png)
 
 ## Features
