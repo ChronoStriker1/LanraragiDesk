@@ -93,7 +93,6 @@ macOS (Apple Silicon-first) LANraragi desktop client for managing a LANraragi se
 - API keys are stored in **Keychain**.
 - Profiles are stored on disk **without secrets**.
 - The app stores local caches and an index database in your user Library directories (see below).
-- Do not paste API keys into issues/PRs.
 
 ## Data Locations
 
