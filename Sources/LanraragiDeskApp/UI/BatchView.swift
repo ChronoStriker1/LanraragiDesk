@@ -5,26 +5,14 @@ import LanraragiKit
 struct BatchView: View {
     @EnvironmentObject private var appModel: AppModel
     @StateObject private var pluginsVM = PluginsViewModel()
+    @StateObject private var runState = BatchRunState.shared
 
     @State private var addTagsText: String = ""
     @State private var removeTagsText: String = ""
-    @State private var running: Bool = false
-    @State private var batchCancelRequested: Bool = false
-    @State private var progressText: String?
-    @State private var errors: [String] = []
-    @State private var task: Task<Void, Never>?
-    @State private var batchCurrentArchive: String?
-    @State private var batchLiveEvents: [String] = []
     @State private var selectedPluginID: String?
     @State private var pluginArgText: String = ""
     @State private var pluginDelayText: String = "4"
     @State private var pluginApplyMode: PluginApplyMode = .mergeWithExisting
-    @State private var pluginRunning: Bool = false
-    @State private var pluginCancelRequested: Bool = false
-    @State private var pluginRunStatus: String?
-    @State private var pluginTask: Task<Void, Never>?
-    @State private var pluginCurrentArchive: String?
-    @State private var pluginLiveEvents: [String] = []
     @State private var showPluginSettings: Bool = false
     @State private var selectedArchiveNames: [String: String] = [:]
     @State private var selectedNamesTask: Task<Void, Never>?
@@ -335,8 +323,6 @@ struct BatchView: View {
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .debugFrameNumber(1)
         .onDisappear {
-            task?.cancel()
-            pluginTask?.cancel()
             selectedNamesTask?.cancel()
             previewTask?.cancel()
         }
@@ -1227,6 +1213,91 @@ struct BatchView: View {
         f.dateFormat = "HH:mm:ss"
         return f
     }()
+
+    private var running: Bool {
+        get { runState.running }
+        nonmutating set { runState.running = newValue }
+    }
+
+    private var batchCancelRequested: Bool {
+        get { runState.batchCancelRequested }
+        nonmutating set { runState.batchCancelRequested = newValue }
+    }
+
+    private var progressText: String? {
+        get { runState.progressText }
+        nonmutating set { runState.progressText = newValue }
+    }
+
+    private var errors: [String] {
+        get { runState.errors }
+        nonmutating set { runState.errors = newValue }
+    }
+
+    private var task: Task<Void, Never>? {
+        get { runState.task }
+        nonmutating set { runState.task = newValue }
+    }
+
+    private var batchCurrentArchive: String? {
+        get { runState.batchCurrentArchive }
+        nonmutating set { runState.batchCurrentArchive = newValue }
+    }
+
+    private var batchLiveEvents: [String] {
+        get { runState.batchLiveEvents }
+        nonmutating set { runState.batchLiveEvents = newValue }
+    }
+
+    private var pluginRunning: Bool {
+        get { runState.pluginRunning }
+        nonmutating set { runState.pluginRunning = newValue }
+    }
+
+    private var pluginCancelRequested: Bool {
+        get { runState.pluginCancelRequested }
+        nonmutating set { runState.pluginCancelRequested = newValue }
+    }
+
+    private var pluginRunStatus: String? {
+        get { runState.pluginRunStatus }
+        nonmutating set { runState.pluginRunStatus = newValue }
+    }
+
+    private var pluginTask: Task<Void, Never>? {
+        get { runState.pluginTask }
+        nonmutating set { runState.pluginTask = newValue }
+    }
+
+    private var pluginCurrentArchive: String? {
+        get { runState.pluginCurrentArchive }
+        nonmutating set { runState.pluginCurrentArchive = newValue }
+    }
+
+    private var pluginLiveEvents: [String] {
+        get { runState.pluginLiveEvents }
+        nonmutating set { runState.pluginLiveEvents = newValue }
+    }
+}
+
+@MainActor
+private final class BatchRunState: ObservableObject {
+    static let shared = BatchRunState()
+
+    @Published var running: Bool = false
+    @Published var batchCancelRequested: Bool = false
+    @Published var progressText: String?
+    @Published var errors: [String] = []
+    var task: Task<Void, Never>?
+    @Published var batchCurrentArchive: String?
+    @Published var batchLiveEvents: [String] = []
+
+    @Published var pluginRunning: Bool = false
+    @Published var pluginCancelRequested: Bool = false
+    @Published var pluginRunStatus: String?
+    var pluginTask: Task<Void, Never>?
+    @Published var pluginCurrentArchive: String?
+    @Published var pluginLiveEvents: [String] = []
 }
 
 private struct BatchPreviewRow: Identifiable {
