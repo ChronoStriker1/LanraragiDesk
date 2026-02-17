@@ -13,3 +13,6 @@ Package.resolved
 
 # App data (never commit)
 *.sqlite
+
+# Local/internal tracking
+CODEX_TODO.md
