@@ -47,6 +47,7 @@ struct PluginsView: View {
                     }
                 }
                 .frame(minWidth: 320)
+                .debugFrameNumber(1)
 
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Run on selection")
@@ -82,6 +83,7 @@ struct PluginsView: View {
                 .padding(18)
                 .background(.thinMaterial)
                 .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .debugFrameNumber(2)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -132,4 +134,3 @@ struct PluginsView: View {
         }
     }
 }
-

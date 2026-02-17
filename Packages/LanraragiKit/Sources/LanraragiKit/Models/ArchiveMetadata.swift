@@ -11,6 +11,7 @@ public struct ArchiveMetadata: Decodable, Sendable, Equatable {
     public var fileExtension: String?
     public var category: String?
     public var isnew: Bool?
+    public var dateAdded: Date?
     public var progress: Int?
     public var lastreadtime: Int?
 
@@ -25,6 +26,7 @@ public struct ArchiveMetadata: Decodable, Sendable, Equatable {
         fileExtension: String? = nil,
         category: String? = nil,
         isnew: Bool? = nil,
+        dateAdded: Date? = nil,
         progress: Int? = nil,
         lastreadtime: Int? = nil
     ) {
@@ -38,6 +40,7 @@ public struct ArchiveMetadata: Decodable, Sendable, Equatable {
         self.fileExtension = fileExtension
         self.category = category
         self.isnew = isnew
+        self.dateAdded = dateAdded
         self.progress = progress
         self.lastreadtime = lastreadtime
     }
@@ -53,6 +56,7 @@ public struct ArchiveMetadata: Decodable, Sendable, Equatable {
         case `extension`
         case category
         case isnew
+        case date_added
         case progress
         case lastreadtime
     }
@@ -73,6 +77,19 @@ public struct ArchiveMetadata: Decodable, Sendable, Equatable {
         progress = LossyInt.decode(from: c, forKey: .progress)
         lastreadtime = LossyInt.decode(from: c, forKey: .lastreadtime)
         isnew = LossyBool.decode(from: c, forKey: .isnew)
+
+        if let raw = LossyInt.decode(from: c, forKey: .date_added) {
+            // LRR is typically seconds-since-epoch; tolerate ms-since-epoch.
+            let seconds: TimeInterval
+            if raw > 1_000_000_000_000 {
+                seconds = TimeInterval(raw) / 1000.0
+            } else {
+                seconds = TimeInterval(raw)
+            }
+            dateAdded = Date(timeIntervalSince1970: seconds)
+        } else {
+            dateAdded = nil
+        }
     }
 }
 

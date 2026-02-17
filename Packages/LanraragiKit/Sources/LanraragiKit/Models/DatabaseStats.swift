@@ -12,6 +12,14 @@ public struct DatabaseStats: Decodable, Sendable, Equatable {
     }
 
     public init(from decoder: Decoder) throws {
+        // LANraragi has returned both of these shapes in the wild:
+        // - [{"tag":"female:ahegao","count":123,"weight":456}, ...] (top-level array)
+        // - {"tags":[...]} (wrapped object)
+        if let arr = try? decoder.singleValueContainer().decode([TagStat].self) {
+            tags = arr
+            return
+        }
+
         let c = try decoder.container(keyedBy: CodingKeys.self)
         tags = (try? c.decode([TagStat].self, forKey: .tags)) ?? []
     }
@@ -67,4 +75,3 @@ private enum LossyInt {
         return nil
     }
 }
-

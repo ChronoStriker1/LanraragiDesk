@@ -18,8 +18,11 @@ final class SelectionModel: ObservableObject {
         }
     }
 
+    func remove(_ arcid: String) {
+        arcids.remove(arcid)
+    }
+
     func clear() {
         arcids.removeAll()
     }
 }
-

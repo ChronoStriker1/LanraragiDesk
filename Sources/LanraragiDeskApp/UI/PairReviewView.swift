@@ -345,6 +345,7 @@ private struct PairCompareView: View {
     @State private var isDetailsCollapsed: Bool = false
     @State private var panelScrollY: CGFloat = 0
     @State private var panelScrollActiveID: Int? = nil
+    @EnvironmentObject private var appModel: AppModel
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -421,6 +422,12 @@ private struct PairCompareView: View {
                 onSaved: { updated in
                     if updated.arcid == pair.arcidA { metaA = updated }
                     if updated.arcid == pair.arcidB { metaB = updated }
+                },
+                onDelete: { deletingArcid in
+                    try await deleteArchive(deletingArcid)
+                    await MainActor.run {
+                        goNext()
+                    }
                 }
             )
         }
@@ -468,7 +475,7 @@ private struct PairCompareView: View {
                 scrollActiveID: $panelScrollActiveID,
                 scrollID: 0,
                 onRead: {
-                    openWindow(value: ReaderRoute(profileID: profile.id, arcid: pair.arcidA))
+                    openReader(pair.arcidA)
                 },
                 onEdit: {
                     editingArcid = pair.arcidA
@@ -504,7 +511,7 @@ private struct PairCompareView: View {
                 scrollActiveID: $panelScrollActiveID,
                 scrollID: 1,
                 onRead: {
-                    openWindow(value: ReaderRoute(profileID: profile.id, arcid: pair.arcidB))
+                    openReader(pair.arcidB)
                 },
                 onEdit: {
                     editingArcid = pair.arcidB
@@ -519,6 +526,11 @@ private struct PairCompareView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .debugFrameNumber(8)
         }
+    }
+
+    private func openReader(_ arcid: String) {
+        appModel.setActiveReader(profileID: profile.id, arcid: arcid)
+        openWindow(id: "reader")
     }
 
     private struct ArcidBox: Identifiable {

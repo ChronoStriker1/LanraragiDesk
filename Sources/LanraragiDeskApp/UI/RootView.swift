@@ -6,12 +6,15 @@ struct RootView: View {
     @EnvironmentObject private var appModel: AppModel
 
     @State private var showNotMatchesPanel: Bool = false
+    @State private var collapseRunCard: Bool = false
     @State private var section: Section = .library
+    @State private var sidebarVisible: Bool = true
+    @AppStorage("sidebar.showStatistics") private var showStatisticsPage: Bool = false
 
     enum Section: Hashable {
         case library
+        case statistics
         case duplicates
-        case review
         case settings
         case activity
         case batch
@@ -32,7 +35,6 @@ struct RootView: View {
             .ignoresSafeArea()
 
             content
-                .padding(24)
         }
         .onAppear {
             appModel.selectFirstIfNeeded()
@@ -40,16 +42,24 @@ struct RootView: View {
                 appModel.profileEditorMode = .add
             }
         }
+        .onChange(of: showStatisticsPage) { _, enabled in
+            if !enabled, section == .statistics {
+                section = .library
+            }
+        }
+        .onReceive(appModel.$librarySearchRequest) { request in
+            guard let request else { return }
+            guard request.profileID == appModel.selectedProfileID else { return }
+            section = .library
+        }
         .sheet(item: $appModel.profileEditorMode) { mode in
             ProfileEditorView(mode: mode)
         }
         .onChange(of: appModel.duplicates.resultRevision) { _, _ in
-            // Auto-focus the review UI after a scan completes.
+            // Keep users on the Duplicates workspace and collapse controls when results are ready.
             if case .completed = appModel.duplicates.status, appModel.duplicates.result != nil {
-                section = .review
-            }
-            if appModel.duplicates.result == nil, section == .review {
                 section = .duplicates
+                collapseRunCard = true
             }
         }
     }
@@ -57,12 +67,20 @@ struct RootView: View {
     @ViewBuilder
     private var content: some View {
         if let profile = appModel.selectedProfile {
-            NavigationSplitView {
-                sidebar(profile: profile)
-            } detail: {
-                detail(profile: profile)
+            VStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    if sidebarVisible {
+                        sidebar
+                            .frame(width: 240)
+                            .transition(.move(edge: .leading).combined(with: .opacity))
+                    }
+                    detail(profile: profile)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
             .frame(minWidth: 980, minHeight: 640)
+            .animation(.easeInOut(duration: 0.18), value: sidebarVisible)
+            .background(TitlebarSidebarToggleHost(isSidebarVisible: $sidebarVisible))
         } else {
             ContentUnavailableView(
                 "Connect To LANraragi",
@@ -73,69 +91,72 @@ struct RootView: View {
         }
     }
 
-    private func sidebar(profile: Profile) -> some View {
-        List(selection: $section) {
-            NavigationLink(value: Section.library) {
-                Label("Library", systemImage: "books.vertical")
-            }
+    private var sidebar: some View {
+        ZStack {
+            // Finder-like frosted background that respects system reduced-transparency settings.
+            SidebarVibrancy()
+                .ignoresSafeArea()
 
-            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    sidebarButton(title: "Library", systemImage: "books.vertical", section: .library)
+                    if showStatisticsPage {
+                        sidebarButton(title: "Statistics", systemImage: "chart.bar.xaxis", section: .statistics)
+                    }
 
-            NavigationLink(value: Section.duplicates) {
-                Label("Duplicates", systemImage: "rectangle.stack.badge.magnifyingglass")
-            }
+                    Divider().padding(.vertical, 8)
 
-            // Only show Review when it's usable (after a scan produced results).
-            if appModel.duplicates.result != nil {
-                NavigationLink(value: Section.review) {
-                    Label("Review", systemImage: "square.stack.3d.up")
+                    sidebarButton(title: "Duplicates", systemImage: "doc.on.doc", section: .duplicates)
+                    sidebarButton(title: "Activity", systemImage: "list.bullet.rectangle", section: .activity)
+                    sidebarButton(title: "Batch", systemImage: "square.stack.3d.forward.dottedline", section: .batch)
+                    sidebarButton(title: "Plugins", systemImage: "puzzlepiece.extension", section: .plugins)
+
+                    Divider().padding(.vertical, 8)
+                    sidebarButton(title: "Settings", systemImage: "gearshape", section: .settings)
                 }
-            }
-
-            NavigationLink(value: Section.activity) {
-                Label("Activity", systemImage: "list.bullet.rectangle")
-            }
-
-            NavigationLink(value: Section.batch) {
-                Label("Batch", systemImage: "square.stack.3d.forward.dottedline")
-            }
-
-            NavigationLink(value: Section.plugins) {
-                Label("Plugins", systemImage: "puzzlepiece.extension")
-            }
-
-            Divider()
-
-            NavigationLink(value: Section.settings) {
-                Label("Settings", systemImage: "gearshape")
+                .padding(.horizontal, 10)
+                .padding(.vertical, 12)
             }
         }
-        .listStyle(.sidebar)
-        .navigationTitle("LanraragiDesk")
+    }
+
+    private func sidebarButton(title: String, systemImage: String, section target: Section) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .regular))
+                .frame(width: 18)
+            Text(title)
+                .font(.body.weight(.medium))
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(section == target ? Color.primary : Color.primary.opacity(0.88))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(section == target ? Color.primary.opacity(0.12) : Color.clear)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .onTapGesture {
+            section = target
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(title))
+        .accessibilityAddTraits(section == target ? .isSelected : [])
     }
 
     @ViewBuilder
     private func detail(profile: Profile) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
+        Group {
             switch section {
             case .library:
                 LibraryView(profile: profile)
                     .environmentObject(appModel)
+            case .statistics:
+                StatisticsView(profile: profile)
+                    .environmentObject(appModel)
             case .duplicates:
-                runCard(profile: profile)
-            case .review:
-                if appModel.duplicates.result != nil {
-                    reviewTab(profile: profile)
-                } else {
-                    ContentUnavailableView(
-                        "No Results Yet",
-                        systemImage: "square.stack.3d.up.slash",
-                        description: Text("Run a scan to see duplicate groups here.")
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(.thinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                }
+                duplicatesWorkspace(profile: profile)
             case .settings:
                 SettingsView()
                     .environmentObject(appModel)
@@ -149,8 +170,30 @@ struct RootView: View {
                 PluginsView()
                     .environmentObject(appModel)
             }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(24)
+        .clipped()
+    }
 
-            Spacer(minLength: 0)
+    @ViewBuilder
+    private func duplicatesWorkspace(profile: Profile) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            runCard(profile: profile)
+
+            if appModel.duplicates.result != nil {
+                reviewTab(profile: profile)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ContentUnavailableView(
+                    "No Results Yet",
+                    systemImage: "square.stack.3d.up.slash",
+                    description: Text("Run a scan to see duplicate groups here.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(.thinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
@@ -184,43 +227,63 @@ struct RootView: View {
 
     private func runCard(profile: Profile) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Find Duplicate Archives")
-                    .font(.title2)
-                    .bold()
-                Text("Click Find Duplicates. The app will update its local index if needed, then show you likely duplicates to review and delete manually.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Find Duplicate Archives")
+                        .font(.title2)
+                        .bold()
 
-            Divider()
-
-            HStack(spacing: 12) {
-                Button {
-                    section = .duplicates
-                    appModel.duplicates.start(profile: profile)
-                } label: {
-                    Text("Find Duplicates")
-                        .frame(minWidth: 180)
+                    if !collapseRunCard {
+                        Text("Click Find Duplicates. The app will update its local index if needed, then show you likely duplicates to review and delete manually.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                .buttonStyle(.borderedProminent)
-
-                Button("Cancel", role: .destructive) { appModel.duplicates.cancel() }
 
                 Spacer()
+
+                if appModel.duplicates.result != nil {
+                    Button(collapseRunCard ? "Expand" : "Collapse") {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            collapseRunCard.toggle()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                }
             }
 
-            statusBlock
+            if !collapseRunCard {
+                Divider()
 
-            DisclosureGroup("Advanced") {
-                advancedOptions(profile: profile)
-                    .padding(.top, 8)
+                HStack(spacing: 12) {
+                    Button {
+                        section = .duplicates
+                        collapseRunCard = false
+                        appModel.duplicates.start(profile: profile)
+                    } label: {
+                        Text("Find Duplicates")
+                            .frame(minWidth: 180)
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button("Cancel", role: .destructive) { appModel.duplicates.cancel() }
+
+                    Spacer()
+                }
+
+                statusBlock
+
+                DisclosureGroup("Advanced") {
+                    advancedOptions(profile: profile)
+                        .padding(.top, 8)
+                }
+                .font(.callout)
             }
-            .font(.callout)
         }
         .padding(18)
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .debugFrameNumber(1)
     }
 
     @ViewBuilder
@@ -244,7 +307,6 @@ struct RootView: View {
                     Text("Scanned \(stats.archives) archives in \(String(format: "%.1fs", stats.durationSeconds)).")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Button("Go To Review") { section = .review }
                 }
             case .failed(let msg):
                 Text("Failed: \(msg)")
@@ -305,4 +367,150 @@ struct RootView: View {
     }
 
     // Connection UI lives in Settings.
+}
+
+private struct SidebarVibrancy: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let v = NSVisualEffectView()
+        v.material = .sidebar
+        v.blendingMode = .withinWindow
+        v.state = .followsWindowActiveState
+        return v
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        // No-op; system handles reduced transparency automatically.
+    }
+}
+
+private struct TitlebarSidebarToggleHost: NSViewRepresentable {
+    @Binding var isSidebarVisible: Bool
+
+    func makeNSView(context: Context) -> TitlebarSidebarToggleNSView {
+        let view = TitlebarSidebarToggleNSView()
+        view.onToggle = {
+            DispatchQueue.main.async {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    isSidebarVisible.toggle()
+                }
+            }
+        }
+        view.isSidebarVisible = isSidebarVisible
+        return view
+    }
+
+    func updateNSView(_ nsView: TitlebarSidebarToggleNSView, context: Context) {
+        nsView.onToggle = {
+            DispatchQueue.main.async {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    isSidebarVisible.toggle()
+                }
+            }
+        }
+        nsView.isSidebarVisible = isSidebarVisible
+        nsView.installIfNeeded()
+    }
+}
+
+private final class TitlebarSidebarToggleNSView: NSView {
+    private static let toggleIdentifier = NSUserInterfaceItemIdentifier("LanraragiDesk.TitlebarSidebarToggle")
+
+    var onToggle: (() -> Void)?
+    var isSidebarVisible: Bool = true {
+        didSet { updateButtonImage() }
+    }
+
+    private weak var toggleButton: NSButton?
+    private weak var observedWindow: NSWindow?
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        installIfNeeded()
+        registerWindowObservers()
+    }
+
+    func installIfNeeded() {
+        guard let window else { return }
+        guard let mini = window.standardWindowButton(.miniaturizeButton),
+              let miniSuperview = mini.superview else { return }
+
+        removeStaleToggleButtons(window: window, keepSuperview: miniSuperview)
+
+        if let existing = miniSuperview.subviews.compactMap({ $0 as? NSButton }).first(where: { $0.identifier == Self.toggleIdentifier }) {
+            toggleButton = existing
+            updateButtonImage()
+            return
+        }
+
+        let button = NSButton(frame: .zero)
+        button.identifier = Self.toggleIdentifier
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.title = ""
+        button.bezelStyle = .texturedRounded
+        button.controlSize = mini.controlSize
+        button.imageScaling = .scaleProportionallyDown
+        button.toolTip = "Toggle Sidebar"
+        button.target = self
+        button.action = #selector(didPressToggleButton)
+
+        miniSuperview.addSubview(button)
+        NSLayoutConstraint.activate([
+            button.leadingAnchor.constraint(equalTo: mini.trailingAnchor, constant: 6),
+            button.centerYAnchor.constraint(equalTo: mini.centerYAnchor),
+            button.widthAnchor.constraint(equalTo: mini.widthAnchor),
+            button.heightAnchor.constraint(equalTo: mini.heightAnchor)
+        ])
+
+        toggleButton = button
+        updateButtonImage()
+    }
+
+    @objc private func didPressToggleButton() {
+        onToggle?()
+    }
+
+    private func updateButtonImage() {
+        guard let button = toggleButton else { return }
+        let symbol = isSidebarVisible ? "sidebar.left" : "sidebar.right"
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Toggle Sidebar")
+    }
+
+    private func removeStaleToggleButtons(window: NSWindow, keepSuperview: NSView) {
+        guard let frameView = window.contentView?.superview else { return }
+        for button in findToggleButtons(in: frameView) where button.superview !== keepSuperview {
+            button.removeFromSuperview()
+        }
+    }
+
+    private func findToggleButtons(in root: NSView) -> [NSButton] {
+        var result: [NSButton] = []
+        if let button = root as? NSButton, button.identifier == Self.toggleIdentifier {
+            result.append(button)
+        }
+        for child in root.subviews {
+            result.append(contentsOf: findToggleButtons(in: child))
+        }
+        return result
+    }
+
+    private func registerWindowObservers() {
+        guard window !== observedWindow else { return }
+        NotificationCenter.default.removeObserver(self)
+        observedWindow = window
+
+        guard let window else { return }
+        let center = NotificationCenter.default
+        center.addObserver(self, selector: #selector(windowGeometryDidChange), name: NSWindow.didResizeNotification, object: window)
+        center.addObserver(self, selector: #selector(windowGeometryDidChange), name: NSWindow.didMoveNotification, object: window)
+        center.addObserver(self, selector: #selector(windowGeometryDidChange), name: NSWindow.didEndLiveResizeNotification, object: window)
+        center.addObserver(self, selector: #selector(windowGeometryDidChange), name: NSWindow.didBecomeKeyNotification, object: window)
+    }
+
+    @objc private func windowGeometryDidChange(_ notification: Notification) {
+        installIfNeeded()
+    }
 }

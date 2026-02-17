@@ -12,6 +12,8 @@ struct SettingsView: View {
 
     @AppStorage("reader.readingDirection") private var readingDirectionRaw: String = ReaderDirection.ltr.rawValue
     @AppStorage("debug.showFrameNumbers") private var showFrameNumbers: Bool = false
+    @AppStorage("sidebar.showStatistics") private var showStatisticsPage: Bool = false
+    @AppStorage("thumbs.cropToFill") private var cropThumbsToFill: Bool = false
 
     var body: some View {
         ScrollView(.vertical) {
@@ -71,6 +73,31 @@ struct SettingsView: View {
                 }
                 .padding(8)
             }
+            .debugFrameNumber(1)
+
+            GroupBox("Sidebar") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle("Show Statistics page", isOn: $showStatisticsPage)
+                        .font(.callout)
+                    Text("Adds a Statistics page to the sidebar that mirrors LANraragi’s statistics tag table.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(8)
+            }
+            .debugFrameNumber(2)
+
+            GroupBox("Thumbnails") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle("Crop thumbnails to fill", isOn: $cropThumbsToFill)
+                        .font(.callout)
+                    Text("When enabled, cover previews are cropped to fill their frames. Off by default.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(8)
+            }
+            .debugFrameNumber(3)
 
             GroupBox("Reader") {
                 VStack(alignment: .leading, spacing: 12) {
@@ -92,6 +119,7 @@ struct SettingsView: View {
                 }
                 .padding(8)
             }
+            .debugFrameNumber(4)
 
             GroupBox("Performance") {
                 VStack(alignment: .leading, spacing: 12) {
@@ -111,6 +139,7 @@ struct SettingsView: View {
                 }
                 .padding(8)
             }
+            .debugFrameNumber(5)
 
             GroupBox("Tag suggestions") {
                 VStack(alignment: .leading, spacing: 12) {
@@ -138,6 +167,7 @@ struct SettingsView: View {
                 }
                 .padding(8)
             }
+            .debugFrameNumber(6)
 
             GroupBox("Server actions") {
                 VStack(alignment: .leading, spacing: 12) {
@@ -162,6 +192,7 @@ struct SettingsView: View {
                 }
                 .padding(8)
             }
+            .debugFrameNumber(7)
 
             Spacer(minLength: 0)
         }

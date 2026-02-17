@@ -88,6 +88,7 @@ struct ActivityView: View {
         .padding(18)
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .debugFrameNumber(1)
     }
 
     private var filteredEvents: [ActivityEvent] {

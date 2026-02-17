@@ -54,6 +54,13 @@ actor ThumbnailLoader {
         cache.setObject(bytes as NSData, forKey: key, cost: bytes.count)
         return bytes
     }
+
+    func invalidate(profile: Profile, arcid: String) {
+        let key = "\(profile.id.uuidString)/\(arcid)" as NSString
+        cache.removeObject(forKey: key)
+        inflight[String(key)]?.cancel()
+        inflight[String(key)] = nil
+    }
 }
 
 private actor AsyncLimiter {

@@ -10,15 +10,46 @@ struct LanraragiDeskApp: App {
                 .environmentObject(appModel)
         }
         .windowStyle(.automatic)
+        .commands {
+            ReaderZoomCommands()
+        }
 
-        WindowGroup(for: ReaderRoute.self) { $route in
-            if let route {
+        Window("Reader", id: "reader") {
+            if let route = appModel.activeReaderRoute {
                 ReaderView(route: route)
                     .environmentObject(appModel)
-                    .frame(minWidth: 860, minHeight: 640)
+                    .frame(minWidth: 960, minHeight: 640)
             } else {
                 ContentUnavailableView("No Archive Selected", systemImage: "book.closed")
                     .frame(minWidth: 520, minHeight: 360)
+            }
+        }
+        .windowToolbarStyle(.unifiedCompact(showsTitle: false))
+    }
+}
+
+private struct ReaderZoomCommands: Commands {
+    @AppStorage("reader.zoomPercent") private var zoomPercent: Double = 100
+
+    var body: some Commands {
+        CommandGroup(after: .toolbar) {
+            Menu("Zoom") {
+                Button("Increase") {
+                    zoomPercent = min(200, zoomPercent + 10)
+                }
+                .keyboardShortcut("=", modifiers: [.command])
+
+                Button("Decrease") {
+                    zoomPercent = max(50, zoomPercent - 10)
+                }
+                .keyboardShortcut("-", modifiers: [.command])
+
+                Divider()
+
+                Button("Reset") {
+                    zoomPercent = 100
+                }
+                .keyboardShortcut("0", modifiers: [.command])
             }
         }
     }

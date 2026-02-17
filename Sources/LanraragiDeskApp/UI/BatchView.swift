@@ -60,6 +60,7 @@ struct BatchView: View {
                 }
                 .padding(8)
             }
+            .debugFrameNumber(2)
 
             if !errors.isEmpty {
                 GroupBox("Errors") {
@@ -77,6 +78,7 @@ struct BatchView: View {
                     }
                     .frame(maxHeight: 220)
                 }
+                .debugFrameNumber(3)
             }
 
             Spacer(minLength: 0)
@@ -85,6 +87,7 @@ struct BatchView: View {
         .padding(18)
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .debugFrameNumber(1)
         .onDisappear {
             task?.cancel()
         }
@@ -189,4 +192,3 @@ struct BatchView: View {
         return items.joined(separator: ", ")
     }
 }
-

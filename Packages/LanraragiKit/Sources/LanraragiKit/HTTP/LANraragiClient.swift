@@ -105,19 +105,32 @@ public final class LANraragiClient: @unchecked Sendable {
         tags: String,
         summary: String
     ) async throws {
-        let body: [String: Any] = [
-            "title": title,
-            "tags": tags,
-            "summary": summary,
-        ]
-        let data = try JSONSerialization.data(withJSONObject: body, options: [])
+        let data = makeFormBody([
+            URLQueryItem(name: "title", value: title),
+            URLQueryItem(name: "tags", value: tags),
+            URLQueryItem(name: "summary", value: summary),
+        ])
 
         let url = try makeURL(path: "/api/archives/\(arcid)/metadata")
         var req = URLRequest(url: url)
         req.httpMethod = "PUT"
         applyDefaultHeaders(to: &req)
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
         req.httpBody = data
+
+        try await performNoContent(req)
+    }
+
+    public func updateArchiveThumbnail(arcid: String, page: Int? = nil) async throws {
+        var queryItems: [URLQueryItem] = []
+        if let page {
+            queryItems.append(URLQueryItem(name: "page", value: String(max(1, page))))
+        }
+
+        let url = try makeURL(path: "/api/archives/\(arcid)/thumbnail", queryItems: queryItems)
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        applyDefaultHeaders(to: &req)
 
         try await performNoContent(req)
     }
@@ -194,6 +207,35 @@ public final class LANraragiClient: @unchecked Sendable {
         return try await getJSON(path: "/api/database/stats", queryItems: queryItems)
     }
 
+    public func listCategories() async throws -> [Category] {
+        let data = try await getData(path: "/api/categories")
+        let obj = try JSONSerialization.jsonObject(with: data)
+
+        // Common shapes:
+        // - [{"id":"...", "name":"...", "pinned":true}, ...]
+        // - {"categories":[...]}
+        // - {"id":"name", ...} (fallback; pinned not representable)
+        if let arr = obj as? [Any] {
+            return parseCategoriesArray(arr)
+        }
+        if let dict = obj as? [String: Any] {
+            if let arr = dict["categories"] as? [Any] {
+                return parseCategoriesArray(arr)
+            }
+            // Fallback: mapping of id -> name
+            var out: [Category] = []
+            out.reserveCapacity(dict.count)
+            for (k, v) in dict {
+                if let name = v as? String {
+                    out.append(Category(id: k, name: name, pinned: false))
+                }
+            }
+            return out
+        }
+
+        return []
+    }
+
     public func listPlugins() async throws -> [PluginInfo] {
         let data = try await getData(path: "/api/plugins")
         let obj = try JSONSerialization.jsonObject(with: data)
@@ -212,6 +254,39 @@ public final class LANraragiClient: @unchecked Sendable {
         }
 
         return []
+    }
+
+    private func parseCategoriesArray(_ arr: [Any]) -> [Category] {
+        var out: [Category] = []
+        out.reserveCapacity(arr.count)
+
+        for item in arr {
+            if let dict = item as? [String: Any] {
+                let id = (dict["id"] as? String) ?? ""
+                let name = (dict["name"] as? String) ?? ""
+                let pinned: Bool = {
+                    if let b = dict["pinned"] as? Bool { return b }
+                    if let i = dict["pinned"] as? Int { return i != 0 }
+                    if let s = dict["pinned"] as? String {
+                        switch s.lowercased() {
+                        case "true", "1", "yes": return true
+                        default: return false
+                        }
+                    }
+                    return false
+                }()
+
+                out.append(Category(id: id, name: name, pinned: pinned))
+                continue
+            }
+
+            // Some servers might return category names as plain strings.
+            if let name = item as? String {
+                out.append(Category(id: name, name: name, pinned: false))
+            }
+        }
+
+        return out
     }
 
     public func queuePlugin(pluginID: String, arcid: String, arg: String? = nil) async throws -> MinionJob {
@@ -467,5 +542,12 @@ public final class LANraragiClient: @unchecked Sendable {
 
         out.sort { a, b in a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending }
         return out
+    }
+
+    private func makeFormBody(_ items: [URLQueryItem]) -> Data {
+        var comps = URLComponents()
+        comps.queryItems = items
+        let encoded = comps.percentEncodedQuery ?? ""
+        return Data(encoded.utf8)
     }
 }
