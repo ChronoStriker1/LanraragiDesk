@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import LanraragiKit
 
@@ -195,7 +196,13 @@ struct ArchiveMetadataEditorView: View {
                                                 .foregroundStyle(.secondary)
                                             VStack(alignment: .leading, spacing: 8) {
                                                 ForEach(group.items, id: \.self) { item in
-                                                    MetadataTagEditorChip(text: item.display) {
+                                                    MetadataTagEditorChip(
+                                                        text: item.display,
+                                                        isLink: isOpenableSourceTag(item),
+                                                        onTap: {
+                                                            openSourceTag(item)
+                                                        }
+                                                    ) {
                                                         removeTag(item.rawToken)
                                                     }
                                                 }
@@ -433,6 +440,44 @@ struct ArchiveMetadataEditorView: View {
         tags = MetadataTagFormatter.removing(rawToken, from: tags)
     }
 
+    private func isOpenableSourceTag(_ item: MetadataTagFormatter.Item) -> Bool {
+        item.namespace.lowercased() == "source" && sourceURL(from: item.value) != nil
+    }
+
+    private func openSourceTag(_ item: MetadataTagFormatter.Item) {
+        guard item.namespace.lowercased() == "source" else { return }
+        guard let url = sourceURL(from: item.value) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func sourceURL(from raw: String) -> URL? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        guard !trimmed.contains(where: \.isWhitespace) else { return nil }
+
+        if let url = URL(string: trimmed),
+           let scheme = url.scheme?.lowercased(),
+           (scheme == "http" || scheme == "https"),
+           let host = url.host,
+           !host.isEmpty {
+            return url
+        }
+
+        let candidate: String
+        if trimmed.hasPrefix("//") {
+            candidate = "https:" + trimmed
+        } else {
+            candidate = "https://" + trimmed
+        }
+
+        guard let url = URL(string: candidate),
+              let host = url.host,
+              host.contains(".") else {
+            return nil
+        }
+        return url
+    }
+
     private func setCoverFromPage() async {
         let boundedPage = min(max(1, coverPage), max(1, pageCount))
         guard pageCount > 0 else { return }
@@ -597,15 +642,25 @@ struct ArchiveMetadataEditorView: View {
 
 private struct MetadataTagEditorChip: View {
     let text: String
+    let isLink: Bool
+    let onTap: () -> Void
     let onRemove: () -> Void
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(text)
-                .font(.callout)
-                .lineLimit(nil)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                onTap()
+            } label: {
+                Text(text)
+                    .font(.callout)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .foregroundStyle(isLink ? .blue : .primary)
+            }
+            .buttonStyle(.plain)
+            .disabled(!isLink)
+            .help(isLink ? "Open source URL" : "")
 
             Button {
                 onRemove()
