@@ -21,6 +21,8 @@ struct BatchView: View {
     @State private var previewRunning: Bool = false
     @State private var previewTask: Task<Void, Never>?
     @State private var previewBeforeQueue: Bool = true
+    @State private var resumableTagBatch: TagBatchCheckpoint?
+    @State private var resumablePluginBatch: PluginBatchCheckpoint?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -117,6 +119,25 @@ struct BatchView: View {
 
             GroupBox("Tag operations") {
                 VStack(alignment: .leading, spacing: 12) {
+                    if let checkpoint = resumableTagBatch, !running {
+                        HStack(spacing: 8) {
+                            Text("Recoverable tag batch found (\(checkpoint.arcids.count) archives).")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Button("Resume Queue") {
+                                resumeTagBatchFromCheckpoint()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(running || pluginRunning || previewRunning)
+                            Button("Discard") {
+                                clearTagBatchCheckpoint()
+                                refreshResumableTagBatch()
+                            }
+                            .disabled(running || pluginRunning)
+                            Spacer()
+                        }
+                    }
+
                     TextField("Add tags (comma separated)", text: $addTagsText)
                         .textFieldStyle(.roundedBorder)
                         .disabled(running || pluginRunning)
@@ -135,6 +156,11 @@ struct BatchView: View {
                             requestBatchCancel()
                         }
                         .disabled(!running || batchCancelRequested)
+
+                        Button(batchPauseRequested ? "Pausing…" : "Pause") {
+                            requestBatchPause()
+                        }
+                        .disabled(!running || batchPauseRequested)
 
                         Spacer()
                     }
@@ -155,6 +181,25 @@ struct BatchView: View {
                         Text(status)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    }
+
+                    if let checkpoint = resumablePluginBatch, !pluginRunning {
+                        HStack(spacing: 8) {
+                            Text("Recoverable plugin batch found (\(checkpoint.arcids.count) archives).")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Button("Resume Queue") {
+                                resumePluginBatchFromCheckpoint()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(running || pluginRunning || previewRunning)
+                            Button("Discard") {
+                                clearPluginBatchCheckpoint()
+                                refreshResumablePluginBatch()
+                            }
+                            .disabled(running || pluginRunning)
+                            Spacer()
+                        }
                     }
 
                     HStack(spacing: 10) {
@@ -241,6 +286,11 @@ struct BatchView: View {
                         }
                         .disabled(!pluginRunning || pluginCancelRequested)
 
+                        Button(pluginPauseRequested ? "Pausing…" : "Pause") {
+                            requestPluginPause()
+                        }
+                        .disabled(!pluginRunning || pluginPauseRequested)
+
                         Spacer()
                     }
 
@@ -322,6 +372,8 @@ struct BatchView: View {
         .task(id: appModel.selectedProfileID) {
             await loadPlugins()
             refreshSelectedArchiveNames()
+            refreshResumableTagBatch()
+            refreshResumablePluginBatch()
         }
         .onChange(of: selectedArcidsSorted) { _, _ in
             refreshSelectedArchiveNames()
@@ -348,24 +400,73 @@ struct BatchView: View {
         let remove = parseTags(removeTagsText)
         let arcids = Array(appModel.selection.arcids).sorted()
         if arcids.isEmpty { return }
+        if add.isEmpty && remove.isEmpty { return }
 
+        let checkpoint = TagBatchCheckpoint(
+            profileID: profile.id,
+            profileBaseURL: profile.baseURL.absoluteString,
+            arcids: arcids,
+            nextIndex: 0,
+            addTagsText: addTagsText,
+            removeTagsText: removeTagsText
+        )
+        saveTagBatchCheckpoint(checkpoint)
+        refreshResumableTagBatch()
+
+        startTagBatch(
+            profile: profile,
+            arcids: arcids,
+            add: add,
+            remove: remove,
+            startIndex: 0,
+            resumed: false
+        )
+    }
+
+    private func startTagBatch(
+        profile: Profile,
+        arcids: [String],
+        add: [String],
+        remove: [String],
+        startIndex: Int,
+        resumed: Bool
+    ) {
         running = true
         batchCancelRequested = false
+        batchPauseRequested = false
+        batchPaused = false
         batchCurrentArchive = nil
-        batchLiveEvents = []
         errors = []
-        progressText = "Starting…"
-        appModel.activity.add(.init(kind: .action, title: "Batch started", detail: "\(arcids.count) archives"))
-        appendBatchLiveEvent("Started \(arcids.count) archives")
+        if !resumed {
+            batchLiveEvents = []
+        }
+        if resumed {
+            let startHuman = min(max(startIndex + 1, 1), max(arcids.count, 1))
+            progressText = "Resumed at archive \(startHuman)/\(arcids.count)…"
+            appendBatchLiveEvent("Resumed at \(startHuman)/\(arcids.count)")
+            appModel.activity.add(.init(kind: .action, title: "Tag batch resumed", detail: "\(startHuman)/\(arcids.count)"))
+        } else {
+            progressText = "Starting…"
+            appModel.activity.add(.init(kind: .action, title: "Batch started", detail: "\(arcids.count) archives"))
+            appendBatchLiveEvent("Started \(arcids.count) archives")
+        }
 
         task?.cancel()
         task = Task {
             var done = 0
-            for arcid in arcids {
-                if await MainActor.run(body: { batchCancelRequested }) { break }
+            for index in startIndex..<arcids.count {
+                let arcid = arcids[index]
+                if await MainActor.run(body: { batchCancelRequested || batchPauseRequested }) { break }
                 await MainActor.run {
                     batchCurrentArchive = displayName(for: arcid)
                 }
+
+                if let existing = loadTagBatchCheckpoint() {
+                    var updated = existing
+                    updated.nextIndex = index
+                    saveTagBatchCheckpoint(updated)
+                }
+
                 do {
                     let meta = try await appModel.archives.metadata(profile: profile, arcid: arcid)
                     if await MainActor.run(body: { batchCancelRequested }) { break }
@@ -411,17 +512,31 @@ struct BatchView: View {
 
                 done += 1
                 await MainActor.run {
-                    progressText = "Processed \(done)/\(arcids.count)…"
+                    progressText = "Processed \(index + 1)/\(arcids.count)…"
+                }
+
+                if await MainActor.run(body: { batchPauseRequested }) {
+                    if let existing = loadTagBatchCheckpoint() {
+                        var updated = existing
+                        // Redo the last touched archive on resume.
+                        updated.nextIndex = max(0, index)
+                        saveTagBatchCheckpoint(updated)
+                    }
+                    break
                 }
             }
 
             let cancelledByRequest = await MainActor.run { batchCancelRequested }
+            let pausedByRequest = await MainActor.run { batchPauseRequested }
             let wasCancelled = cancelledByRequest || Task.isCancelled
 
             await MainActor.run {
                 running = false
                 batchCurrentArchive = nil
-                if wasCancelled {
+                if pausedByRequest {
+                    progressText = "Paused. Processed \(done)/\(arcids.count) with \(errors.count) errors."
+                    batchPaused = true
+                } else if wasCancelled {
                     progressText = "Cancelled."
                 } else if errors.isEmpty {
                     progressText = "Done."
@@ -429,14 +544,32 @@ struct BatchView: View {
                     progressText = "Done with \(errors.count) errors."
                 }
                 batchCancelRequested = false
+                batchPauseRequested = false
                 task = nil
             }
 
-            if wasCancelled {
+            if pausedByRequest {
+                appModel.activity.add(.init(kind: .warning, title: "Batch paused"))
+                await MainActor.run {
+                    refreshResumableTagBatch()
+                }
+            } else if wasCancelled {
+                clearTagBatchCheckpoint()
+                await MainActor.run {
+                    refreshResumableTagBatch()
+                }
                 appModel.activity.add(.init(kind: .warning, title: "Batch cancelled"))
             } else if errors.isEmpty {
+                clearTagBatchCheckpoint()
+                await MainActor.run {
+                    refreshResumableTagBatch()
+                }
                 appModel.activity.add(.init(kind: .action, title: "Batch completed", detail: "\(arcids.count) archives"))
             } else {
+                clearTagBatchCheckpoint()
+                await MainActor.run {
+                    refreshResumableTagBatch()
+                }
                 appModel.activity.add(.init(kind: .warning, title: "Batch completed with errors", detail: "\(errors.count) errors"))
             }
         }
@@ -447,6 +580,75 @@ struct BatchView: View {
         batchCancelRequested = true
         progressText = "Stopping after current archive save finishes…"
         appModel.activity.add(.init(kind: .warning, title: "Batch cancel requested"))
+    }
+
+    private func requestBatchPause() {
+        guard running, !batchPauseRequested else { return }
+        batchPauseRequested = true
+        progressText = "Pausing after current archive save finishes…"
+        appModel.activity.add(.init(kind: .warning, title: "Batch pause requested"))
+    }
+
+    private func resumeTagBatchFromCheckpoint() {
+        guard let profile = appModel.selectedProfile else { return }
+        guard let checkpoint = resumableTagBatch else { return }
+        guard !checkpoint.arcids.isEmpty else {
+            clearTagBatchCheckpoint()
+            refreshResumableTagBatch()
+            return
+        }
+
+        addTagsText = checkpoint.addTagsText
+        removeTagsText = checkpoint.removeTagsText
+
+        let add = parseTags(checkpoint.addTagsText)
+        let remove = parseTags(checkpoint.removeTagsText)
+        if add.isEmpty && remove.isEmpty {
+            clearTagBatchCheckpoint()
+            refreshResumableTagBatch()
+            return
+        }
+
+        let startIndex = min(max(0, checkpoint.nextIndex), max(0, checkpoint.arcids.count - 1))
+        startTagBatch(
+            profile: profile,
+            arcids: checkpoint.arcids,
+            add: add,
+            remove: remove,
+            startIndex: startIndex,
+            resumed: true
+        )
+    }
+
+    private func refreshResumableTagBatch() {
+        guard let profile = appModel.selectedProfile else {
+            resumableTagBatch = nil
+            return
+        }
+        guard let checkpoint = loadTagBatchCheckpoint() else {
+            resumableTagBatch = nil
+            return
+        }
+        if checkpoint.profileID == profile.id || checkpoint.profileBaseURL == profile.baseURL.absoluteString {
+            resumableTagBatch = checkpoint
+        } else {
+            resumableTagBatch = nil
+        }
+    }
+
+    private func loadTagBatchCheckpoint() -> TagBatchCheckpoint? {
+        guard let data = UserDefaults.standard.data(forKey: tagBatchCheckpointKey) else { return nil }
+        return try? JSONDecoder().decode(TagBatchCheckpoint.self, from: data)
+    }
+
+    private func saveTagBatchCheckpoint(_ checkpoint: TagBatchCheckpoint) {
+        if let data = try? JSONEncoder().encode(checkpoint) {
+            UserDefaults.standard.set(data, forKey: tagBatchCheckpointKey)
+        }
+    }
+
+    private func clearTagBatchCheckpoint() {
+        UserDefaults.standard.removeObject(forKey: tagBatchCheckpointKey)
     }
 
     private func parseTags(_ s: String) -> [String] {
@@ -504,26 +706,74 @@ struct BatchView: View {
             return
         }
 
+        let checkpoint = PluginBatchCheckpoint(
+            profileID: profile.id,
+            profileBaseURL: profile.baseURL.absoluteString,
+            arcids: arcids,
+            nextIndex: 0,
+            selectedPluginID: pluginID,
+            pluginArgText: pluginArgText,
+            pluginDelayText: pluginDelayText,
+            pluginApplyModeRaw: pluginApplyMode.rawValue
+        )
+        savePluginBatchCheckpoint(checkpoint)
+        refreshResumablePluginBatch()
+
+        startPluginBatch(
+            profile: profile,
+            pluginID: pluginID,
+            arcids: arcids,
+            startIndex: 0,
+            resumed: false
+        )
+    }
+
+    private func startPluginBatch(
+        profile: Profile,
+        pluginID: String,
+        arcids: [String],
+        startIndex: Int,
+        resumed: Bool
+    ) {
         let delaySeconds = sanitizedDelaySeconds(from: pluginDelayText)
 
         pluginRunning = true
         pluginCancelRequested = false
+        pluginPauseRequested = false
+        pluginPaused = false
         pluginCurrentArchive = nil
-        pluginLiveEvents = []
-        pluginRunStatus = "Running plugin on \(arcids.count) archives…"
-        appModel.activity.add(.init(kind: .action, title: "Plugin batch queued", detail: "\(pluginID) on \(arcids.count) archives"))
-        appendPluginLiveEvent("Started \(pluginID) on \(arcids.count) archives")
+        if !resumed {
+            pluginLiveEvents = []
+        }
+        if resumed {
+            let startHuman = min(max(startIndex + 1, 1), max(arcids.count, 1))
+            pluginRunStatus = "Resumed \(pluginID) at archive \(startHuman)/\(arcids.count)…"
+            appendPluginLiveEvent("Resumed \(pluginID) at \(startHuman)/\(arcids.count)")
+            appModel.activity.add(.init(kind: .action, title: "Plugin batch resumed", detail: "\(pluginID) at \(startHuman)/\(arcids.count)"))
+        } else {
+            pluginRunStatus = "Running plugin on \(arcids.count) archives…"
+            appModel.activity.add(.init(kind: .action, title: "Plugin batch queued", detail: "\(pluginID) on \(arcids.count) archives"))
+            appendPluginLiveEvent("Started \(pluginID) on \(arcids.count) archives")
+        }
 
         pluginTask?.cancel()
         pluginTask = Task {
             var ok = 0
             var fail = 0
-            for (index, arcid) in arcids.enumerated() {
-                if await MainActor.run(body: { pluginCancelRequested }) { break }
+            for index in startIndex..<arcids.count {
+                let arcid = arcids[index]
+                if await MainActor.run(body: { pluginCancelRequested || pluginPauseRequested }) { break }
                 await MainActor.run {
                     pluginCurrentArchive = displayName(for: arcid)
                     appendPluginLiveEvent("Processing \(displayName(for: arcid))")
                 }
+
+                if let existing = loadPluginBatchCheckpoint() {
+                    var updated = existing
+                    updated.nextIndex = index
+                    savePluginBatchCheckpoint(updated)
+                }
+
                 do {
                     let prePluginMeta = try? await appModel.archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
                     let preSignature = prePluginMeta.map {
@@ -629,6 +879,16 @@ struct BatchView: View {
                     pluginRunStatus = "Processed \(index + 1)/\(arcids.count) • Success \(ok) • Failed \(fail)…"
                 }
 
+                if await MainActor.run(body: { pluginPauseRequested }) {
+                    if let existing = loadPluginBatchCheckpoint() {
+                        var updated = existing
+                        // Redo the last touched archive on resume.
+                        updated.nextIndex = max(0, index)
+                        savePluginBatchCheckpoint(updated)
+                    }
+                    break
+                }
+
                 if index + 1 < arcids.count && delaySeconds > 0 {
                     if await pauseBetweenPluginRuns(seconds: delaySeconds, done: index + 1, total: arcids.count, ok: ok, fail: fail) {
                         break
@@ -637,21 +897,40 @@ struct BatchView: View {
             }
 
             let cancelledByRequest = await MainActor.run { pluginCancelRequested }
+            let pausedByRequest = await MainActor.run { pluginPauseRequested }
 
             await MainActor.run {
                 pluginRunning = false
                 pluginCurrentArchive = nil
-                if cancelledByRequest {
+                if pausedByRequest {
+                    pluginRunStatus = "Paused. Success \(ok), failed \(fail)."
+                    pluginPaused = true
+                } else if cancelledByRequest {
                     pluginRunStatus = "Cancelled. Success \(ok), failed \(fail)."
                 } else {
                     pluginRunStatus = "Done. Success \(ok), failed \(fail)."
                 }
                 pluginCancelRequested = false
+                pluginPauseRequested = false
                 pluginTask = nil
             }
 
-            if cancelledByRequest {
+            if pausedByRequest {
+                appModel.activity.add(.init(kind: .warning, title: "Plugin batch paused", detail: "\(pluginID)"))
+                await MainActor.run {
+                    refreshResumablePluginBatch()
+                }
+            } else if cancelledByRequest {
+                clearPluginBatchCheckpoint()
+                await MainActor.run {
+                    refreshResumablePluginBatch()
+                }
                 appModel.activity.add(.init(kind: .warning, title: "Plugin batch cancelled", detail: "\(pluginID)"))
+            } else {
+                clearPluginBatchCheckpoint()
+                await MainActor.run {
+                    refreshResumablePluginBatch()
+                }
             }
         }
     }
@@ -661,6 +940,70 @@ struct BatchView: View {
         pluginCancelRequested = true
         pluginRunStatus = "Stopping after current archive operation finishes…"
         appModel.activity.add(.init(kind: .warning, title: "Plugin batch cancel requested"))
+    }
+
+    private func requestPluginPause() {
+        guard pluginRunning, !pluginPauseRequested else { return }
+        pluginPauseRequested = true
+        pluginRunStatus = "Pausing after current archive finishes…"
+        appModel.activity.add(.init(kind: .warning, title: "Plugin batch pause requested"))
+    }
+
+    private func resumePluginBatchFromCheckpoint() {
+        guard let profile = appModel.selectedProfile else { return }
+        guard let checkpoint = resumablePluginBatch else { return }
+        guard !checkpoint.arcids.isEmpty else {
+            clearPluginBatchCheckpoint()
+            refreshResumablePluginBatch()
+            return
+        }
+
+        selectedPluginID = checkpoint.selectedPluginID
+        pluginArgText = checkpoint.pluginArgText
+        pluginDelayText = checkpoint.pluginDelayText
+        if let mode = PluginApplyMode(rawValue: checkpoint.pluginApplyModeRaw) {
+            pluginApplyMode = mode
+        }
+
+        let startIndex = min(max(0, checkpoint.nextIndex), max(0, checkpoint.arcids.count - 1))
+        startPluginBatch(
+            profile: profile,
+            pluginID: checkpoint.selectedPluginID,
+            arcids: checkpoint.arcids,
+            startIndex: startIndex,
+            resumed: true
+        )
+    }
+
+    private func refreshResumablePluginBatch() {
+        guard let profile = appModel.selectedProfile else {
+            resumablePluginBatch = nil
+            return
+        }
+        guard let checkpoint = loadPluginBatchCheckpoint() else {
+            resumablePluginBatch = nil
+            return
+        }
+        if checkpoint.profileID == profile.id || checkpoint.profileBaseURL == profile.baseURL.absoluteString {
+            resumablePluginBatch = checkpoint
+        } else {
+            resumablePluginBatch = nil
+        }
+    }
+
+    private func loadPluginBatchCheckpoint() -> PluginBatchCheckpoint? {
+        guard let data = UserDefaults.standard.data(forKey: pluginBatchCheckpointKey) else { return nil }
+        return try? JSONDecoder().decode(PluginBatchCheckpoint.self, from: data)
+    }
+
+    private func savePluginBatchCheckpoint(_ checkpoint: PluginBatchCheckpoint) {
+        if let data = try? JSONEncoder().encode(checkpoint) {
+            UserDefaults.standard.set(data, forKey: pluginBatchCheckpointKey)
+        }
+    }
+
+    private func clearPluginBatchCheckpoint() {
+        UserDefaults.standard.removeObject(forKey: pluginBatchCheckpointKey)
     }
 
     private var selectedArcidsSorted: [String] {
@@ -1309,6 +1652,16 @@ struct BatchView: View {
         nonmutating set { runState.batchCancelRequested = newValue }
     }
 
+    private var batchPauseRequested: Bool {
+        get { runState.batchPauseRequested }
+        nonmutating set { runState.batchPauseRequested = newValue }
+    }
+
+    private var batchPaused: Bool {
+        get { runState.batchPaused }
+        nonmutating set { runState.batchPaused = newValue }
+    }
+
     private var progressText: String? {
         get { runState.progressText }
         nonmutating set { runState.progressText = newValue }
@@ -1344,6 +1697,16 @@ struct BatchView: View {
         nonmutating set { runState.pluginCancelRequested = newValue }
     }
 
+    private var pluginPauseRequested: Bool {
+        get { runState.pluginPauseRequested }
+        nonmutating set { runState.pluginPauseRequested = newValue }
+    }
+
+    private var pluginPaused: Bool {
+        get { runState.pluginPaused }
+        nonmutating set { runState.pluginPaused = newValue }
+    }
+
     private var pluginRunStatus: String? {
         get { runState.pluginRunStatus }
         nonmutating set { runState.pluginRunStatus = newValue }
@@ -1370,12 +1733,37 @@ struct BatchView: View {
     }
 }
 
+private let tagBatchCheckpointKey = "batch.tag.checkpoint.v1"
+private let pluginBatchCheckpointKey = "batch.plugin.checkpoint.v1"
+
+private struct TagBatchCheckpoint: Codable {
+    let profileID: UUID
+    let profileBaseURL: String
+    let arcids: [String]
+    var nextIndex: Int
+    let addTagsText: String
+    let removeTagsText: String
+}
+
+private struct PluginBatchCheckpoint: Codable {
+    let profileID: UUID
+    let profileBaseURL: String
+    let arcids: [String]
+    var nextIndex: Int
+    let selectedPluginID: String
+    let pluginArgText: String
+    let pluginDelayText: String
+    let pluginApplyModeRaw: String
+}
+
 @MainActor
 private final class BatchRunState: ObservableObject {
     static let shared = BatchRunState()
 
     @Published var running: Bool = false
     @Published var batchCancelRequested: Bool = false
+    @Published var batchPauseRequested: Bool = false
+    @Published var batchPaused: Bool = false
     @Published var progressText: String?
     @Published var errors: [String] = []
     var task: Task<Void, Never>?
@@ -1384,6 +1772,8 @@ private final class BatchRunState: ObservableObject {
 
     @Published var pluginRunning: Bool = false
     @Published var pluginCancelRequested: Bool = false
+    @Published var pluginPauseRequested: Bool = false
+    @Published var pluginPaused: Bool = false
     @Published var pluginRunStatus: String?
     var pluginTask: Task<Void, Never>?
     @Published var pluginCurrentArchive: String?
