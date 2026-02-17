@@ -3,14 +3,6 @@
 This file tracks what still needs to be built, what may be broken, and what to verify.
 It is intentionally pragmatic and may be blunt.
 
-## High Priority: Possible Breakage / UX Regressions
-
-- Sidebar "Review" visibility behavior:
-  - Requirement: "hide review unless review is active".
-  - Current: Review link is only shown when `duplicates.result != nil`.
-  - Risk: if the user is *on* Review and `result` becomes nil (clear results/reset/index rebuild), the sidebar hides the item and selection binding may behave oddly. Confirm and adjust logic to: show Review when `section == .review || duplicates.result != nil`.
-  - File: `Sources/LanraragiDeskApp/UI/RootView.swift`
-
 ## Recently Fixed
 
 - Region numbers (UI labels):
@@ -36,13 +28,54 @@ It is intentionally pragmatic and may be blunt.
   - Added visible suggestion status text to surface failures instead of silently returning empty.
   - Query submission normalizes explicit separators for LANraragi-style multi-term search while preserving spaces inside each term and preserving wildcard tokens.
   - Grid card overlap fix: library grid column minimum now matches card outer width to prevent frame overlap between neighboring cards.
+  - Grid cards now use a fixed tile size so cover/title/artist/group blocks are uniform per card.
+  - Grid spacing was reduced for a denser layout.
+  - Library grid content is now centered in the panel instead of sticking to the left edge.
+  - Grid rendering no longer forces a fixed computed content width, preventing cards/frames from spilling outside the visible area on constrained layouts.
+  - Library root/header/results/card frames were normalized to centered parent-frame alignment.
+  - Removed thumbnail border frame in Library previews (grid + list) while keeping cover overlays/selection behavior.
+  - Added a `Crop Covers` checkbox next to the `Grid|List` layout control to toggle thumbnail crop-to-fill quickly.
+  - Library hover details now only activate while cursor is in the archive results panel.
+  - Increased hover details panel/tag region height to reduce scrolling.
+  - Hover details now keep title fixed while summary+tags share one vertical scroll area.
+  - Added inline query syntax help under the search field (`-tag` negation and wildcard examples).
+  - Added server capability detection for `date_added` sort with automatic fallback to Title when unsupported.
+  - Added `Open in Browser` to Library context menus (grid + list).
+  - Fixed `Open in Browser` URL generation to use LANraragi reader route (`/reader?id=<arcid>`) instead of archive path routing.
   - Files:
     - `Sources/LanraragiDeskApp/Services/TagSuggestionStore.swift`
     - `Sources/LanraragiDeskApp/UI/LibraryView.swift`
+    - `Sources/LanraragiDeskApp/UI/Components/CoverThumb.swift`
+    - `Sources/LanraragiDeskApp/ViewModels/LibraryViewModel.swift`
+
+- Reader navigation + zoom menu:
+  - Added explicit left/right arrow key handling in-reader (in addition to move command handling) for reliable keyboard page turns.
+  - Added `Increase`, `Decrease`, and `Reset` zoom controls in the Reader `View` menu with shortcuts (`Cmd+=`, `Cmd+-`, `Cmd+0`).
+  - Added a reset action/button for zoom inside the Reader view options menu.
+  - Files:
+    - `Sources/LanraragiDeskApp/UI/ReaderView.swift`
+    - `Sources/LanraragiDeskApp/LanraragiDeskApp.swift`
+
+- Duplicates/review workspace layout:
+  - Moved review UI under the Find Duplicate Archives panel within the Duplicates page.
+  - Scan panel now auto-collapses to title-only when a scan completes with results, and can be manually expanded/collapsed.
+  - Removed the redundant "Go To Review" action from completed scan status.
+  - Removed the standalone Review sidebar section; Duplicates is now the only review entrypoint.
+  - Added duplicate workflow activity logging via `AppModel.activity`: scan start/completed/failed/cancelled, mark/remove/clear "Not a match", and archive delete success/failure.
+  - Files:
+    - `Sources/LanraragiDeskApp/UI/RootView.swift`
+    - `Sources/LanraragiDeskApp/ViewModels/DuplicateScanViewModel.swift`
+    - `Sources/LanraragiDeskApp/ViewModels/AppModel.swift`
 
 - Sidebar toggle placement:
   - Removed the default moving split-view sidebar toggle from toolbar.
   - Added a fixed titlebar toggle anchored next to macOS traffic-light controls (same button size as minimize).
+  - Hid the window title text and forced compact titlebar style to prevent titlebar growth/shrink while switching sidebar sections.
+  - Disabled transparent titlebar for the main window so sidebar content no longer intrudes into titlebar space.
+  - Moved window titlebar styling to one-time-per-window configuration to prevent relayout churn when sidebar selection changes.
+  - Kept native toolbar/titlebar visible (compact style) and explicitly cleared split-view navigation title to remove stray `LanraragiDesk` header text.
+  - Added fixed top safe-area spacer in sidebar list for stable clearance below traffic lights + custom sidebar toggle.
+  - Removed plain button styling from sidebar `NavigationLink`s so selection rendering remains stable.
   - File:
     - `Sources/LanraragiDeskApp/UI/RootView.swift`
 
@@ -67,6 +100,27 @@ It is intentionally pragmatic and may be blunt.
     - `Sources/LanraragiDeskApp/UI/SettingsView.swift`
     - `Sources/LanraragiDeskApp/UI/Components/CoverThumb.swift`
 
+- Metadata editor save + tag UX:
+  - Fixed metadata save transport for LANraragi by using `application/x-www-form-urlencoded` in `PUT /api/archives/{id}/metadata` (JSON payloads are rejected by LANraragi's API handler).
+  - Added cover override: metadata editor can set archive thumbnail from a selected page (`PUT /api/archives/{arcid}/thumbnail?page=<n>`), with thumbnail cache invalidation.
+  - Added archive delete from metadata editor, with confirmation and caller-specific refresh behavior for Library and Duplicates workflows.
+  - Hardened metadata-editor delete flow in both Library and Duplicates:
+    - Archive deletion is now idempotent in app-layer transport handling (404/410 treated as already deleted).
+    - Library path explicitly clears selection state for deleted archive IDs.
+    - Duplicates path now invalidates deleted archive thumbnails, rebuilds groups from surviving pairs, and prunes stale "Not a match" records (in-memory + index store).
+  - Metadata editor now normalizes tags, shows grouped/sorted tag chips (matching Library hover grouping), renders date tags human-readably, and supports remove-by-chip plus autocomplete add flow.
+  - Raw tags CSV editor field is now hidden; metadata tag editing uses grouped chips + add/remove actions.
+  - Save now preserves untouched fields from latest metadata so title/tags/summary are always sent.
+  - Replaced `Form`-based field layout with explicit full-width sections so title and summary text placement stays correct during editing.
+  - Files:
+    - `Packages/LanraragiKit/Sources/LanraragiKit/HTTP/LANraragiClient.swift`
+    - `Sources/LanraragiDeskApp/Services/ArchiveLoader.swift`
+    - `Sources/LanraragiDeskApp/Services/ThumbnailLoader.swift`
+    - `Sources/LanraragiDeskApp/UI/ArchiveMetadataEditorView.swift`
+    - `Sources/LanraragiDeskApp/UI/LibraryView.swift`
+    - `Sources/LanraragiDeskApp/UI/PairReviewView.swift`
+    - `Sources/LanraragiDeskApp/ViewModels/DuplicateScanViewModel.swift`
+
 - Performance setting expectations:
   - `network.maxConnectionsPerHost` affects URLSession `httpMaximumConnectionsPerHost` only.
   - App-level limiters are still hard-coded (`AsyncLimiter(limit: 4)` in loaders and `IndexerConfig(concurrency: 4)` for indexing).
@@ -77,24 +131,6 @@ It is intentionally pragmatic and may be blunt.
     - `Sources/LanraragiDeskApp/ViewModels/DuplicateScanViewModel.swift`
 
 ## High Priority: Missing From Requested Plan
-
-- Library (search and quality):
-  - Add a small "help" on LANraragi query syntax and negation (`-tag:`).
-  - Category selector is now server-backed (pinned categories show as buttons).
-  - Tag suggestions are shown under the search field; hover popover tag chips can be clicked to add to search.
-  - Add server capability detection for `date_added` sort (today it falls back on HTTP 400/422 only).
-  - Consider adding "Open in browser" from library context menu.
-  - Files:
-    - `Sources/LanraragiDeskApp/UI/LibraryView.swift`
-    - `Sources/LanraragiDeskApp/ViewModels/LibraryViewModel.swift`
-
-- Metadata editor:
-  - Missing: set/override cover page (LANraragi supports custom cover selection; needs API endpoint wiring).
-  - Missing: archive delete from editor (optional).
-  - Tag editing is a raw comma string; consider structured tag chips editor later.
-  - Files:
-    - `Sources/LanraragiDeskApp/UI/ArchiveMetadataEditorView.swift`
-    - `Packages/LanraragiKit/Sources/LanraragiKit/HTTP/LANraragiClient.swift`
 
 - Reader:
   - Ensure no controls "hide" due to toolbar overflow; current strategy is stable-width items and no `Spacer()`, but verify on narrow windows.

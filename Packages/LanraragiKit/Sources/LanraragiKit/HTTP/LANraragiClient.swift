@@ -105,19 +105,32 @@ public final class LANraragiClient: @unchecked Sendable {
         tags: String,
         summary: String
     ) async throws {
-        let body: [String: Any] = [
-            "title": title,
-            "tags": tags,
-            "summary": summary,
-        ]
-        let data = try JSONSerialization.data(withJSONObject: body, options: [])
+        let data = makeFormBody([
+            URLQueryItem(name: "title", value: title),
+            URLQueryItem(name: "tags", value: tags),
+            URLQueryItem(name: "summary", value: summary),
+        ])
 
         let url = try makeURL(path: "/api/archives/\(arcid)/metadata")
         var req = URLRequest(url: url)
         req.httpMethod = "PUT"
         applyDefaultHeaders(to: &req)
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
         req.httpBody = data
+
+        try await performNoContent(req)
+    }
+
+    public func updateArchiveThumbnail(arcid: String, page: Int? = nil) async throws {
+        var queryItems: [URLQueryItem] = []
+        if let page {
+            queryItems.append(URLQueryItem(name: "page", value: String(max(1, page))))
+        }
+
+        let url = try makeURL(path: "/api/archives/\(arcid)/thumbnail", queryItems: queryItems)
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        applyDefaultHeaders(to: &req)
 
         try await performNoContent(req)
     }
@@ -529,5 +542,12 @@ public final class LANraragiClient: @unchecked Sendable {
 
         out.sort { a, b in a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending }
         return out
+    }
+
+    private func makeFormBody(_ items: [URLQueryItem]) -> Data {
+        var comps = URLComponents()
+        comps.queryItems = items
+        let encoded = comps.percentEncodedQuery ?? ""
+        return Data(encoded.utf8)
     }
 }

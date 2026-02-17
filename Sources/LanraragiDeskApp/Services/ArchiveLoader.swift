@@ -67,6 +67,39 @@ actor ArchiveLoader {
         return updated
     }
 
+    func updateThumbnail(
+        profile: Profile,
+        arcid: String,
+        page: Int? = nil
+    ) async throws {
+        let client = try await makeClient(profile: profile)
+        try await limiter.withPermit {
+            try await client.updateArchiveThumbnail(arcid: arcid, page: page)
+        }
+    }
+
+    func deleteArchive(profile: Profile, arcid: String) async throws {
+        let client = try await makeClient(profile: profile)
+        do {
+            try await limiter.withPermit {
+                try await client.deleteArchive(arcid: arcid)
+            }
+        } catch let LANraragiError.httpStatus(code, _) where code == 404 || code == 410 {
+            // Treat delete as idempotent if the archive is already gone server-side.
+        }
+
+        // Drop cached references for the deleted archive.
+        metaCache[arcid] = nil
+        metaRawCache[arcid] = nil
+        pagesCache[arcid] = nil
+        metaInflight[arcid]?.cancel()
+        metaRawInflight[arcid]?.cancel()
+        pagesInflight[arcid]?.cancel()
+        metaInflight[arcid] = nil
+        metaRawInflight[arcid] = nil
+        pagesInflight[arcid] = nil
+    }
+
     func metadataPrettyJSON(profile: Profile, arcid: String) async throws -> String {
         if let s = metaRawCache[arcid] { return s }
         if let t = metaRawInflight[arcid] { return try await t.value }
@@ -97,7 +130,7 @@ actor ArchiveLoader {
     }
 
     func pageURLs(profile: Profile, arcid: String) async throws -> [URL] {
-        if let p = pagesCache[arcid] { return p }
+        if let p = pagesCache[arcid], p.count > 1 { return p }
         if let t = pagesInflight[arcid] { return try await t.value }
 
         let task = Task<[URL], Error> {
@@ -105,7 +138,14 @@ actor ArchiveLoader {
                 let client = try await makeClient(profile: profile)
                 let resp: ArchiveFilesResponse
                 do {
-                    resp = try await client.getArchiveFiles(arcid: arcid, force: false)
+                    let initial = try await client.getArchiveFiles(arcid: arcid, force: false)
+                    if initial.pages.count <= 1 {
+                        // Some servers return only the first extracted page unless forced.
+                        let forced = try await client.getArchiveFiles(arcid: arcid, force: true)
+                        resp = forced.pages.count > initial.pages.count ? forced : initial
+                    } else {
+                        resp = initial
+                    }
                 } catch let LANraragiError.httpStatus(code, _) where code == 400 {
                     // Some LANraragi setups return 400 unless file listing is forced (e.g. stale extraction state).
                     resp = try await client.getArchiveFiles(arcid: arcid, force: true)

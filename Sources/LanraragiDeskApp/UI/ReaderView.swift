@@ -8,7 +8,7 @@ struct ReaderView: View {
     let route: ReaderRoute
 
     @AppStorage("reader.autoAdvanceEnabled") private var autoAdvanceEnabled: Bool = false
-    @AppStorage("reader.autoAdvanceSeconds") private var autoAdvanceSeconds: Double = 8
+    @AppStorage("reader.autoAdvanceSeconds") private var autoAdvanceSeconds: Double = 10
     @AppStorage("reader.readingDirection") private var readingDirectionRaw: String = ReaderDirection.ltr.rawValue
     @AppStorage("reader.twoPageSpread") private var twoPageSpread: Bool = false
     @AppStorage("reader.fitMode") private var fitModeRaw: String = ReaderFitMode.fit.rawValue
@@ -29,6 +29,9 @@ struct ReaderView: View {
     @State private var prefetchTask: Task<Void, Never>?
     // Reserved for future in-reader UI toggles.
     // (Toolbar items should remain stable; avoid hiding controls unexpectedly.)
+
+    private static let autoAdvanceMinSeconds: Double = 10
+    private static let autoAdvanceMaxSeconds: Double = 60
 
     var body: some View {
         ZStack {
@@ -51,49 +54,14 @@ struct ReaderView: View {
                     .frame(width: 0, height: 0)
                 )
         }
-        .navigationTitle(titleText)
+        .navigationTitle("")
         .toolbar {
-            ToolbarItemGroup(placement: .automatic) {
-                if readingDirection == .rtl {
-                    Button {
-                        goNext(userInitiated: true)
-                    } label: {
-                        Image(systemName: "chevron.left")
-                    }
-                    .help("Next page")
-                    .disabled(!canGoNext)
+            ToolbarItem(placement: .principal) {
+                pageNavigationToolbarControl
+            }
 
-                    Button {
-                        goPrev(userInitiated: true)
-                    } label: {
-                        Image(systemName: "chevron.right")
-                    }
-                    .help("Previous page")
-                    .disabled(pageIndex <= 0)
-                } else {
-                    Button {
-                        goPrev(userInitiated: true)
-                    } label: {
-                        Image(systemName: "chevron.left")
-                    }
-                    .help("Previous page")
-                    .disabled(pageIndex <= 0)
-
-                    Button {
-                        goNext(userInitiated: true)
-                    } label: {
-                        Image(systemName: "chevron.right")
-                    }
-                    .help("Next page")
-                    .disabled(!canGoNext)
-                }
-
-                Text(pageCountText)
-                    .font(.callout.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(minWidth: 78, alignment: .leading)
-
-                Divider()
+            ToolbarItemGroup(placement: .primaryAction) {
+                autoAdvanceToolbarControl
 
                 Menu {
                     Toggle("Two-page spread", isOn: $twoPageSpread)
@@ -106,57 +74,31 @@ struct ReaderView: View {
                         }
                     }
 
-                    HStack {
-                        Text("Zoom")
-                        Slider(value: $zoomPercent, in: 50...200, step: 5)
-                            .frame(width: 180)
+                    Menu("Zoom") {
+                        Button("Increase") {
+                            increaseZoom()
+                        }
+                        .keyboardShortcut("=", modifiers: [.command])
+
+                        Button("Decrease") {
+                            decreaseZoom()
+                        }
+                        .keyboardShortcut("-", modifiers: [.command])
+
+                        Divider()
+
+                        Button("Reset") {
+                            resetZoom()
+                        }
+                        .keyboardShortcut("0", modifiers: [.command])
                     }
+
+                    Text("Current zoom: \(Int(zoomPercent.rounded()))%")
                 } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "rectangle.3.group")
-                        Text("View")
-                    }
+                    Image(systemName: "rectangle.3.group")
+                        .imageScale(.medium)
                 }
                 .help("Reader view options")
-            }
-
-            // Keep the toggle+slider as a stable-width toolbar item, so enabling auto-advance doesn't
-            // cause the controls to move into the overflow.
-            ToolbarItem(placement: .automatic) {
-                HStack(spacing: 10) {
-                    Toggle("Auto-advance", isOn: $autoAdvanceEnabled)
-                        .toggleStyle(.switch)
-
-                    Slider(value: $autoAdvanceSeconds, in: 2...30, step: 1)
-                        .frame(width: 160)
-                        .disabled(!autoAdvanceEnabled)
-                        .opacity(autoAdvanceEnabled ? 1 : 0.35)
-
-                    Text("\(Int(autoAdvanceSeconds))s")
-                        .font(.callout.monospacedDigit())
-                        .foregroundStyle(.primary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(.thinMaterial)
-                        .clipShape(Capsule())
-                        .accessibilityLabel("Auto-advance seconds")
-                }
-                .help("Auto-advance to the next page after the selected delay.")
-                .frame(width: 330, alignment: .leading)
-            }
-
-            // Countdown is separate so it can overflow independently without hiding the controls.
-            ToolbarItem(placement: .automatic) {
-                if autoAdvanceEnabled, let countdownRemaining {
-                    Text("Next in \(countdownRemaining)s")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(.thinMaterial)
-                        .clipShape(Capsule())
-                        .help("Auto-advance countdown")
-                }
             }
         }
         .onMoveCommand { dir in
@@ -180,6 +122,9 @@ struct ReaderView: View {
         .task(id: route) {
             await loadArchive()
         }
+        .onAppear {
+            clampAutoAdvanceSecondsIfNeeded()
+        }
         .onChange(of: pageIndex) { _, _ in
             loadCurrentPage()
             restartAutoAdvance(reason: .pageChanged)
@@ -197,7 +142,12 @@ struct ReaderView: View {
         .onChange(of: autoAdvanceEnabled) { _, _ in
             restartAutoAdvance(reason: .settingsChanged)
         }
-        .onChange(of: autoAdvanceSeconds) { _, _ in
+        .onChange(of: autoAdvanceSeconds) { _, newValue in
+            let clamped = min(Self.autoAdvanceMaxSeconds, max(Self.autoAdvanceMinSeconds, newValue))
+            if clamped != newValue {
+                autoAdvanceSeconds = clamped
+                return
+            }
             restartAutoAdvance(reason: .settingsChanged)
         }
         .onChange(of: readingDirectionRaw) { _, _ in
@@ -223,6 +173,81 @@ struct ReaderView: View {
     private var canGoNext: Bool {
         guard !pages.isEmpty else { return false }
         return (pageIndex + step) <= pages.count - 1
+    }
+
+    private var clampedAutoAdvanceSeconds: Double {
+        min(Self.autoAdvanceMaxSeconds, max(Self.autoAdvanceMinSeconds, autoAdvanceSeconds))
+    }
+
+    private var activeCountdownSeconds: Int {
+        countdownRemaining ?? Int(clampedAutoAdvanceSeconds.rounded())
+    }
+
+    private var autoAdvanceDisplayedSeconds: Int {
+        autoAdvanceEnabled ? activeCountdownSeconds : Int(clampedAutoAdvanceSeconds.rounded())
+    }
+
+    private var leftToolbarHelp: String {
+        readingDirection == .rtl ? "Next page" : "Previous page"
+    }
+
+    private var rightToolbarHelp: String {
+        readingDirection == .rtl ? "Previous page" : "Next page"
+    }
+
+    private var canGoLeftFromToolbar: Bool {
+        if readingDirection == .rtl {
+            return canGoNext
+        }
+        return pageIndex > 0
+    }
+
+    private var canGoRightFromToolbar: Bool {
+        if readingDirection == .rtl {
+            return pageIndex > 0
+        }
+        return canGoNext
+    }
+
+    private var pageNavigationToolbarControl: some View {
+        HStack(spacing: 10) {
+            Button {
+                if readingDirection == .rtl {
+                    goNext(userInitiated: true)
+                } else {
+                    goPrev(userInitiated: true)
+                }
+            } label: {
+                Image(systemName: "chevron.left")
+                    .imageScale(.medium)
+            }
+            .buttonStyle(.borderless)
+            .disabled(!canGoLeftFromToolbar)
+            .help(leftToolbarHelp)
+
+            Text(pageCountText)
+                .font(.callout.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 58, alignment: .center)
+
+            Button {
+                if readingDirection == .rtl {
+                    goPrev(userInitiated: true)
+                } else {
+                    goNext(userInitiated: true)
+                }
+            } label: {
+                Image(systemName: "chevron.right")
+                    .imageScale(.medium)
+            }
+            .buttonStyle(.borderless)
+            .disabled(!canGoRightFromToolbar)
+            .help(rightToolbarHelp)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(.quaternary.opacity(0.3))
+        .clipShape(Capsule())
     }
 
     @ViewBuilder
@@ -283,19 +308,51 @@ struct ReaderView: View {
         .help("Click to change pages")
     }
 
-    private var titleText: String {
-        if let profile = appModel.profileStore.profiles.first(where: { $0.id == route.profileID }) {
-            return "Reader • \(profile.name)"
-        }
-        return "Reader"
-    }
-
     private var pageCountText: String {
         guard !pages.isEmpty else { return "—/—" }
         return "\(pageIndex + 1)/\(pages.count)"
     }
 
+    private var autoAdvanceToolbarControl: some View {
+        HStack(spacing: 6) {
+            Button {
+                autoAdvanceEnabled.toggle()
+            } label: {
+                Image(systemName: autoAdvanceEnabled ? "clock.badge.checkmark" : "clock")
+                    .imageScale(.medium)
+            }
+            .buttonStyle(.borderless)
+            .help("Toggle auto page turn")
+
+            Slider(
+                value: $autoAdvanceSeconds,
+                in: Self.autoAdvanceMinSeconds...Self.autoAdvanceMaxSeconds,
+                step: 1
+            )
+            .frame(width: 84)
+            .controlSize(.small)
+
+            Text("\(autoAdvanceDisplayedSeconds)s")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 36, alignment: .trailing)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(.quaternary.opacity(0.3))
+        .clipShape(Capsule())
+        .overlay {
+            Capsule()
+                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 1)
+        }
+        .frame(width: 164, alignment: .leading)
+        .help("Auto page turn")
+    }
+
     private func loadArchive() async {
+        // Auto page turn should always start disabled when opening a new archive.
+        autoAdvanceEnabled = false
         pages = []
         image = nil
         imageB = nil
@@ -429,7 +486,7 @@ struct ReaderView: View {
             return
         }
 
-        let seconds = max(2, min(30, Int(autoAdvanceSeconds.rounded())))
+        let seconds = Int(clampedAutoAdvanceSeconds.rounded())
         countdownRemaining = seconds
 
         timerTask = Task { @MainActor in
@@ -477,10 +534,21 @@ struct ReaderView: View {
     }
 
     private func handleKeyDown(_ event: NSEvent) {
-        // Arrow keys handled via `.onMoveCommand`.
         // Space: next page. Shift-space: previous page.
         // Esc: close.
         switch event.keyCode {
+        case 123: // left arrow
+            if readingDirection == .rtl {
+                goNext(userInitiated: true)
+            } else {
+                goPrev(userInitiated: true)
+            }
+        case 124: // right arrow
+            if readingDirection == .rtl {
+                goPrev(userInitiated: true)
+            } else {
+                goNext(userInitiated: true)
+            }
         case 49: // space
             if event.modifierFlags.contains(.shift) {
                 goPrev(userInitiated: true)
@@ -490,13 +558,32 @@ struct ReaderView: View {
         case 53: // escape
             dismiss()
         case 24, 69: // + on some keyboards, numpad +
-            zoomPercent = min(200, zoomPercent + 10)
+            increaseZoom()
         case 27, 78: // - on some keyboards, numpad -
-            zoomPercent = max(50, zoomPercent - 10)
+            decreaseZoom()
         case 29: // 0
-            zoomPercent = 100
+            resetZoom()
         default:
             break
+        }
+    }
+
+    private func increaseZoom() {
+        zoomPercent = min(200, zoomPercent + 10)
+    }
+
+    private func decreaseZoom() {
+        zoomPercent = max(50, zoomPercent - 10)
+    }
+
+    private func resetZoom() {
+        zoomPercent = 100
+    }
+
+    private func clampAutoAdvanceSecondsIfNeeded() {
+        let clamped = clampedAutoAdvanceSeconds
+        if clamped != autoAdvanceSeconds {
+            autoAdvanceSeconds = clamped
         }
     }
 }

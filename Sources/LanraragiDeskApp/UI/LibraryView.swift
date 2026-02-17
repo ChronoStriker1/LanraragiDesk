@@ -9,6 +9,8 @@ struct LibraryView: View {
 
     let profile: Profile
 
+    @AppStorage("thumbs.cropToFill") private var cropThumbsToFill: Bool = false
+
     @StateObject private var vm = LibraryViewModel()
     @State private var queryDraft: String = ""
     @State private var tagSuggestions: [TagSuggestionStore.Suggestion] = []
@@ -16,6 +18,7 @@ struct LibraryView: View {
     @State private var tagSuggestionsLoading: Bool = false
     @State private var suggestionTask: Task<Void, Never>?
     @State private var editingMeta: EditorRoute?
+    @State private var hoveringArchiveResultsArea: Bool = false
     @FocusState private var searchFocused: Bool
 
     // Used by list/table view to avoid refetching metadata per-cell.
@@ -30,7 +33,7 @@ struct LibraryView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .center, spacing: 14) {
             header
 
             if let banner = vm.bannerText {
@@ -41,23 +44,41 @@ struct LibraryView: View {
                     .padding(.vertical, 10)
                     .background(.thinMaterial)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .frame(maxWidth: .infinity, alignment: .center)
             }
 
             if let err = vm.errorText {
                 Text("Error: \(err)")
                     .font(.callout)
                     .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .center)
             }
 
             results
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .sheet(item: $editingMeta) { route in
             ArchiveMetadataEditorView(
                 profile: profile,
                 arcid: route.arcid,
                 initialMeta: nil,
                 archives: appModel.archives,
-                onSaved: { _ in }
+                onSaved: { updated in
+                    metaByArcid[updated.arcid] = updated
+                },
+                onDelete: { arcid in
+                    do {
+                        try await appModel.archives.deleteArchive(profile: profile, arcid: arcid)
+                        await appModel.thumbnails.invalidate(profile: profile, arcid: arcid)
+                        appModel.selection.remove(arcid)
+                        metaByArcid[arcid] = nil
+                        vm.refresh(profile: profile)
+                        appModel.activity.add(.init(kind: .action, title: "Deleted archive", detail: arcid))
+                    } catch {
+                        appModel.activity.add(.init(kind: .error, title: "Delete archive failed", detail: "\(arcid)\n\(error)"))
+                        throw error
+                    }
+                }
             )
             .environmentObject(appModel)
         }
@@ -113,6 +134,10 @@ struct LibraryView: View {
                 .pickerStyle(.segmented)
                 .frame(width: 140)
 
+                Toggle("Crop Covers", isOn: $cropThumbsToFill)
+                    .toggleStyle(.checkbox)
+                    .font(.callout)
+
                 if vm.layout == .grid {
                     Picker("Sort", selection: $vm.sort) {
                         ForEach(LibraryViewModel.Sort.allCases) { s in
@@ -146,6 +171,12 @@ struct LibraryView: View {
                     }
 
                     tagSuggestionList
+
+                    Text("Query tips: separate terms with commas, use `-tag` for negation, and wildcards like `artist:*mura*`.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .zIndex(10)
             }
@@ -201,6 +232,7 @@ struct LibraryView: View {
         .padding(18)
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .frame(maxWidth: .infinity, alignment: .center)
         .debugFrameNumber(1)
     }
 
@@ -312,6 +344,21 @@ struct LibraryView: View {
             + ", "
     }
 
+    private func openArchiveInBrowser(_ arcid: String) {
+        let trimmed = arcid.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard var comps = URLComponents(url: profile.baseURL, resolvingAgainstBaseURL: false) else { return }
+        comps.path = "/reader"
+        comps.queryItems = [URLQueryItem(name: "id", value: trimmed)]
+        guard let url = comps.url else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func openReader(_ arcid: String) {
+        appModel.setActiveReader(profileID: profile.id, arcid: arcid)
+        openWindow(id: "reader")
+    }
+
     private func handleSearchSubmit() {
         let normalized = normalizeLANraragiQuery(queryDraft)
         queryDraft = normalized
@@ -323,18 +370,36 @@ struct LibraryView: View {
     private var results: some View {
         switch vm.layout {
         case .grid:
+            let spacing: CGFloat = 8
+            let columns = [GridItem(
+                .adaptive(minimum: LibraryCard.outerCardWidth, maximum: LibraryCard.outerCardWidth),
+                spacing: spacing,
+                alignment: .top
+            )]
+
             ScrollView {
                 LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: LibraryCard.outerCardWidth), spacing: 12, alignment: .top)],
-                    alignment: .leading,
-                    spacing: 12
+                    columns: columns,
+                    alignment: .center,
+                    spacing: spacing
                 ) {
                     ForEach(vm.arcids, id: \.self) { arcid in
-                        LibraryCard(profile: profile, arcid: arcid, onSelectTag: addTagToQuery)
+                        LibraryCard(
+                            profile: profile,
+                            arcid: arcid,
+                            allowHoverDetails: hoveringArchiveResultsArea,
+                            onSelectTag: addTagToQuery,
+                            onOpenReader: {
+                                openReader(arcid)
+                            }
+                        )
                             .environmentObject(appModel)
                             .contextMenu {
                                 Button("Open Reader") {
-                                    openWindow(value: ReaderRoute(profileID: profile.id, arcid: arcid))
+                                    openReader(arcid)
+                                }
+                                Button("Open in Browser") {
+                                    openArchiveInBrowser(arcid)
                                 }
                                 Button("Edit Metadata…") {
                                     editingMeta = EditorRoute(arcid: arcid)
@@ -345,24 +410,26 @@ struct LibraryView: View {
                                     NSPasteboard.general.setString(arcid, forType: .string)
                                 }
                             }
-                            .onTapGesture {
-                                openWindow(value: ReaderRoute(profileID: profile.id, arcid: arcid))
-                            }
                             .onAppear {
                                 if arcid == vm.arcids.last {
                                     Task { await vm.loadMore(profile: profile) }
                                 }
                             }
                     }
-
-                    if vm.isLoading {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                            .padding(20)
-                            .gridCellColumns(2)
-                    }
                 }
-                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, spacing)
+                .padding(.top, 6)
+
+                if vm.isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding(20)
+                }
+            }
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                hoveringArchiveResultsArea = hovering
             }
             .background(.thinMaterial)
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -409,14 +476,19 @@ struct LibraryView: View {
             .width(min: 54, ideal: 54, max: 54)
 
             TableColumn("Title", value: \.title) { row in
-                HStack(spacing: 10) {
-                    CoverThumb(profile: profile, arcid: row.arcid, thumbnails: appModel.thumbnails, size: .init(width: 38, height: 52))
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                Button {
+                    openReader(row.arcid)
+                } label: {
+                    HStack(spacing: 10) {
+                        CoverThumb(profile: profile, arcid: row.arcid, thumbnails: appModel.thumbnails, size: .init(width: 38, height: 52), showsBorder: false)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-                    Text(row.title)
-                        .font(.callout)
-                        .lineLimit(1)
+                        Text(row.title)
+                            .font(.callout)
+                            .lineLimit(1)
+                    }
                 }
+                .buttonStyle(.plain)
                 .task(id: row.arcid) {
                     if metaByArcid[row.arcid] != nil { return }
                     do {
@@ -431,12 +503,12 @@ struct LibraryView: View {
                         Task { await vm.loadMore(profile: profile) }
                     }
                 }
-                .onTapGesture(count: 2) {
-                    openWindow(value: ReaderRoute(profileID: profile.id, arcid: row.arcid))
-                }
                 .contextMenu {
                     Button("Open Reader") {
-                        openWindow(value: ReaderRoute(profileID: profile.id, arcid: row.arcid))
+                        openReader(row.arcid)
+                    }
+                    Button("Open in Browser") {
+                        openArchiveInBrowser(row.arcid)
                     }
                     Button("Edit Metadata…") {
                         editingMeta = EditorRoute(arcid: row.arcid)
@@ -681,13 +753,17 @@ private struct LibraryListRow: Identifiable, Hashable {
 }
 
 private struct LibraryCard: View {
-    static let outerCardWidth: CGFloat = 202
+    static let outerCardWidth: CGFloat = 196
+    private static let outerCardHeight: CGFloat = 340
+    private static let coverSize: CGSize = .init(width: 160, height: 210)
 
     @EnvironmentObject private var appModel: AppModel
 
     let profile: Profile
     let arcid: String
+    var allowHoverDetails: Bool = true
     let onSelectTag: (String) -> Void
+    let onOpenReader: () -> Void
 
     @State private var meta: ArchiveMetadata?
     @State private var title: String = "Loading…"
@@ -703,54 +779,46 @@ private struct LibraryCard: View {
         return f
     }()
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            CoverThumb(profile: profile, arcid: arcid, thumbnails: appModel.thumbnails, size: .init(width: 160, height: 210))
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(alignment: .topLeading) {
-                    ZStack(alignment: .topLeading) {
-                        if meta?.isnew == true {
-                            CoverBadge(text: "NEW", background: .green.opacity(0.55))
-                        }
+    private func openReaderFromCard() {
+        showDetails = false
+        onOpenReader()
+    }
 
-                        // Always positioned top-left; on hover it overlays other badges (ex: NEW).
-                        if hoveringCover {
-                            Button {
-                                appModel.selection.toggle(arcid)
-                            } label: {
-                                Image(systemName: appModel.selection.contains(arcid) ? "checkmark.circle.fill" : "circle")
-                                    .imageScale(.large)
-                                    .foregroundStyle(appModel.selection.contains(arcid) ? .green : .white)
+    var body: some View {
+        VStack(alignment: .center, spacing: 8) {
+            ZStack(alignment: .topLeading) {
+                Button {
+                    openReaderFromCard()
+                } label: {
+                    CoverThumb(profile: profile, arcid: arcid, thumbnails: appModel.thumbnails, size: Self.coverSize, showsBorder: false)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .overlay(alignment: .topLeading) {
+                            if meta?.isnew == true {
+                                CoverBadge(text: "NEW", background: .green.opacity(0.55))
                                     .padding(8)
-                                    .background(.black.opacity(0.22))
-                                    .clipShape(Circle())
-                                    .shadow(color: .black.opacity(0.35), radius: 2, x: 0, y: 1)
                             }
-                            .buttonStyle(.plain)
-                            .help("Select for batch operations")
-                            .zIndex(200)
                         }
-                    }
-                    .padding(8)
-                }
-                .overlay(alignment: .topTrailing) {
-                    ZStack(alignment: .topTrailing) {
-                        if let d = ArchiveMetaHelpers.dateAdded(meta) {
-                            CoverBadge(text: Self.dateFormatter.string(from: d))
+                        .overlay(alignment: .topTrailing) {
+                            ZStack(alignment: .topTrailing) {
+                                if let d = ArchiveMetaHelpers.dateAdded(meta) {
+                                    CoverBadge(text: Self.dateFormatter.string(from: d))
+                                        .padding(8)
+                                }
+                            }
+                        }
+                        .overlay(alignment: .bottom) {
+                            if let pages = meta?.pagecount, pages > 0 {
+                                HStack {
+                                    Spacer(minLength: 0)
+                                    CoverBadge(text: "\(pages) pages")
+                                    Spacer(minLength: 0)
+                                }
                                 .padding(8)
+                            }
                         }
-                    }
                 }
-                .overlay(alignment: .bottom) {
-                    if let pages = meta?.pagecount, pages > 0 {
-                        HStack {
-                            Spacer(minLength: 0)
-                            CoverBadge(text: "\(pages) pages")
-                            Spacer(minLength: 0)
-                        }
-                        .padding(8)
-                    }
-                }
+                .buttonStyle(.plain)
+                .help("Open reader")
                 .onHover { hovering in
                     hoveringCover = hovering
                     updatePopoverVisibility()
@@ -771,31 +839,63 @@ private struct LibraryCard: View {
                     }
                 }
 
-            Text(title)
-                .font(.callout)
-                .lineLimit(nil)
-                .fixedSize(horizontal: false, vertical: true)
-
-            let artists = ArchiveMetaHelpers.artists(meta)
-            if !artists.isEmpty {
-                Text("Artist: " + artists.joined(separator: ", "))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(nil)
-                    .fixedSize(horizontal: false, vertical: true)
+                if hoveringCover {
+                    // Keep selection as a separate button so the cover's single-click open stays reliable.
+                    Button {
+                        appModel.selection.toggle(arcid)
+                    } label: {
+                        Image(systemName: appModel.selection.contains(arcid) ? "checkmark.circle.fill" : "circle")
+                            .imageScale(.large)
+                            .foregroundStyle(appModel.selection.contains(arcid) ? .green : .white)
+                            .padding(8)
+                            .background(.black.opacity(0.22))
+                            .clipShape(Circle())
+                            .shadow(color: .black.opacity(0.35), radius: 2, x: 0, y: 1)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Select for batch operations")
+                    .padding(16)
+                    .zIndex(200)
+                }
             }
 
-            let groups = ArchiveMetaHelpers.groups(meta)
-            if !groups.isEmpty {
-                Text("Group: " + groups.joined(separator: ", "))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(nil)
-                    .fixedSize(horizontal: false, vertical: true)
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.callout)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .center)
+
+                    let artistLine = ArchiveMetaHelpers.artists(meta).joined(separator: ", ")
+                    Text("Artist: " + (artistLine.isEmpty ? "—" : artistLine))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .center)
+
+                    let groupLine = ArchiveMetaHelpers.groups(meta).joined(separator: ", ")
+                    Text("Group: " + (groupLine.isEmpty ? "—" : groupLine))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+            }
+            .scrollIndicators(.hidden)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .onTapGesture {
+                openReaderFromCard()
             }
         }
-        .frame(width: 182, alignment: .topLeading)
         .padding(10)
+        .frame(width: Self.outerCardWidth, height: Self.outerCardHeight, alignment: .top)
         .background(.quaternary.opacity(0.35))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay {
@@ -818,7 +918,12 @@ private struct LibraryCard: View {
     private func updatePopoverVisibility() {
         popoverCloseTask?.cancel()
 
-        if hoveringCover || hoveringPopover {
+        if hoveringCover {
+            showDetails = allowHoverDetails
+            return
+        }
+
+        if hoveringPopover {
             showDetails = true
             return
         }
@@ -860,7 +965,7 @@ private struct LibraryRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            CoverThumb(profile: profile, arcid: arcid, thumbnails: appModel.thumbnails, size: .init(width: 54, height: 72))
+            CoverThumb(profile: profile, arcid: arcid, thumbnails: appModel.thumbnails, size: .init(width: 54, height: 72), showsBorder: false)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(alignment: .topLeading) {
                     ZStack(alignment: .topLeading) {
@@ -1016,42 +1121,48 @@ private struct ArchiveHoverDetailsView: View {
     let onSelectTag: (String) -> Void
 
     var body: some View {
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text(title.isEmpty ? "Untitled" : title)
-                    .font(.headline)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title.isEmpty ? "Untitled" : title)
+                .font(.headline)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Summary")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text(summary)
-                            .font(.callout)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                    } else {
-                        Text("No summary.")
-                            .font(.callout)
+            Divider()
+
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Summary")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                        if !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text(summary)
+                                .font(.callout)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            Text("No summary.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Tags")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TagGroupsView(tags: tags, onSelectTag: onSelectTag)
                     }
                 }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Tags")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TagGroupsView(tags: tags, onSelectTag: onSelectTag)
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
+            .scrollIndicators(.visible)
         }
-        .scrollIndicators(.visible)
-        .frame(width: 520, height: 340)
+        .padding(14)
+        .frame(width: 520, height: 460)
     }
 }
 
@@ -1116,27 +1227,23 @@ private struct TagGroupsView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         } else {
-            ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(groups, id: \.0) { ns, items in
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(ns == "tag" ? "Tags" : ns)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(groups, id: \.0) { ns, items in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(ns == "tag" ? "Tags" : ns)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
 
-                            VStack(alignment: .leading, spacing: 8) {
-                                ForEach(items, id: \.self) { t in
-                                    TagChip(text: t.display) {
-                                        onSelectTag(t.rawToken)
-                                    }
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(items, id: \.self) { t in
+                                TagChip(text: t.display) {
+                                    onSelectTag(t.rawToken)
                                 }
                             }
                         }
                     }
                 }
             }
-            .scrollIndicators(.visible)
-            .frame(maxHeight: 190)
         }
     }
 }

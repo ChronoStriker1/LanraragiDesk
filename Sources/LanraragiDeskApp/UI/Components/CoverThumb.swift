@@ -23,6 +23,7 @@ struct CoverThumb: View {
     let thumbnails: ThumbnailLoader
     let size: CGSize
     let contentInset: CGFloat
+    let showsBorder: Bool
 
     @State private var image: NSImage?
     @State private var errorText: String?
@@ -35,18 +36,22 @@ struct CoverThumb: View {
         arcid: String,
         thumbnails: ThumbnailLoader,
         size: CGSize = .init(width: 56, height: 72),
-        contentInset: CGFloat = 4
+        contentInset: CGFloat = 4,
+        showsBorder: Bool = true
     ) {
         self.profile = profile
         self.arcid = arcid
         self.thumbnails = thumbnails
         self.size = size
         self.contentInset = contentInset
+        self.showsBorder = showsBorder
     }
 
     var body: some View {
+        let clipShape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+
         ZStack {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            clipShape
                 .fill(.quaternary)
 
             if let image {
@@ -74,9 +79,13 @@ struct CoverThumb: View {
             }
         }
         .frame(width: size.width, height: size.height)
+        .clipShape(clipShape)
+        .contentShape(clipShape)
         .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 1)
+            if showsBorder {
+                clipShape
+                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 1)
+            }
         }
         .task(id: arcid) {
             // When switching between pairs, the view may be reused; reload for the new arcid.

@@ -28,6 +28,7 @@ final class DuplicateScanViewModel: ObservableObject {
 
     let thumbnails: ThumbnailLoader
     let archives: ArchiveLoader
+    var activitySink: ((ActivityEvent) -> Void)?
 
     private var task: Task<Void, Never>?
     private var runID: UUID?
@@ -37,11 +38,32 @@ final class DuplicateScanViewModel: ObservableObject {
         self.archives = archives
     }
 
+    private func log(_ kind: ActivityEvent.Kind, _ title: String, detail: String? = nil) {
+        activitySink?(.init(kind: kind, title: title, detail: detail))
+    }
+
     func start(profile: Profile) {
-        guard task == nil else { return }
+        guard task == nil else {
+            log(.warning, "Duplicate scan already running")
+            return
+        }
 
         let rid = UUID()
         runID = rid
+
+        let strictnessLabel: String = {
+            switch strictness {
+            case .strict: return "Strict"
+            case .balanced: return "Balanced"
+            case .loose: return "Loose"
+            }
+        }()
+
+        log(
+            .action,
+            "Duplicate scan started",
+            detail: "Mode: \(strictnessLabel) • Exact: \(includeExactChecksum ? "on" : "off") • Approx: \(includeApproximate ? "on" : "off")"
+        )
 
         status = .running("Resetting local index…")
         result = nil
@@ -130,10 +152,16 @@ final class DuplicateScanViewModel: ObservableObject {
                 result = res
                 status = .completed(res.stats)
                 resultRevision &+= 1
+                log(
+                    .action,
+                    "Duplicate scan completed",
+                    detail: "Groups: \(res.groups.count) • Pairs: \(res.pairs.count) • Archives: \(res.stats.archives) • \(String(format: "%.1fs", res.stats.durationSeconds))"
+                )
             } catch {
                 if Task.isCancelled { return }
                 if runID == rid {
                     status = .failed(String(describing: error))
+                    log(.error, "Duplicate scan failed", detail: String(describing: error))
                 }
             }
         }
@@ -146,6 +174,7 @@ final class DuplicateScanViewModel: ObservableObject {
             try store.addNotDuplicatePair(profileID: profile.id, arcidA: pair.arcidA, arcidB: pair.arcidB)
         } catch {
             status = .failed("Failed to save exclusion: \(error)")
+            log(.error, "Failed to save Not a match pair", detail: "\(pair.arcidA) • \(pair.arcidB)\n\(error)")
             return
         }
 
@@ -164,17 +193,22 @@ final class DuplicateScanViewModel: ObservableObject {
             result = r
             resultRevision &+= 1
         }
+
+        log(.action, "Marked Not a match", detail: "\(pair.arcidA) • \(pair.arcidB)")
     }
 
     func clearNotDuplicateDecisions(profile: Profile) {
+        let previousCount = notMatches.count
         do {
             let store = try IndexStore(configuration: .init(url: AppPaths.indexDBURL()))
             try store.clearNotDuplicatePairs(profileID: profile.id)
         } catch {
             status = .failed("Failed to clear exclusions: \(error)")
+            log(.error, "Failed to clear Not a match pairs", detail: String(describing: error))
             return
         }
         notMatches = []
+        log(.action, "Cleared Not a match pairs", detail: "\(previousCount) pairs")
     }
 
     func loadNotDuplicatePairs(profile: Profile) async {
@@ -188,6 +222,7 @@ final class DuplicateScanViewModel: ObservableObject {
             }
         } catch {
             status = .failed("Failed to load exclusions: \(error)")
+            log(.error, "Failed to load Not a match pairs", detail: String(describing: error))
         }
     }
 
@@ -197,43 +232,126 @@ final class DuplicateScanViewModel: ObservableObject {
             try store.removeNotDuplicatePair(profileID: profile.id, arcidA: pair.arcidA, arcidB: pair.arcidB)
         } catch {
             status = .failed("Failed to remove exclusion: \(error)")
+            log(.error, "Failed to remove Not a match pair", detail: "\(pair.arcidA) • \(pair.arcidB)\n\(error)")
             return
         }
         notMatches.removeAll { $0 == pair }
+        log(.action, "Removed Not a match pair", detail: "\(pair.arcidA) • \(pair.arcidB)")
     }
 
     func deleteArchive(profile: Profile, arcid: String) async throws {
-        let account = "apiKey.\(profile.id.uuidString)"
-        let apiKeyString = try KeychainService.getString(account: account)
-        let apiKey = apiKeyString.map { LANraragiAPIKey($0) }
+        do {
+            try await archives.deleteArchive(profile: profile, arcid: arcid)
+        } catch {
+            log(.error, "Delete archive failed", detail: "\(arcid)\n\(error)")
+            throw error
+        }
 
-        let client = LANraragiClient(configuration: .init(
-            baseURL: profile.baseURL,
-            apiKey: apiKey,
-            acceptLanguage: profile.language,
-            maxConnectionsPerHost: AppSettings.maxConnectionsPerHost(defaultValue: 8)
-        ))
+        await thumbnails.invalidate(profile: profile, arcid: arcid)
 
-        try await client.deleteArchive(arcid: arcid)
+        let removedLocalNotMatches = notMatches.reduce(into: 0) { count, pair in
+            if pair.arcidA == arcid || pair.arcidB == arcid {
+                count += 1
+            }
+        }
+        if removedLocalNotMatches > 0 {
+            notMatches.removeAll { $0.arcidA == arcid || $0.arcidB == arcid }
+        }
+
+        do {
+            let removedStoredNotMatches = try purgeStoredNotDuplicatePairs(profile: profile, containing: arcid)
+            let removedTotal = max(removedLocalNotMatches, removedStoredNotMatches)
+            if removedTotal > 0 {
+                log(.action, "Cleaned Not a match pairs", detail: "\(arcid) • removed \(removedTotal)")
+            }
+        } catch {
+            log(.warning, "Failed to clean Not a match pairs", detail: "\(arcid)\n\(error)")
+        }
 
         if var r = result {
             r.pairs.removeAll { $0.arcidA == arcid || $0.arcidB == arcid }
-            r.groups.removeAll { $0.contains(arcid) }
+            r.groups = makeGroups(from: r.pairs)
             result = r
             resultRevision &+= 1
         }
+
+        log(.action, "Deleted archive", detail: arcid)
     }
 
     func cancel() {
+        let hadRunningTask = (task != nil)
         task?.cancel()
         task = nil
         runID = nil
         status = .idle
+        if hadRunningTask {
+            log(.warning, "Duplicate scan cancelled")
+        }
     }
 
     func clearResults() {
         cancel()
         result = nil
         resultRevision &+= 1
+        log(.action, "Cleared duplicate scan results")
+    }
+
+    private func makeGroups(from pairs: [DuplicateScanResult.Pair]) -> [[String]] {
+        guard !pairs.isEmpty else { return [] }
+
+        var adjacency: [String: Set<String>] = [:]
+        adjacency.reserveCapacity(pairs.count * 2)
+
+        for pair in pairs {
+            adjacency[pair.arcidA, default: []].insert(pair.arcidB)
+            adjacency[pair.arcidB, default: []].insert(pair.arcidA)
+        }
+
+        var visited: Set<String> = []
+        visited.reserveCapacity(adjacency.count)
+
+        var groups: [[String]] = []
+        groups.reserveCapacity(adjacency.count)
+
+        for arcid in adjacency.keys.sorted() {
+            if visited.contains(arcid) { continue }
+
+            var stack: [String] = [arcid]
+            visited.insert(arcid)
+
+            var component: [String] = []
+            component.reserveCapacity(4)
+
+            while let current = stack.popLast() {
+                component.append(current)
+                for next in adjacency[current, default: []] where !visited.contains(next) {
+                    visited.insert(next)
+                    stack.append(next)
+                }
+            }
+
+            if component.count > 1 {
+                groups.append(component.sorted())
+            }
+        }
+
+        groups.sort { a, b in
+            if a.count != b.count { return a.count > b.count }
+            return (a.first ?? "") < (b.first ?? "")
+        }
+        return groups
+    }
+
+    private func purgeStoredNotDuplicatePairs(profile: Profile, containing arcid: String) throws -> Int {
+        let store = try IndexStore(configuration: .init(url: AppPaths.indexDBURL()))
+        let stored = try store.loadNotDuplicatePairs(profileID: profile.id)
+
+        var removed = 0
+        for pair in stored where pair.arcidA == arcid || pair.arcidB == arcid {
+            try store.removeNotDuplicatePair(profileID: profile.id, arcidA: pair.arcidA, arcidB: pair.arcidB)
+            removed += 1
+        }
+
+        return removed
     }
 }

@@ -44,6 +44,7 @@ final class LibraryViewModel: ObservableObject {
     private var totalFiltered: Int = 0
     private let pageSize: Int = 100
     private var reachedEnd: Bool = false
+    private var supportsDateAddedSort: Bool?
 
     func refresh(profile: Profile) {
         start = 0
@@ -95,12 +96,14 @@ final class LibraryViewModel: ObservableObject {
         do {
             let client = try makeClient(profile: profile)
             let reqSort = sort
+            let effectiveSort = await effectiveSortForServer(client: client, requested: reqSort)
 
             do {
-                let resp = try await fetchSearch(client: client, start: start, sort: reqSort)
+                let resp = try await fetchSearch(client: client, start: start, sort: effectiveSort)
                 apply(resp: resp)
             } catch let LANraragiError.httpStatus(code, _) where reqSort == .newestAdded && (code == 400 || code == 422) {
-                // Server doesn't support sorting by date_added; fall back to Title.
+                // Server reported no date_added support even after capability probe. Fall back safely.
+                supportsDateAddedSort = false
                 sort = .title
                 bannerText = "Server doesn’t support sorting by date added; using Title instead."
                 let resp = try await fetchSearch(client: client, start: start, sort: .title)
@@ -119,6 +122,52 @@ final class LibraryViewModel: ObservableObject {
         start += new.count
         if arcids.count >= totalFiltered || new.isEmpty {
             reachedEnd = true
+        }
+    }
+
+    private func effectiveSortForServer(client: LANraragiClient, requested: Sort) async -> Sort {
+        guard requested == .newestAdded else { return requested }
+
+        if let supportsDateAddedSort {
+            if !supportsDateAddedSort {
+                sort = .title
+                bannerText = "Server doesn’t support sorting by date added; using Title instead."
+                return .title
+            }
+            return .newestAdded
+        }
+
+        guard let capability = await detectDateAddedSortSupport(client: client) else {
+            // Unknown capability (network/transient issue): keep requested sort and let normal
+            // request handling surface any real error to the user.
+            return requested
+        }
+
+        supportsDateAddedSort = capability
+        if !capability {
+            sort = .title
+            bannerText = "Server doesn’t support sorting by date added; using Title instead."
+            return .title
+        }
+        return requested
+    }
+
+    private func detectDateAddedSortSupport(client: LANraragiClient) async -> Bool? {
+        do {
+            _ = try await client.search(
+                start: 0,
+                filter: "",
+                category: "",
+                newOnly: false,
+                untaggedOnly: false,
+                sortBy: "date_added",
+                order: "desc"
+            )
+            return true
+        } catch let LANraragiError.httpStatus(code, _) where code == 400 || code == 422 {
+            return false
+        } catch {
+            return nil
         }
     }
 
