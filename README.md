@@ -33,6 +33,7 @@ This is a personal project intended to be published on GitHub (not the Mac App S
   - Right-click: open Reader, open in browser, edit metadata, copy archive id
   - Open in browser now targets LANraragi reader URLs (`/reader?id=<arcid>`)
   - Grid layout no longer forces fixed content width that can overflow the visible panel
+  - Library page state now persists while switching sidebar sections (no forced rebuild/reload on return)
 - **Duplicates**
   - Local cover fingerprint index (rebuilt at the start of every scan)
   - Finds **exact** and **similar** cover matches
@@ -64,6 +65,9 @@ This is a personal project intended to be published on GitHub (not the Mac App S
 - **Batch**
   - Bulk add/remove tags for selected archives
   - Queue selected metadata plugins for selected archives
+  - Tag and plugin queues support pause/resume and recoverable checkpoints after app restart
+  - Pause waits for the current archive to finish safely before stopping
+  - Resume re-runs the last in-progress archive before continuing
 - **Activity**
   - Local activity log with filtering and search
 - **Window chrome**

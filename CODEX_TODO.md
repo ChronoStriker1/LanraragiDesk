@@ -5,6 +5,20 @@ It is intentionally pragmatic and may be blunt.
 
 ## Recently Fixed
 
+- Batch queue resilience + control:
+  - Added pause + resume + recovery checkpoints for both Tag operations and Plugin operations in Batch.
+  - Pause now completes the current archive operation before stopping.
+  - Resume now redoes the last touched archive before continuing, to avoid partial-run ambiguity.
+  - Added recoverable queue UI with Resume/Discard actions for both tag and plugin flows.
+  - Files:
+    - `Sources/LanraragiDeskApp/UI/BatchView.swift`
+
+- Root navigation state retention:
+  - Kept major section views mounted and switched visibility instead of recreating views on sidebar navigation.
+  - Prevents Library state from resetting/reloading when navigating away and back.
+  - File:
+    - `Sources/LanraragiDeskApp/UI/RootView.swift`
+
 - Region numbers (UI labels):
   - Fixed: `Settings -> UI labels -> Show region numbers` now applies overlays across the app (not just Review).
   - Files:
