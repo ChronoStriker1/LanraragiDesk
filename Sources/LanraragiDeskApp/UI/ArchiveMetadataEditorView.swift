@@ -390,13 +390,19 @@ struct ArchiveMetadataEditorView: View {
     }
 
     private func save() async {
-        errorText = nil
-        isLoading = true
-        defer { isLoading = false }
-
         let editedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let editedTags = MetadataTagFormatter.normalizedCSV(from: tags)
         let editedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasChanges = editedTitle != loadedTitle || editedTags != loadedTags || editedSummary != loadedSummary
+
+        if !hasChanges {
+            dismiss()
+            return
+        }
+
+        errorText = nil
+        isLoading = true
+        defer { isLoading = false }
 
         do {
             // Preserve untouched fields from the latest metadata response so the API always receives
@@ -441,21 +447,28 @@ struct ArchiveMetadataEditorView: View {
     }
 
     private func isOpenableSourceTag(_ item: MetadataTagFormatter.Item) -> Bool {
-        item.namespace.lowercased() == "source" && sourceURL(from: item.value) != nil
+        isSourceNamespace(item.namespace) && sourceURL(from: item.value) != nil
     }
 
     private func openSourceTag(_ item: MetadataTagFormatter.Item) {
-        guard item.namespace.lowercased() == "source" else { return }
+        guard isSourceNamespace(item.namespace) else { return }
         guard let url = sourceURL(from: item.value) else { return }
         NSWorkspace.shared.open(url)
     }
 
-    private func sourceURL(from raw: String) -> URL? {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        guard !trimmed.contains(where: \.isWhitespace) else { return nil }
+    private func isSourceNamespace(_ namespace: String) -> Bool {
+        let ns = namespace.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return ns == "source" || ns == "source_url" || ns == "url"
+    }
 
-        if let url = URL(string: trimmed),
+    private func sourceURL(from raw: String) -> URL? {
+        let trimmed = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: .init(charactersIn: "\"'<>"))
+        guard !trimmed.isEmpty else { return nil }
+        let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed) ?? trimmed
+
+        if let url = URL(string: encoded),
            let scheme = url.scheme?.lowercased(),
            (scheme == "http" || scheme == "https"),
            let host = url.host,
@@ -464,10 +477,10 @@ struct ArchiveMetadataEditorView: View {
         }
 
         let candidate: String
-        if trimmed.hasPrefix("//") {
-            candidate = "https:" + trimmed
+        if encoded.hasPrefix("//") {
+            candidate = "https:" + encoded
         } else {
-            candidate = "https://" + trimmed
+            candidate = "https://" + encoded
         }
 
         guard let url = URL(string: candidate),
