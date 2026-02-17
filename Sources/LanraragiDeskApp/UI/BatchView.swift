@@ -16,6 +16,7 @@ struct BatchView: View {
     @State private var selectedPluginID: String?
     @State private var pluginArgText: String = ""
     @State private var pluginDelayText: String = "4"
+    @State private var pluginApplyMode: PluginApplyMode = .mergeWithExisting
     @State private var pluginRunning: Bool = false
     @State private var pluginCancelRequested: Bool = false
     @State private var pluginRunStatus: String?
@@ -210,6 +211,15 @@ struct BatchView: View {
                         .disabled(running || pluginRunning)
 
                     HStack {
+                        Picker("Save mode", selection: $pluginApplyMode) {
+                            ForEach(PluginApplyMode.allCases, id: \.self) { mode in
+                                Text(mode.label).tag(mode)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .frame(maxWidth: 260)
+                        .disabled(running || pluginRunning || previewRunning)
+
                         Toggle("Preview Before Queue", isOn: $previewBeforeQueue)
                             .toggleStyle(.checkbox)
                             .font(.caption)
@@ -480,7 +490,8 @@ struct BatchView: View {
                                     profile: profile,
                                     pluginID: pluginID,
                                     arcid: arcid,
-                                    previousSignature: preSignature
+                                    previousSignature: preSignature,
+                                    applyMode: pluginApplyMode
                                 )
                             }
                             ok += 1
@@ -492,7 +503,8 @@ struct BatchView: View {
                                 profile: profile,
                                 pluginID: pluginID,
                                 arcid: arcid,
-                                previousSignature: preSignature
+                                previousSignature: preSignature,
+                                applyMode: pluginApplyMode
                             )
                         }
                         ok += 1
@@ -648,11 +660,16 @@ struct BatchView: View {
                                 arg: pluginArgText
                             )
                             if let patch = parsePluginMetadataPatch(from: raw) {
-                                previewTitle = patch.title ?? previewTitle
-                                previewSummary = patch.summary ?? previewSummary
-                                if let patchTags = patch.tags {
-                                    previewTags = mergeTagCSV(base: previewTags, additions: patchTags)
-                                }
+                                let applied = applyPluginPatch(
+                                    patch,
+                                    currentTitle: previewTitle,
+                                    currentTags: previewTags,
+                                    currentSummary: previewSummary,
+                                    mode: pluginApplyMode
+                                )
+                                previewTitle = applied.title
+                                previewTags = applied.tags
+                                previewSummary = applied.summary
                             }
                             details.append("Plugin preview executed without saving.")
                         } else {
@@ -726,7 +743,8 @@ struct BatchView: View {
         profile: Profile,
         pluginID: String,
         arcid: String,
-        previousSignature: String?
+        previousSignature: String?,
+        applyMode: PluginApplyMode
     ) async -> Bool {
         do {
             let raw = try await pluginsVM.run(profile: profile, pluginID: pluginID, arcid: arcid, arg: pluginArgText)
@@ -737,14 +755,16 @@ struct BatchView: View {
             let currentSummary = (current.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let currentTagsRaw = current.tags ?? ""
 
-            let titleToSave = patch.title ?? currentTitle
-            let summaryToSave = patch.summary ?? currentSummary
-            let tagsToSave: String
-            if let patchTags = patch.tags {
-                tagsToSave = mergeTagCSV(base: currentTagsRaw, additions: patchTags)
-            } else {
-                tagsToSave = currentTagsRaw
-            }
+            let applied = applyPluginPatch(
+                patch,
+                currentTitle: currentTitle,
+                currentTags: currentTagsRaw,
+                currentSummary: currentSummary,
+                mode: applyMode
+            )
+            let titleToSave = applied.title
+            let summaryToSave = applied.summary
+            let tagsToSave = applied.tags
 
             let beforeSignature = previousSignature ?? metadataSignature(title: currentTitle, tags: currentTagsRaw, summary: currentSummary)
             let nextSignature = metadataSignature(title: titleToSave, tags: tagsToSave, summary: summaryToSave)
@@ -959,6 +979,31 @@ struct BatchView: View {
         return await MainActor.run { pluginCancelRequested }
     }
 
+    private func applyPluginPatch(
+        _ patch: (title: String?, tags: String?, summary: String?),
+        currentTitle: String,
+        currentTags: String,
+        currentSummary: String,
+        mode: PluginApplyMode
+    ) -> (title: String, tags: String, summary: String) {
+        let title = patch.title ?? currentTitle
+        let summary = patch.summary ?? currentSummary
+
+        let tags: String
+        if let patchTags = patch.tags {
+            switch mode {
+            case .mergeWithExisting:
+                tags = uniqueTagCSV(mergeTagCSV(base: currentTags, additions: patchTags))
+            case .replaceWithPluginData:
+                tags = uniqueTagCSV(patchTags)
+            }
+        } else {
+            tags = uniqueTagCSV(currentTags)
+        }
+
+        return (title, tags, summary)
+    }
+
     private func summarizeMetadataChanges(
         beforeTitle: String,
         beforeTags: String,
@@ -987,6 +1032,18 @@ struct BatchView: View {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "(empty)" : trimmed
     }
+
+    private func uniqueTagCSV(_ value: String) -> String {
+        var out: [String] = []
+        var seen: Set<String> = []
+        for tag in parseTags(value) {
+            let key = tag.lowercased()
+            if seen.insert(key).inserted {
+                out.append(tag)
+            }
+        }
+        return out.joined(separator: ", ")
+    }
 }
 
 private struct BatchPreviewRow: Identifiable {
@@ -1000,4 +1057,18 @@ private struct BatchPreviewRow: Identifiable {
     let filename: String
     let detail: String
     let kind: Kind
+}
+
+private enum PluginApplyMode: String, CaseIterable {
+    case mergeWithExisting
+    case replaceWithPluginData
+
+    var label: String {
+        switch self {
+        case .mergeWithExisting:
+            return "Combine plugin data with existing"
+        case .replaceWithPluginData:
+            return "Use plugin data as-is"
+        }
+    }
 }
