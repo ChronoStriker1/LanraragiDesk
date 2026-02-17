@@ -554,12 +554,30 @@ struct ArchiveMetadataEditorView: View {
                     pluginRunning = false
                     pluginRunStatus = job.job > 0
                         ? "Queued job \(job.job)."
-                        : "Queued plugin (server did not return a job id)."
+                        : "Plugin executed (server did not return a trackable job id)."
                 }
                 let detail = job.job > 0
                     ? "\(pluginID) • \(arcid) • job \(job.job)"
-                    : "\(pluginID) • \(arcid) • queued (no job id returned)"
+                    : "\(pluginID) • \(arcid) • executed (no job id returned)"
                 appModel.activity.add(.init(kind: .action, title: "Plugin job queued", detail: detail))
+
+                if job.job > 0 {
+                    let state = await pluginsVM.waitForJobCompletion(profile: profile, jobID: job.job)
+                    switch state {
+                    case .finished:
+                        await refreshMetadataAfterPlugin(status: "Plugin completed. Metadata refreshed.")
+                    case .failed:
+                        await MainActor.run {
+                            pluginRunStatus = "Plugin job \(job.job) failed."
+                        }
+                    case .queued, .running, .unknown:
+                        await MainActor.run {
+                            pluginRunStatus = "Plugin job \(job.job) finished with unknown state."
+                        }
+                    }
+                } else {
+                    await refreshMetadataAfterPlugin(status: "Plugin completed. Metadata refreshed.")
+                }
             } catch {
                 await MainActor.run {
                     pluginRunning = false
@@ -567,6 +585,22 @@ struct ArchiveMetadataEditorView: View {
                 }
                 appModel.activity.add(.init(kind: .error, title: "Plugin queue failed", detail: "\(pluginID) • \(arcid)\n\(error)"))
             }
+        }
+    }
+
+    private func refreshMetadataAfterPlugin(status: String) async {
+        do {
+            let updated = try await archives.metadata(profile: profile, arcid: arcid)
+            await MainActor.run {
+                apply(meta: updated)
+                pluginRunStatus = status
+            }
+            appModel.activity.add(.init(kind: .action, title: "Plugin metadata refreshed", detail: arcid))
+        } catch {
+            await MainActor.run {
+                pluginRunStatus = "Plugin finished, but refresh failed: \(ErrorPresenter.short(error))"
+            }
+            appModel.activity.add(.init(kind: .warning, title: "Plugin refresh failed", detail: "\(arcid)\n\(error)"))
         }
     }
 

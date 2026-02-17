@@ -309,19 +309,23 @@ public final class LANraragiClient: @unchecked Sendable {
         if let arg, !arg.isEmpty {
             items.append(URLQueryItem(name: "arg", value: arg))
         }
-        let data = try await getData(path: "/api/plugins/queue", queryItems: items)
+        let formBody = makeFormBody(items)
+
         do {
+            let data = try await postData(
+                path: "/api/plugins/queue",
+                body: formBody,
+                contentType: "application/x-www-form-urlencoded; charset=utf-8"
+            )
             return try parseQueuedPluginJob(from: data)
-        } catch let LANraragiError.decoding(queueDecodeError) {
-            // Compatibility fallback: some servers/plugins don't return a Minion job for queue.
-            // Use the synchronous plugin endpoint; success is represented by job=0 (untrackable).
-            do {
-                _ = try await runPlugin(pluginID: pluginID, arcid: arcid, arg: arg)
-                return MinionJob(job: 0)
-            } catch {
-                // Surface the real fallback failure to aid diagnostics.
-                _ = queueDecodeError
-                throw error
+        } catch let lrrError as LANraragiError {
+            // Some servers only expose GET on this endpoint; retain a compatibility fallback.
+            switch lrrError {
+            case .httpStatus(let code, _) where code == 404 || code == 405:
+                let data = try await getData(path: "/api/plugins/queue", queryItems: items)
+                return try parseQueuedPluginJob(from: data)
+            default:
+                throw lrrError
             }
         }
     }
@@ -702,7 +706,7 @@ public final class LANraragiClient: @unchecked Sendable {
     }
 
     private func parseQueuedPluginJob(from data: Data) throws -> MinionJob {
-        if let job = try? JSONDecoder().decode(MinionJob.self, from: data) {
+        if let job = try? JSONDecoder().decode(MinionJob.self, from: data), job.job > 0 {
             return job
         }
 
@@ -716,12 +720,6 @@ public final class LANraragiClient: @unchecked Sendable {
         if let jobID = findQueuedPluginJobID(in: obj) {
             return MinionJob(job: jobID)
         }
-        if queueResponseLooksSuccessful(obj) {
-            // Some LANraragi/plugin setups return only a success message with no Minion job id.
-            // Use 0 as a sentinel value for "queued/ran without trackable job id".
-            return MinionJob(job: 0)
-        }
-
         let err = NSError(
             domain: "LANraragiClient",
             code: 1,
@@ -732,17 +730,30 @@ public final class LANraragiClient: @unchecked Sendable {
 
     private func findQueuedPluginJobID(in value: Any) -> Int? {
         if let int = value as? Int {
-            return int
+            return int > 0 ? int : nil
         }
         if let num = value as? NSNumber {
             if CFGetTypeID(num) == CFBooleanGetTypeID() {
                 return nil
             }
-            return num.intValue
+            let id = num.intValue
+            return id > 0 ? id : nil
         }
         if let str = value as? String {
             let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
-            return Int(trimmed)
+            if let exact = Int(trimmed), exact > 0 {
+                return exact
+            }
+            let pattern = #"(?i)\bjob(?:_id|id)?\D+(\d+)\b"#
+            if let regex = try? NSRegularExpression(pattern: pattern),
+               let match = regex.firstMatch(in: trimmed, range: NSRange(trimmed.startIndex..., in: trimmed)),
+               match.numberOfRanges > 1,
+               let range = Range(match.range(at: 1), in: trimmed),
+               let parsed = Int(trimmed[range]),
+               parsed > 0 {
+                return parsed
+            }
+            return nil
         }
         if let dict = value as? [String: Any] {
             let preferredKeys = ["job", "job_id", "jobId", "id"]
@@ -767,47 +778,6 @@ public final class LANraragiClient: @unchecked Sendable {
             return nil
         }
         return nil
-    }
-
-    private func queueResponseLooksSuccessful(_ value: Any) -> Bool {
-        func hasSuccessText(_ text: String) -> Bool {
-            let s = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            guard !s.isEmpty else { return false }
-            if s.contains("error") || s.contains("fail") || s.contains("invalid") || s.contains("denied") {
-                return false
-            }
-            return s.contains("success")
-                || s.contains("queued")
-                || s.contains("enqueued")
-                || s.contains("started")
-                || s.contains("ok")
-        }
-
-        if let str = value as? String {
-            return hasSuccessText(str)
-        }
-        if let dict = value as? [String: Any] {
-            for key in ["success", "status", "message", "msg", "result"] {
-                if let val = dict[key], let text = stringValue(val), hasSuccessText(text) {
-                    return true
-                }
-            }
-            if let ok = dict["ok"] as? Bool, ok {
-                return true
-            }
-            if let success = dict["success"] as? Bool, success {
-                return true
-            }
-            return false
-        }
-        if let arr = value as? [Any] {
-            for item in arr {
-                if queueResponseLooksSuccessful(item) {
-                    return true
-                }
-            }
-        }
-        return false
     }
 
     private func makeFormBody(_ items: [URLQueryItem]) -> Data {

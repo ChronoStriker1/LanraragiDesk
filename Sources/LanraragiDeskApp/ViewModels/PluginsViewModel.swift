@@ -119,6 +119,49 @@ final class PluginsViewModel: ObservableObject {
         }
     }
 
+    func waitForJobCompletion(
+        profile: Profile,
+        jobID: Int,
+        maxPolls: Int = 180,
+        pollInterval: Duration = .seconds(1)
+    ) async -> TrackedPluginJob.State {
+        guard jobID > 0 else { return .finished }
+
+        do {
+            let client = try makeClient(profile: profile)
+            for _ in 0..<maxPolls {
+                if Task.isCancelled { return .unknown }
+                do {
+                    let status = try await client.getMinionStatus(job: jobID)
+                    let raw = status.state ?? status.data?.state
+                    let normalized = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    let mapped = mapJobState(normalized: normalized)
+                    update(jobID: jobID, state: mapped, rawState: raw, lastError: nil)
+                    if mapped.isTerminal {
+                        return mapped
+                    }
+                } catch let lrrError as LANraragiError {
+                    switch lrrError {
+                    case .httpStatus(let code, _) where code == 404 || code == 410:
+                        update(jobID: jobID, state: .finished, rawState: "finished", lastError: nil)
+                        return .finished
+                    default:
+                        update(jobID: jobID, state: .unknown, rawState: nil, lastError: ErrorPresenter.short(lrrError))
+                        return .unknown
+                    }
+                } catch {
+                    update(jobID: jobID, state: .unknown, rawState: nil, lastError: ErrorPresenter.short(error))
+                    return .unknown
+                }
+                try? await Task.sleep(for: pollInterval)
+            }
+        } catch {
+            statusText = "Failed to wait for job: \(ErrorPresenter.short(error))"
+        }
+
+        return .unknown
+    }
+
     func clearTerminalJobs() {
         jobs.removeAll { $0.state.isTerminal }
     }
