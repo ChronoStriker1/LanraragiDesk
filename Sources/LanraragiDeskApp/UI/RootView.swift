@@ -18,7 +18,6 @@ struct RootView: View {
         case settings
         case activity
         case batch
-        case plugins
     }
 
     var body: some View {
@@ -121,7 +120,6 @@ struct RootView: View {
                     sidebarButton(title: "Duplicates", systemImage: "doc.on.doc", section: .duplicates)
                     sidebarButton(title: "Activity", systemImage: "list.bullet.rectangle", section: .activity)
                     sidebarButton(title: "Batch", systemImage: "square.stack.3d.forward.dottedline", section: .batch)
-                    sidebarButton(title: "Plugins", systemImage: "puzzlepiece.extension", section: .plugins)
 
                     Divider().padding(.vertical, 8)
                     sidebarButton(title: "Settings", systemImage: "gearshape", section: .settings)
@@ -177,9 +175,6 @@ struct RootView: View {
                     .environmentObject(appModel)
             case .batch:
                 BatchView()
-                    .environmentObject(appModel)
-            case .plugins:
-                PluginsView()
                     .environmentObject(appModel)
             }
         }

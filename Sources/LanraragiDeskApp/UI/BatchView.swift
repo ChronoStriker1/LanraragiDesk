@@ -1,7 +1,9 @@
 import SwiftUI
+import LanraragiKit
 
 struct BatchView: View {
     @EnvironmentObject private var appModel: AppModel
+    @StateObject private var pluginsVM = PluginsViewModel()
 
     @State private var addTagsText: String = ""
     @State private var removeTagsText: String = ""
@@ -9,6 +11,10 @@ struct BatchView: View {
     @State private var progressText: String?
     @State private var errors: [String] = []
     @State private var task: Task<Void, Never>?
+    @State private var selectedPluginID: String?
+    @State private var pluginArgText: String = ""
+    @State private var pluginRunning: Bool = false
+    @State private var pluginRunStatus: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -28,17 +34,17 @@ struct BatchView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     TextField("Add tags (comma separated)", text: $addTagsText)
                         .textFieldStyle(.roundedBorder)
-                        .disabled(running)
+                        .disabled(running || pluginRunning)
                     TextField("Remove tags (comma separated)", text: $removeTagsText)
                         .textFieldStyle(.roundedBorder)
-                        .disabled(running)
+                        .disabled(running || pluginRunning)
 
                     HStack {
                         Button(running ? "Running…" : "Run") {
                             run()
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(running || appModel.selection.count == 0 || (parseTags(addTagsText).isEmpty && parseTags(removeTagsText).isEmpty))
+                        .disabled(running || pluginRunning || appModel.selection.count == 0 || (parseTags(addTagsText).isEmpty && parseTags(removeTagsText).isEmpty))
 
                         Button("Cancel", role: .destructive) {
                             task?.cancel()
@@ -61,6 +67,73 @@ struct BatchView: View {
                 .padding(8)
             }
             .debugFrameNumber(2)
+
+            GroupBox("Plugin operations") {
+                VStack(alignment: .leading, spacing: 10) {
+                    if let status = pluginsVM.statusText {
+                        Text(status)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack(spacing: 10) {
+                        Picker("Plugin", selection: $selectedPluginID) {
+                            Text("Select plugin").tag(Optional<String>.none)
+                            ForEach(pluginsVM.plugins, id: \.id) { p in
+                                Text(p.title).tag(Optional(p.id))
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .disabled(pluginsVM.plugins.isEmpty || running || pluginRunning)
+
+                        Button("Refresh Plugins") {
+                            Task { await loadPlugins() }
+                        }
+                        .disabled(running || pluginRunning)
+                    }
+
+                    if let plugin = selectedPlugin {
+                        if let d = plugin.description, !d.isEmpty {
+                            Text(d)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if !plugin.parameters.isEmpty {
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    ForEach(plugin.parameters) { param in
+                                        pluginOptionRow(param)
+                                    }
+                                }
+                            }
+                            .frame(minHeight: 66, maxHeight: 130)
+                        }
+                    }
+
+                    TextField(selectedPlugin?.oneshotArg ?? "Plugin arg (optional)", text: $pluginArgText)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(running || pluginRunning)
+
+                    HStack {
+                        Button(pluginRunning ? "Queueing…" : "Queue Plugin") {
+                            runPluginBatch()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(running || pluginRunning || selectedPluginID == nil || appModel.selection.count == 0)
+
+                        Spacer()
+                    }
+
+                    if let pluginRunStatus {
+                        Text(pluginRunStatus)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(8)
+            }
+            .debugFrameNumber(4)
 
             if !errors.isEmpty {
                 GroupBox("Errors") {
@@ -90,6 +163,9 @@ struct BatchView: View {
         .debugFrameNumber(1)
         .onDisappear {
             task?.cancel()
+        }
+        .task(id: appModel.selectedProfileID) {
+            await loadPlugins()
         }
     }
 
@@ -190,5 +266,79 @@ struct BatchView: View {
         }
 
         return items.joined(separator: ", ")
+    }
+
+    private func loadPlugins() async {
+        guard let profile = appModel.selectedProfile else { return }
+        await pluginsVM.load(profile: profile)
+        if let selectedPluginID, pluginsVM.plugins.contains(where: { $0.id == selectedPluginID }) {
+            return
+        }
+        selectedPluginID = pluginsVM.plugins.first?.id
+    }
+
+    private func runPluginBatch() {
+        guard let profile = appModel.selectedProfile else { return }
+        guard let pluginID = selectedPluginID else { return }
+        let arcids = Array(appModel.selection.arcids).sorted()
+        guard !arcids.isEmpty else { return }
+
+        pluginRunning = true
+        pluginRunStatus = "Queueing \(arcids.count) plugin jobs…"
+        appModel.activity.add(.init(kind: .action, title: "Plugin batch queued", detail: "\(pluginID) on \(arcids.count) archives"))
+
+        Task {
+            var ok = 0
+            var fail = 0
+            for arcid in arcids {
+                if Task.isCancelled { break }
+                do {
+                    let job = try await pluginsVM.queue(profile: profile, pluginID: pluginID, arcid: arcid, arg: pluginArgText)
+                    pluginsVM.trackQueuedJob(profile: profile, pluginID: pluginID, arcid: arcid, jobID: job.job)
+                    ok += 1
+                    appModel.activity.add(.init(kind: .action, title: "Plugin job queued", detail: "\(pluginID) • \(arcid) • job \(job.job)"))
+                } catch {
+                    fail += 1
+                    appModel.activity.add(.init(kind: .error, title: "Plugin queue failed", detail: "\(pluginID) • \(arcid)\n\(error)"))
+                }
+                await MainActor.run {
+                    pluginRunStatus = "Queued \(ok) • Failed \(fail)…"
+                }
+            }
+
+            await MainActor.run {
+                pluginRunning = false
+                pluginRunStatus = "Done. Queued \(ok), failed \(fail)."
+            }
+        }
+    }
+
+    private var selectedPlugin: PluginInfo? {
+        guard let id = selectedPluginID else { return nil }
+        return pluginsVM.plugins.first(where: { $0.id == id })
+    }
+
+    @ViewBuilder
+    private func pluginOptionRow(_ param: PluginInfo.Parameter) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(param.name?.isEmpty == false ? param.name! : "Option")
+                .font(.caption.weight(.semibold))
+
+            if let value = param.value, !value.isEmpty {
+                Text("Current: \(value)")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+            if let desc = param.description, !desc.isEmpty {
+                Text(desc)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }

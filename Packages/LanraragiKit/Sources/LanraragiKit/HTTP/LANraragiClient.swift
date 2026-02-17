@@ -236,9 +236,21 @@ public final class LANraragiClient: @unchecked Sendable {
         return []
     }
 
-    public func listPlugins() async throws -> [PluginInfo] {
-        let data = try await getData(path: "/api/plugins")
-        let obj = try JSONSerialization.jsonObject(with: data)
+    public func listPlugins(type: String = "metadata") async throws -> [PluginInfo] {
+        let obj: Any
+        do {
+            let data = try await getData(path: "/api/plugins/\(type)")
+            obj = try JSONSerialization.jsonObject(with: data)
+        } catch let error as LANraragiError {
+            // Backward-compat fallback if a server exposes /api/plugins without a type segment.
+            switch error {
+            case .httpStatus(let code, _) where code == 404:
+                let data = try await getData(path: "/api/plugins")
+                obj = try JSONSerialization.jsonObject(with: data)
+            default:
+                throw error
+            }
+        }
 
         // Common shapes:
         // - ["pluginA", "pluginB"]

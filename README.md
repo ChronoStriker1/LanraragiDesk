@@ -55,6 +55,7 @@ This is a personal project intended to be published on GitHub (not the Mac App S
   - Save uses LANraragi-compatible metadata update payloads (title/tags/summary are always sent)
   - Supports cover override by setting thumbnail from a selected archive page
   - Supports deleting the current archive with confirmation
+  - Queue selected metadata plugins against the current archive
   - Delete handling is resilient if an archive was already removed server-side (idempotent cleanup in Library and Duplicates flows)
   - Tags are shown grouped/sorted like Library hover tags (chip-based editor; raw CSV field hidden)
   - Date tags are rendered in human-readable form
@@ -62,8 +63,7 @@ This is a personal project intended to be published on GitHub (not the Mac App S
   - Title and summary inputs use full-width editor sections for stable text placement while typing/editing
 - **Batch**
   - Bulk add/remove tags for selected archives
-- **Plugins**
-  - List server plugins and queue them for selected archives
+  - Queue selected metadata plugins for selected archives
 - **Activity**
   - Local activity log with filtering and search
 - **Window chrome**

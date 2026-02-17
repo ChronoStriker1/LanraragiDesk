@@ -11,6 +11,7 @@ struct ArchiveMetadataEditorView: View {
 
     @EnvironmentObject private var appModel: AppModel
     @Environment(\.dismiss) private var dismiss
+    @StateObject private var pluginsVM = PluginsViewModel()
 
     @State private var isLoading: Bool = false
     @State private var errorText: String?
@@ -29,6 +30,10 @@ struct ArchiveMetadataEditorView: View {
     @State private var isUpdatingCover: Bool = false
     @State private var isDeleting: Bool = false
     @State private var confirmDelete: Bool = false
+    @State private var selectedPluginID: String?
+    @State private var pluginArgText: String = ""
+    @State private var pluginRunning: Bool = false
+    @State private var pluginRunStatus: String?
 
     private var groupedTags: [MetadataTagFormatter.Group] {
         MetadataTagFormatter.grouped(tags: tags)
@@ -191,6 +196,72 @@ struct ArchiveMetadataEditorView: View {
                             .foregroundStyle(.secondary)
                         borderedTextEditor($summary, minHeight: 180)
                     }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Run plugin on this archive")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        HStack(spacing: 10) {
+                            Picker("Plugin", selection: $selectedPluginID) {
+                                Text("Select plugin").tag(Optional<String>.none)
+                                ForEach(pluginsVM.plugins, id: \.id) { p in
+                                    Text(p.title).tag(Optional(p.id))
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .disabled(isLoading || isDeleting || pluginRunning || pluginsVM.plugins.isEmpty)
+
+                            Button("Refresh") {
+                                Task { await loadPlugins() }
+                            }
+                            .disabled(isLoading || isDeleting || pluginRunning)
+                        }
+
+                        if let plugin = selectedPlugin {
+                            if let d = plugin.description, !d.isEmpty {
+                                Text(d)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            if !plugin.parameters.isEmpty {
+                                ScrollView(.vertical) {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        ForEach(plugin.parameters) { param in
+                                            pluginOptionRow(param)
+                                        }
+                                    }
+                                }
+                                .frame(maxHeight: 120)
+                            }
+                        }
+
+                        TextField(selectedPlugin?.oneshotArg ?? "Plugin arg (optional)", text: $pluginArgText)
+                            .textFieldStyle(.roundedBorder)
+                            .disabled(isLoading || isDeleting || pluginRunning)
+
+                        HStack {
+                            Button(pluginRunning ? "Queueing…" : "Queue Plugin") {
+                                queuePluginForArchive()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(isLoading || isDeleting || pluginRunning || selectedPluginID == nil)
+
+                            Spacer()
+                        }
+
+                        if let pluginRunStatus {
+                            Text(pluginRunStatus)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        } else if let status = pluginsVM.statusText {
+                            Text(status)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.trailing, 2)
@@ -201,7 +272,7 @@ struct ArchiveMetadataEditorView: View {
                 Button(isDeleting ? "Deleting…" : "Delete Archive…", role: .destructive) {
                     confirmDelete = true
                 }
-                .disabled(isLoading || isUpdatingCover || isDeleting)
+                .disabled(isLoading || isUpdatingCover || isDeleting || pluginRunning)
 
                 Spacer()
                 Button("Cancel") { dismiss() }
@@ -209,7 +280,7 @@ struct ArchiveMetadataEditorView: View {
                     Task { await save() }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(isLoading || isDeleting)
+                .disabled(isLoading || isDeleting || pluginRunning)
             }
         }
         .padding(20)
@@ -228,6 +299,7 @@ struct ArchiveMetadataEditorView: View {
         }
         .task {
             await loadIfNeeded()
+            await loadPlugins()
         }
         .onChange(of: tagQuery) { _, _ in
             Task { await refreshSuggestions() }
@@ -390,6 +462,66 @@ struct ArchiveMetadataEditorView: View {
 
         let sugg = await appModel.tagSuggestions.suggestions(profile: profile, settings: settings, prefix: q, limit: 20)
         await MainActor.run { tagSuggestions = sugg }
+    }
+
+    private func loadPlugins() async {
+        await pluginsVM.load(profile: profile)
+        if let selectedPluginID, pluginsVM.plugins.contains(where: { $0.id == selectedPluginID }) {
+            return
+        }
+        selectedPluginID = pluginsVM.plugins.first?.id
+    }
+
+    private func queuePluginForArchive() {
+        guard let pluginID = selectedPluginID else { return }
+        pluginRunning = true
+        pluginRunStatus = "Queueing plugin job…"
+
+        Task {
+            do {
+                let job = try await pluginsVM.queue(profile: profile, pluginID: pluginID, arcid: arcid, arg: pluginArgText)
+                pluginsVM.trackQueuedJob(profile: profile, pluginID: pluginID, arcid: arcid, jobID: job.job)
+                await MainActor.run {
+                    pluginRunning = false
+                    pluginRunStatus = "Queued job \(job.job)."
+                }
+                appModel.activity.add(.init(kind: .action, title: "Plugin job queued", detail: "\(pluginID) • \(arcid) • job \(job.job)"))
+            } catch {
+                await MainActor.run {
+                    pluginRunning = false
+                    pluginRunStatus = "Failed: \(ErrorPresenter.short(error))"
+                }
+                appModel.activity.add(.init(kind: .error, title: "Plugin queue failed", detail: "\(pluginID) • \(arcid)\n\(error)"))
+            }
+        }
+    }
+
+    private var selectedPlugin: PluginInfo? {
+        guard let id = selectedPluginID else { return nil }
+        return pluginsVM.plugins.first(where: { $0.id == id })
+    }
+
+    @ViewBuilder
+    private func pluginOptionRow(_ param: PluginInfo.Parameter) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(param.name?.isEmpty == false ? param.name! : "Option")
+                .font(.caption2.weight(.semibold))
+            if let value = param.value, !value.isEmpty {
+                Text("Current: \(value)")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+            if let desc = param.description, !desc.isEmpty {
+                Text(desc)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
