@@ -90,6 +90,7 @@ final class PluginsViewModel: ObservableObject {
     }
 
     func trackQueuedJob(profile: Profile, pluginID: String, arcid: String, jobID: Int) {
+        guard jobID > 0 else { return }
         setActiveJobsProfileIfNeeded(profile)
         if jobs.contains(where: { $0.jobID == jobID }) {
             return

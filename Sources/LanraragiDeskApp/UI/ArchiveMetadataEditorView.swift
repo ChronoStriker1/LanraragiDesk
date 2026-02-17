@@ -490,9 +490,14 @@ struct ArchiveMetadataEditorView: View {
                 pluginsVM.trackQueuedJob(profile: profile, pluginID: pluginID, arcid: arcid, jobID: job.job)
                 await MainActor.run {
                     pluginRunning = false
-                    pluginRunStatus = "Queued job \(job.job)."
+                    pluginRunStatus = job.job > 0
+                        ? "Queued job \(job.job)."
+                        : "Queued plugin (server did not return a job id)."
                 }
-                appModel.activity.add(.init(kind: .action, title: "Plugin job queued", detail: "\(pluginID) • \(arcid) • job \(job.job)"))
+                let detail = job.job > 0
+                    ? "\(pluginID) • \(arcid) • job \(job.job)"
+                    : "\(pluginID) • \(arcid) • queued (no job id returned)"
+                appModel.activity.add(.init(kind: .action, title: "Plugin job queued", detail: detail))
             } catch {
                 await MainActor.run {
                     pluginRunning = false

@@ -303,7 +303,10 @@ struct BatchView: View {
                     let job = try await pluginsVM.queue(profile: profile, pluginID: pluginID, arcid: arcid, arg: pluginArgText)
                     pluginsVM.trackQueuedJob(profile: profile, pluginID: pluginID, arcid: arcid, jobID: job.job)
                     ok += 1
-                    appModel.activity.add(.init(kind: .action, title: "Plugin job queued", detail: "\(pluginID) • \(arcid) • job \(job.job)"))
+                    let detail = job.job > 0
+                        ? "\(pluginID) • \(arcid) • job \(job.job)"
+                        : "\(pluginID) • \(arcid) • queued (no job id returned)"
+                    appModel.activity.add(.init(kind: .action, title: "Plugin job queued", detail: detail))
                 } catch {
                     fail += 1
                     appModel.activity.add(.init(kind: .error, title: "Plugin queue failed", detail: "\(pluginID) • \(arcid)\n\(error)"))

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -5,6 +6,7 @@ struct ActivityView: View {
     @EnvironmentObject private var appModel: AppModel
     @State private var searchText: String = ""
     @State private var filter: Filter = .all
+    @State private var copiedMessage: String?
 
     enum Filter: String, CaseIterable, Identifiable {
         case all
@@ -35,6 +37,11 @@ struct ActivityView: View {
                 Text("Activity")
                     .font(.title2)
                     .bold()
+                if let copiedMessage {
+                    Text(copiedMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 Picker("", selection: $filter) {
                     ForEach(Filter.allCases) { f in
@@ -78,6 +85,17 @@ struct ActivityView: View {
                             }
                         }
                         .padding(.vertical, 4)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if e.kind == .error {
+                                copyEventToClipboard(e)
+                            }
+                        }
+                        .contextMenu {
+                            Button("Copy Entry") {
+                                copyEventToClipboard(e)
+                            }
+                        }
                     }
                 }
                 .listStyle(.inset)
@@ -111,5 +129,17 @@ struct ActivityView: View {
             if let d = e.detail, d.lowercased().contains(needle) { return true }
             return false
         }
+    }
+
+    private func copyEventToClipboard(_ event: ActivityEvent) {
+        let parts = [
+            event.title,
+            event.detail
+        ]
+        let text = parts.compactMap { $0 }.joined(separator: "\n")
+        guard !text.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        copiedMessage = "Copied entry"
     }
 }

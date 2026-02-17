@@ -658,6 +658,11 @@ public final class LANraragiClient: @unchecked Sendable {
         if let jobID = findQueuedPluginJobID(in: obj) {
             return MinionJob(job: jobID)
         }
+        if queueResponseLooksSuccessful(obj) {
+            // Some LANraragi/plugin setups return only a success message with no Minion job id.
+            // Use 0 as a sentinel value for "queued/ran without trackable job id".
+            return MinionJob(job: 0)
+        }
 
         let err = NSError(
             domain: "LANraragiClient",
@@ -704,6 +709,47 @@ public final class LANraragiClient: @unchecked Sendable {
             return nil
         }
         return nil
+    }
+
+    private func queueResponseLooksSuccessful(_ value: Any) -> Bool {
+        func hasSuccessText(_ text: String) -> Bool {
+            let s = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !s.isEmpty else { return false }
+            if s.contains("error") || s.contains("fail") || s.contains("invalid") || s.contains("denied") {
+                return false
+            }
+            return s.contains("success")
+                || s.contains("queued")
+                || s.contains("enqueued")
+                || s.contains("started")
+                || s.contains("ok")
+        }
+
+        if let str = value as? String {
+            return hasSuccessText(str)
+        }
+        if let dict = value as? [String: Any] {
+            for key in ["success", "status", "message", "msg", "result"] {
+                if let val = dict[key], let text = stringValue(val), hasSuccessText(text) {
+                    return true
+                }
+            }
+            if let ok = dict["ok"] as? Bool, ok {
+                return true
+            }
+            if let success = dict["success"] as? Bool, success {
+                return true
+            }
+            return false
+        }
+        if let arr = value as? [Any] {
+            for item in arr {
+                if queueResponseLooksSuccessful(item) {
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     private func makeFormBody(_ items: [URLQueryItem]) -> Data {
