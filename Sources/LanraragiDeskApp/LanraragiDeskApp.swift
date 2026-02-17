@@ -10,6 +10,7 @@ struct LanraragiDeskApp: App {
                 .environmentObject(appModel)
         }
         .windowStyle(.automatic)
+        .windowToolbarStyle(.unifiedCompact(showsTitle: false))
         .commands {
             ReaderZoomCommands()
         }

@@ -62,6 +62,18 @@ struct RootView: View {
                 collapseRunCard = true
             }
         }
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        sidebarVisible.toggle()
+                    }
+                } label: {
+                    Image(systemName: sidebarVisible ? "sidebar.left" : "sidebar.right")
+                }
+                .help(sidebarVisible ? "Hide Sidebar" : "Show Sidebar")
+            }
+        }
     }
 
     @ViewBuilder
@@ -421,7 +433,10 @@ private final class TitlebarSidebarToggleNSView: NSView {
     }
 
     private weak var toggleButton: NSButton?
+    private weak var fallbackAccessoryButton: NSButton?
+    private weak var fallbackAccessoryController: NSTitlebarAccessoryViewController?
     private weak var observedWindow: NSWindow?
+    private var hasScheduledRetry: Bool = false
 
     deinit {
         NotificationCenter.default.removeObserver(self)
@@ -435,15 +450,36 @@ private final class TitlebarSidebarToggleNSView: NSView {
 
     func installIfNeeded() {
         guard let window else { return }
+        if installNearTrafficLights(window: window) {
+            hasScheduledRetry = false
+            removeFallbackAccessoryIfNeeded(window: window)
+            return
+        }
+
+        if installAccessoryFallback(window: window) {
+            hasScheduledRetry = false
+            return
+        }
+
+        scheduleInstallRetry()
+    }
+
+    @objc private func didPressToggleButton() {
+        onToggle?()
+    }
+
+    private func installNearTrafficLights(window: NSWindow) -> Bool {
         guard let mini = window.standardWindowButton(.miniaturizeButton),
-              let miniSuperview = mini.superview else { return }
+              let miniSuperview = mini.superview else { return false }
 
         removeStaleToggleButtons(window: window, keepSuperview: miniSuperview)
 
         if let existing = miniSuperview.subviews.compactMap({ $0 as? NSButton }).first(where: { $0.identifier == Self.toggleIdentifier }) {
             toggleButton = existing
+            fallbackAccessoryButton = nil
+            fallbackAccessoryController = nil
             updateButtonImage()
-            return
+            return true
         }
 
         let button = NSButton(frame: .zero)
@@ -466,17 +502,77 @@ private final class TitlebarSidebarToggleNSView: NSView {
         ])
 
         toggleButton = button
+        fallbackAccessoryButton = nil
+        fallbackAccessoryController = nil
         updateButtonImage()
+        return true
     }
 
-    @objc private func didPressToggleButton() {
-        onToggle?()
+    private func installAccessoryFallback(window: NSWindow) -> Bool {
+        if let existing = fallbackAccessoryController,
+           window.titlebarAccessoryViewControllers.contains(existing) {
+            updateButtonImage()
+            return true
+        }
+
+        let button = NSButton(frame: .zero)
+        button.identifier = Self.toggleIdentifier
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.title = ""
+        button.bezelStyle = .texturedRounded
+        button.controlSize = .small
+        button.imageScaling = .scaleProportionallyDown
+        button.toolTip = "Toggle Sidebar"
+        button.target = self
+        button.action = #selector(didPressToggleButton)
+
+        let host = NSView(frame: .init(x: 0, y: 0, width: 20, height: 20))
+        host.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(button)
+        NSLayoutConstraint.activate([
+            button.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            button.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            button.topAnchor.constraint(equalTo: host.topAnchor),
+            button.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            host.widthAnchor.constraint(equalToConstant: 20),
+            host.heightAnchor.constraint(equalToConstant: 20),
+        ])
+
+        let accessory = NSTitlebarAccessoryViewController()
+        accessory.layoutAttribute = .left
+        accessory.view = host
+        window.addTitlebarAccessoryViewController(accessory)
+
+        fallbackAccessoryController = accessory
+        fallbackAccessoryButton = button
+        toggleButton = nil
+        updateButtonImage()
+        return true
+    }
+
+    private func removeFallbackAccessoryIfNeeded(window: NSWindow) {
+        guard let accessory = fallbackAccessoryController else { return }
+        if let idx = window.titlebarAccessoryViewControllers.firstIndex(where: { $0 === accessory }) {
+            window.titlebarAccessoryViewControllers.remove(at: idx)
+        }
+        fallbackAccessoryController = nil
+        fallbackAccessoryButton = nil
+    }
+
+    private func scheduleInstallRetry() {
+        guard !hasScheduledRetry else { return }
+        hasScheduledRetry = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+            guard let self else { return }
+            self.hasScheduledRetry = false
+            self.installIfNeeded()
+        }
     }
 
     private func updateButtonImage() {
-        guard let button = toggleButton else { return }
         let symbol = isSidebarVisible ? "sidebar.left" : "sidebar.right"
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Toggle Sidebar")
+        toggleButton?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Toggle Sidebar")
+        fallbackAccessoryButton?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Toggle Sidebar")
     }
 
     private func removeStaleToggleButtons(window: NSWindow, keepSuperview: NSView) {

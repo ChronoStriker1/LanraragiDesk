@@ -142,7 +142,11 @@ See `CONTRIBUTING.md` (includes a rule to keep Markdown docs updated alongside c
 ## Roadmap (short)
 
 - [x] Profile + API connectivity
-- [ ] Fingerprint index (SQLite)
-- [ ] Candidate scan + verification
-- [ ] Manual review UI + persistent "not duplicates"
-- [ ] Full client features (reader/search/categories/etc)
+- [x] Fingerprint index (SQLite) + duplicate candidate scan
+- [x] Manual review UI + persistent "Not a match"
+- [x] Core client features (library/reader/metadata editor/batch/plugins/activity)
+- [x] Optional statistics page that mirrors LANraragi stats
+- [ ] Plugins: job status tracking UI (running/finished/failed)
+- [ ] Activity: structured entries + export/severity UX
+- [ ] Reader: add optional "Open in LANraragi" action and complete narrow-window verification
+- [ ] Duplicates: better "Not a match" management (search/undo) and additional error-path UX polish
