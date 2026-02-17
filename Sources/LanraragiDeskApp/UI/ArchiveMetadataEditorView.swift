@@ -34,6 +34,7 @@ struct ArchiveMetadataEditorView: View {
     @State private var pluginArgText: String = ""
     @State private var pluginRunning: Bool = false
     @State private var pluginRunStatus: String?
+    @State private var showPluginSettings: Bool = false
 
     private var groupedTags: [MetadataTagFormatter.Group] {
         MetadataTagFormatter.grouped(tags: tags)
@@ -226,18 +227,24 @@ struct ArchiveMetadataEditorView: View {
                             }
 
                             if !plugin.parameters.isEmpty {
-                                ScrollView(.vertical) {
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        ForEach(plugin.parameters) { param in
-                                            pluginOptionRow(param)
+                                DisclosureGroup(isExpanded: $showPluginSettings) {
+                                    ScrollView(.vertical) {
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            ForEach(plugin.parameters) { param in
+                                                pluginOptionRow(param)
+                                            }
                                         }
                                     }
+                                    .frame(maxHeight: 150)
+                                    .padding(.top, 4)
+                                } label: {
+                                    Text("Plugin settings")
+                                        .font(.caption.weight(.semibold))
                                 }
-                                .frame(maxHeight: 120)
                             }
                         }
 
-                        TextField(selectedPlugin?.oneshotArg ?? "Plugin arg (optional)", text: $pluginArgText)
+                        TextField(selectedPlugin?.oneshotArg ?? "Plugin URL/arg (optional)", text: $pluginArgText)
                             .textFieldStyle(.roundedBorder)
                             .disabled(isLoading || isDeleting || pluginRunning)
 
@@ -504,12 +511,22 @@ struct ArchiveMetadataEditorView: View {
     @ViewBuilder
     private func pluginOptionRow(_ param: PluginInfo.Parameter) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(param.name?.isEmpty == false ? param.name! : "Option")
-                .font(.caption2.weight(.semibold))
-            if let value = param.value, !value.isEmpty {
-                Text("Current: \(value)")
+            let title = pluginOptionName(param)
+            let fallbackValue = pluginOptionValueText(param)
+            if pluginOptionIsBool(param), let boolValue = pluginBoolValue(param) {
+                Toggle(isOn: .constant(boolValue)) {
+                    Text(title)
+                        .font(.caption2.weight(.semibold))
+                }
+                .toggleStyle(.switch)
+                .disabled(true)
+            } else {
+                Text(title)
+                    .font(.caption2.weight(.semibold))
+                TextField("", text: .constant(fallbackValue))
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(true)
                     .font(.caption2.monospaced())
-                    .foregroundStyle(.secondary)
             }
             if let desc = param.description, !desc.isEmpty {
                 Text(desc)
@@ -522,6 +539,37 @@ struct ArchiveMetadataEditorView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.primary.opacity(0.06))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func pluginOptionName(_ param: PluginInfo.Parameter) -> String {
+        let raw = param.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return raw.isEmpty ? "Option" : raw
+    }
+
+    private func pluginOptionValueText(_ param: PluginInfo.Parameter) -> String {
+        let value = param.value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !value.isEmpty { return value }
+        let fallback = param.defaultValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return fallback
+    }
+
+    private func pluginOptionIsBool(_ param: PluginInfo.Parameter) -> Bool {
+        let type = param.type?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        if type == "bool" || type == "boolean" { return true }
+        let v = pluginOptionValueText(param).lowercased()
+        return v == "true" || v == "false" || v == "1" || v == "0" || v == "yes" || v == "no"
+    }
+
+    private func pluginBoolValue(_ param: PluginInfo.Parameter) -> Bool? {
+        let v = pluginOptionValueText(param).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch v {
+        case "true", "1", "yes", "on":
+            return true
+        case "false", "0", "no", "off":
+            return false
+        default:
+            return nil
+        }
     }
 }
 
