@@ -15,7 +15,7 @@ macOS (Apple Silicon-first) LANraragi desktop client for managing a LANraragi se
   - Library cover previews are shown without a thumbnail border frame
   - Header toggle next to `Grid|List` to crop covers to fill the fixed preview area (centered, off by default)
   - Server-side paging (scales to large libraries)
-  - Default sort: **Newest added first** (`date_added desc`), with server capability detection and automatic fallback to Title when unsupported
+  - Default sort: **Newest added first** (`date_added desc`) with automatic fallback to Title when unsupported
   - Cover overlays: **NEW**, **Date added**, **Page count**
   - Hover a cover to show the selection checkbox (top-left)
   - Shows **Artist** and **Group** (when present) under the title (on separate lines)
@@ -29,9 +29,9 @@ macOS (Apple Silicon-first) LANraragi desktop client for managing a LANraragi se
   - List view uses a table with columns: Select, Title, New, Date, Artist, Group, Tags (sortable and re-orderable)
   - Filters: New only, Untagged only, Category (server-backed)
   - Right-click: open Reader, open in browser, edit metadata, copy archive id
-  - Open in browser now targets LANraragi reader URLs (`/reader?id=<arcid>`)
-  - Grid layout no longer forces fixed content width that can overflow the visible panel
-  - Library page state now persists while switching sidebar sections (no forced rebuild/reload on return)
+  - Open in browser opens LANraragi reader URLs (`/reader?id=<arcid>`)
+  - Adaptive grid layout that fits constrained panel widths
+  - Library page state persists while switching sidebar sections
 - **Duplicates**
   - Local cover fingerprint index (rebuilt at the start of every scan)
   - Finds **exact** and **similar** cover matches
@@ -39,12 +39,11 @@ macOS (Apple Silicon-first) LANraragi desktop client for managing a LANraragi se
   - Actions: delete left/right, mark “Not a match” (persisted locally and excluded from future scans)
   - Duplicates workflow events are logged to Activity (scan start/complete/fail/cancel, exclusions, removals, deletes)
   - Synced page preview scrolling for visual verification
-  - Review now appears directly under the Find Duplicates panel in the Duplicates page
-  - After a scan completes, the Find Duplicates panel auto-collapses to title-only so review gets more space (manual expand/collapse available)
-  - Separate Review sidebar tab removed (all duplicate review stays in Duplicates)
+  - Integrated review workspace directly in the Duplicates page
+  - Collapsible Find Duplicates panel to prioritize review space
 - **Reader**
   - Keyboard navigation
-  - Left/Right arrow keys now always move pages in addition to click zones and move commands
+  - Left/Right arrow key page navigation (in addition to click zones and move commands)
   - Optional auto-advance timer (off by default)
   - Two-page spread, fit modes, zoom controls
   - View zoom controls include Increase, Decrease, and Reset (`Cmd+=`, `Cmd+-`, `Cmd+0`)
@@ -55,7 +54,7 @@ macOS (Apple Silicon-first) LANraragi desktop client for managing a LANraragi se
   - Supports cover override by setting thumbnail from a selected archive page
   - Supports deleting the current archive with confirmation
   - Queue selected metadata plugins against the current archive
-  - Delete handling is resilient if an archive was already removed server-side (idempotent cleanup in Library and Duplicates flows)
+  - Delete flow handles already-removed archives safely across Library and Duplicates
   - Tags are shown grouped/sorted like Library hover tags (chip-based editor; raw CSV field hidden)
   - Date tags are rendered in human-readable form
   - Click-to-remove tag chips plus tag autocomplete from server database stats (configurable cache)
@@ -69,12 +68,12 @@ macOS (Apple Silicon-first) LANraragi desktop client for managing a LANraragi se
 - **Activity**
   - Local activity log with filtering and search
 - **Window chrome**
-  - Sidebar toggle is fixed in the titlebar next to the macOS traffic-light controls, at traffic-light button size
+  - Sidebar toggle in the titlebar next to macOS traffic-light controls
   - App title text is hidden from the titlebar (no extra `LanraragiDesk` title label in the window header)
-  - Native toolbar/titlebar remains enabled with compact style; sidebar uses a fixed top safe-area spacer to avoid titlebar overlap
+  - Compact native toolbar/titlebar styling with sidebar safe-area spacing
 - **Statistics** (optional; enable in Settings)
   - Sidebar page that mirrors LANraragi’s `/stats` behavior
-  - Tag cloud from `/api/database/stats?minweight=<n>` rendered with a WebKit/jQCloud view (cloud-like layout, lower CPU than the old SwiftUI flow layout)
+  - Tag cloud from `/api/database/stats?minweight=<n>` rendered with a WebKit/jQCloud view
   - Cloud rendering is capped to the top 1000 tags by weight for responsiveness
   - Detailed stats list sorted by weight (excluding `source` and `date_added`, matching LANraragi)
   - Header counters from server info (`total_archives`, `total_pages_read`, and distinct tag count)
