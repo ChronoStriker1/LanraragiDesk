@@ -581,7 +581,8 @@ struct ArchiveMetadataEditorView: View {
                     case .finished:
                         let changed = await refreshMetadataAfterPlugin(
                             status: "Plugin completed. Metadata refreshed.",
-                            previousSignature: prePluginSignature
+                            previousSignature: prePluginSignature,
+                            allowPluginOutputFallback: true
                         )
                         if !changed {
                             await applyMetadataFromPluginOutput(pluginID: pluginID, previousSignature: prePluginSignature)
@@ -593,7 +594,8 @@ struct ArchiveMetadataEditorView: View {
                     case .queued, .running, .unknown:
                         let changed = await refreshMetadataAfterPlugin(
                             status: "Plugin job \(job.job) ended with unknown state. Metadata refreshed.",
-                            previousSignature: prePluginSignature
+                            previousSignature: prePluginSignature,
+                            allowPluginOutputFallback: true
                         )
                         if !changed {
                             await applyMetadataFromPluginOutput(pluginID: pluginID, previousSignature: prePluginSignature)
@@ -602,7 +604,8 @@ struct ArchiveMetadataEditorView: View {
                 } else {
                     let changed = await refreshMetadataAfterPlugin(
                         status: "Plugin completed. Metadata refreshed.",
-                        previousSignature: prePluginSignature
+                        previousSignature: prePluginSignature,
+                        allowPluginOutputFallback: true
                     )
                     if !changed {
                         await applyMetadataFromPluginOutput(pluginID: pluginID, previousSignature: prePluginSignature)
@@ -618,7 +621,11 @@ struct ArchiveMetadataEditorView: View {
         }
     }
 
-    private func refreshMetadataAfterPlugin(status: String, previousSignature: String? = nil) async -> Bool {
+    private func refreshMetadataAfterPlugin(
+        status: String,
+        previousSignature: String? = nil,
+        allowPluginOutputFallback: Bool = false
+    ) async -> Bool {
         do {
             var updated: ArchiveMetadata?
             for attempt in 0..<6 {
@@ -646,14 +653,21 @@ struct ArchiveMetadataEditorView: View {
                 metadataSignature(title: updated.title ?? "", tags: updated.tags ?? "", summary: updated.summary ?? "") != $0
             } ?? true
             await MainActor.run {
-                apply(meta: updated)
-                pluginRunStatus = changed ? status : "Plugin completed. No metadata changes detected."
+                if changed {
+                    apply(meta: updated)
+                    pluginRunStatus = status
+                } else if allowPluginOutputFallback {
+                    pluginRunStatus = "Plugin completed. Applying plugin output…"
+                } else {
+                    apply(meta: updated)
+                    pluginRunStatus = "Plugin completed. No metadata changes detected."
+                }
             }
-            appModel.activity.add(.init(
-                kind: .action,
-                title: changed ? "Plugin metadata refreshed" : "Plugin completed with no metadata changes",
-                detail: arcid
-            ))
+            if changed {
+                appModel.activity.add(.init(kind: .action, title: "Plugin metadata refreshed", detail: arcid))
+            } else if !allowPluginOutputFallback {
+                appModel.activity.add(.init(kind: .action, title: "Plugin completed with no metadata changes", detail: arcid))
+            }
             return changed
         } catch {
             await MainActor.run {
