@@ -310,18 +310,35 @@ public final class LANraragiClient: @unchecked Sendable {
             items.append(URLQueryItem(name: "arg", value: arg))
         }
         let data = try await getData(path: "/api/plugins/queue", queryItems: items)
-        return try parseQueuedPluginJob(from: data)
+        do {
+            return try parseQueuedPluginJob(from: data)
+        } catch let LANraragiError.decoding(queueDecodeError) {
+            // Compatibility fallback: some servers/plugins don't return a Minion job for queue.
+            // Use the synchronous plugin endpoint; success is represented by job=0 (untrackable).
+            do {
+                _ = try await runPlugin(pluginID: pluginID, arcid: arcid, arg: arg)
+                return MinionJob(job: 0)
+            } catch {
+                // Surface the real fallback failure to aid diagnostics.
+                _ = queueDecodeError
+                throw error
+            }
+        }
     }
 
     public func runPlugin(pluginID: String, arcid: String, arg: String? = nil) async throws -> String {
-        var items: [URLQueryItem] = [
+        var formItems: [URLQueryItem] = [
             URLQueryItem(name: "plugin", value: pluginID),
             URLQueryItem(name: "id", value: arcid),
         ]
         if let arg, !arg.isEmpty {
-            items.append(URLQueryItem(name: "arg", value: arg))
+            formItems.append(URLQueryItem(name: "arg", value: arg))
         }
-        let data = try await getData(path: "/api/plugins/use", queryItems: items)
+        let data = try await postData(
+            path: "/api/plugins/use",
+            body: makeFormBody(formItems),
+            contentType: "application/x-www-form-urlencoded; charset=utf-8"
+        )
         return String(decoding: data, as: UTF8.self)
     }
 
@@ -454,6 +471,43 @@ public final class LANraragiClient: @unchecked Sendable {
         return try await perform(req)
     }
 
+    private func postData(
+        path: String,
+        queryItems: [URLQueryItem] = [],
+        body: Data?,
+        contentType: String? = nil
+    ) async throws -> Data {
+        let url = try makeURL(path: path, queryItems: queryItems)
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        applyDefaultHeaders(to: &req)
+        if let contentType {
+            req.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        }
+        req.httpBody = body
+
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await session.data(for: req)
+        } catch {
+            throw LANraragiError.transport(error)
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw LANraragiError.invalidResponse
+        }
+
+        if http.statusCode == 401 {
+            throw LANraragiError.unauthorized
+        }
+
+        guard (200...299).contains(http.statusCode) else {
+            throw LANraragiError.httpStatus(http.statusCode, body: data)
+        }
+
+        return data
+    }
+
     private func perform<T: Decodable>(_ req: URLRequest) async throws -> T {
         let (data, response): (Data, URLResponse)
         do {
@@ -544,7 +598,11 @@ public final class LANraragiClient: @unchecked Sendable {
             if let s = item as? String {
                 out.append(.init(id: s, title: s))
             } else if let d = item as? [String: Any] {
-                let id = (d["id"] as? String) ?? (d["name"] as? String) ?? (d["plugin"] as? String) ?? ""
+                let id = (d["id"] as? String)
+                    ?? (d["namespace"] as? String)
+                    ?? (d["plugin"] as? String)
+                    ?? (d["name"] as? String)
+                    ?? ""
                 let title = (d["title"] as? String) ?? (d["name"] as? String) ?? id
                 let desc = (d["desc"] as? String) ?? (d["description"] as? String)
                 let oneshotArg = (d["oneshot_arg"] as? String) ?? (d["oneshotArg"] as? String)
