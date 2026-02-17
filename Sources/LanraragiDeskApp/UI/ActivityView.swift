@@ -61,6 +61,16 @@ struct ActivityView: View {
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 220)
 
+                Button("Export JSON") {
+                    exportJSON()
+                }
+                .disabled(filteredEvents.isEmpty)
+
+                Button("Export CSV") {
+                    exportCSV()
+                }
+                .disabled(filteredEvents.isEmpty)
+
                 Button("Clear", role: .destructive) {
                     appModel.activity.clear()
                 }
@@ -77,8 +87,19 @@ struct ActivityView: View {
                         let rendered = renderEvent(e)
                         VStack(alignment: .leading, spacing: 4) {
                             HStack(alignment: .firstTextBaseline) {
+                                Image(systemName: severitySymbol(for: e.kind))
+                                    .foregroundStyle(severityColor(for: e.kind))
+                                    .font(.caption.weight(.semibold))
                                 Text(rendered.title)
                                     .font(.callout)
+                                if let component = e.component, !component.isEmpty {
+                                    Text(component)
+                                        .font(.caption2.weight(.semibold))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Color.primary.opacity(0.08))
+                                        .clipShape(Capsule())
+                                }
                                 Spacer()
                                 Text(Self.formatter.string(from: e.date))
                                     .font(.caption)
@@ -97,6 +118,18 @@ struct ActivityView: View {
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                             .textSelection(.enabled)
+                                    }
+                                }
+                            }
+                            if let metadata = e.metadata, !metadata.isEmpty {
+                                HStack(spacing: 6) {
+                                    ForEach(metadata.sorted(by: { $0.key < $1.key }), id: \.key) { pair in
+                                        Text("\(pair.key): \(pair.value)")
+                                            .font(.caption2.monospaced())
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color.primary.opacity(0.06))
+                                            .clipShape(Capsule())
                                     }
                                 }
                             }
@@ -144,6 +177,14 @@ struct ActivityView: View {
         return base.filter { e in
             if e.title.lowercased().contains(needle) { return true }
             if let d = e.detail, d.lowercased().contains(needle) { return true }
+            if let c = e.component, c.lowercased().contains(needle) { return true }
+            if let metadata = e.metadata {
+                for (k, v) in metadata {
+                    if k.lowercased().contains(needle) || v.lowercased().contains(needle) {
+                        return true
+                    }
+                }
+            }
             return false
         }
     }
@@ -241,4 +282,100 @@ struct ActivityView: View {
         }
         return trimmed
     }
+
+    private func severitySymbol(for kind: ActivityEvent.Kind) -> String {
+        switch kind {
+        case .error:
+            return "xmark.octagon.fill"
+        case .warning:
+            return "exclamationmark.triangle.fill"
+        case .action:
+            return "checkmark.circle.fill"
+        case .info:
+            return "info.circle.fill"
+        }
+    }
+
+    private func severityColor(for kind: ActivityEvent.Kind) -> Color {
+        switch kind {
+        case .error:
+            return .red
+        case .warning:
+            return .orange
+        case .action:
+            return .green
+        case .info:
+            return .blue
+        }
+    }
+
+    private func exportJSON() {
+        let panel = NSSavePanel()
+        panel.title = "Export Activity"
+        panel.nameFieldStringValue = "activity-export.json"
+        panel.allowedContentTypes = [.json]
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(filteredEvents)
+            try data.write(to: url, options: [.atomic])
+            copiedMessage = "Exported JSON"
+        } catch {
+            copiedMessage = "Export failed"
+        }
+    }
+
+    private func exportCSV() {
+        let panel = NSSavePanel()
+        panel.title = "Export Activity"
+        panel.nameFieldStringValue = "activity-export.csv"
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        let rows = filteredEvents.map { event in
+            [
+                iso8601(event.date),
+                event.kind.rawValue,
+                event.component ?? "",
+                event.title,
+                event.detail ?? "",
+                flattenedMetadata(event.metadata)
+            ]
+            .map(csvEscape)
+            .joined(separator: ",")
+        }
+        let csv = (["timestamp,kind,component,title,detail,metadata"] + rows).joined(separator: "\n")
+        do {
+            try csv.data(using: .utf8)?.write(to: url, options: [.atomic])
+            copiedMessage = "Exported CSV"
+        } catch {
+            copiedMessage = "Export failed"
+        }
+    }
+
+    private func csvEscape(_ value: String) -> String {
+        let escaped = value.replacingOccurrences(of: "\"", with: "\"\"")
+        return "\"\(escaped)\""
+    }
+
+    private func flattenedMetadata(_ metadata: [String: String]?) -> String {
+        guard let metadata, !metadata.isEmpty else { return "" }
+        return metadata
+            .sorted(by: { $0.key < $1.key })
+            .map { "\($0.key)=\($0.value)" }
+            .joined(separator: "; ")
+    }
+
+    private func iso8601(_ date: Date) -> String {
+        Self.isoFormatter.string(from: date)
+    }
+
+    private static let isoFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
 }

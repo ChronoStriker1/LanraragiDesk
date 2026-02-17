@@ -13,13 +13,24 @@ struct ActivityEvent: Identifiable, Codable, Equatable {
     var kind: Kind
     var title: String
     var detail: String?
+    var component: String?
+    var metadata: [String: String]?
 
-    init(id: UUID = UUID(), date: Date = Date(), kind: Kind, title: String, detail: String? = nil) {
+    init(
+        id: UUID = UUID(),
+        date: Date = Date(),
+        kind: Kind,
+        title: String,
+        detail: String? = nil,
+        component: String? = nil,
+        metadata: [String: String]? = nil
+    ) {
         self.id = id
         self.date = date
         self.kind = kind
         self.title = title
         self.detail = detail
+        self.component = component
+        self.metadata = metadata
     }
 }
-
