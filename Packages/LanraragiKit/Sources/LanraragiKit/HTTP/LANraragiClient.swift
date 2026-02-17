@@ -309,7 +309,8 @@ public final class LANraragiClient: @unchecked Sendable {
         if let arg, !arg.isEmpty {
             items.append(URLQueryItem(name: "arg", value: arg))
         }
-        return try await getJSON(path: "/api/plugins/queue", queryItems: items)
+        let data = try await getData(path: "/api/plugins/queue", queryItems: items)
+        return try parseQueuedPluginJob(from: data)
     }
 
     public func runPlugin(pluginID: String, arcid: String, arg: String? = nil) async throws -> String {
@@ -640,6 +641,69 @@ public final class LANraragiClient: @unchecked Sendable {
             return json
         }
         return String(describing: value)
+    }
+
+    private func parseQueuedPluginJob(from data: Data) throws -> MinionJob {
+        if let job = try? JSONDecoder().decode(MinionJob.self, from: data) {
+            return job
+        }
+
+        let obj: Any
+        do {
+            obj = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            throw LANraragiError.decoding(error)
+        }
+
+        if let jobID = findQueuedPluginJobID(in: obj) {
+            return MinionJob(job: jobID)
+        }
+
+        let err = NSError(
+            domain: "LANraragiClient",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Unable to parse plugin queue job id from response."]
+        )
+        throw LANraragiError.decoding(err)
+    }
+
+    private func findQueuedPluginJobID(in value: Any) -> Int? {
+        if let int = value as? Int {
+            return int
+        }
+        if let num = value as? NSNumber {
+            if CFGetTypeID(num) == CFBooleanGetTypeID() {
+                return nil
+            }
+            return num.intValue
+        }
+        if let str = value as? String {
+            let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
+            return Int(trimmed)
+        }
+        if let dict = value as? [String: Any] {
+            let preferredKeys = ["job", "job_id", "jobId", "id"]
+            for key in preferredKeys {
+                if let found = dict[key], let parsed = findQueuedPluginJobID(in: found) {
+                    return parsed
+                }
+            }
+            for nested in dict.values where nested is [Any] || nested is [String: Any] {
+                if let parsed = findQueuedPluginJobID(in: nested) {
+                    return parsed
+                }
+            }
+            return nil
+        }
+        if let arr = value as? [Any] {
+            for item in arr {
+                if let parsed = findQueuedPluginJobID(in: item) {
+                    return parsed
+                }
+            }
+            return nil
+        }
+        return nil
     }
 
     private func makeFormBody(_ items: [URLQueryItem]) -> Data {
