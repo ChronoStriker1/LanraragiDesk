@@ -534,14 +534,100 @@ public final class LANraragiClient: @unchecked Sendable {
                 let id = (d["id"] as? String) ?? (d["name"] as? String) ?? (d["plugin"] as? String) ?? ""
                 let title = (d["title"] as? String) ?? (d["name"] as? String) ?? id
                 let desc = (d["desc"] as? String) ?? (d["description"] as? String)
+                let oneshotArg = (d["oneshot_arg"] as? String) ?? (d["oneshotArg"] as? String)
+                let parameters = parsePluginParameters(d["parameters"])
                 if !id.isEmpty || !title.isEmpty {
-                    out.append(.init(id: id.isEmpty ? title : id, title: title.isEmpty ? id : title, description: desc))
+                    out.append(.init(
+                        id: id.isEmpty ? title : id,
+                        title: title.isEmpty ? id : title,
+                        description: desc,
+                        oneshotArg: oneshotArg,
+                        parameters: parameters
+                    ))
                 }
             }
         }
 
         out.sort { a, b in a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending }
         return out
+    }
+
+    private func parsePluginParameters(_ raw: Any?) -> [PluginInfo.Parameter] {
+        if let arr = raw as? [Any] {
+            return arr.enumerated().compactMap { idx, item in
+                if let dict = item as? [String: Any] {
+                    let name = stringValue(dict["name"])
+                    let id = (name?.isEmpty == false ? name! : "param_\(idx)")
+                    let defaultValue: String?
+                    if let v = stringValue(dict["default_value"]) {
+                        defaultValue = v
+                    } else {
+                        defaultValue = stringValue(dict["default"])
+                    }
+                    return .init(
+                        id: id,
+                        name: name,
+                        type: stringValue(dict["type"]),
+                        description: stringValue(dict["desc"]) ?? stringValue(dict["description"]),
+                        value: stringValue(dict["value"]),
+                        defaultValue: defaultValue
+                    )
+                }
+
+                if let text = stringValue(item), !text.isEmpty {
+                    return .init(id: "param_\(idx)", description: text)
+                }
+                return nil
+            }
+        }
+
+        // Some servers can still return a hash keyed by parameter names.
+        if let dict = raw as? [String: Any] {
+            return dict.keys.sorted().enumerated().compactMap { idx, key in
+                if let valueDict = dict[key] as? [String: Any] {
+                    let defaultValue: String?
+                    if let v = stringValue(valueDict["default_value"]) {
+                        defaultValue = v
+                    } else {
+                        defaultValue = stringValue(valueDict["default"])
+                    }
+                    return .init(
+                        id: key.isEmpty ? "param_\(idx)" : key,
+                        name: key,
+                        type: stringValue(valueDict["type"]),
+                        description: stringValue(valueDict["desc"]) ?? stringValue(valueDict["description"]),
+                        value: stringValue(valueDict["value"]),
+                        defaultValue: defaultValue
+                    )
+                }
+
+                return .init(
+                    id: key.isEmpty ? "param_\(idx)" : key,
+                    name: key,
+                    value: stringValue(dict[key])
+                )
+            }
+        }
+
+        return []
+    }
+
+    private func stringValue(_ value: Any?) -> String? {
+        guard let value else { return nil }
+        if let s = value as? String { return s }
+        if let b = value as? Bool { return b ? "true" : "false" }
+        if let n = value as? NSNumber { return n.stringValue }
+        if let arr = value as? [Any] {
+            let parts = arr.compactMap { stringValue($0) }.filter { !$0.isEmpty }
+            return parts.isEmpty ? nil : parts.joined(separator: ", ")
+        }
+        if let dict = value as? [String: Any],
+           JSONSerialization.isValidJSONObject(dict),
+           let data = try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys]),
+           let json = String(data: data, encoding: .utf8) {
+            return json
+        }
+        return String(describing: value)
     }
 
     private func makeFormBody(_ items: [URLQueryItem]) -> Data {
