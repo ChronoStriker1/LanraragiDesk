@@ -476,19 +476,18 @@ struct LibraryView: View {
             .width(min: 54, ideal: 54, max: 54)
 
             TableColumn("Title", value: \.title) { row in
-                Button {
-                    openReader(row.arcid)
-                } label: {
-                    HStack(spacing: 10) {
-                        CoverThumb(profile: profile, arcid: row.arcid, thumbnails: appModel.thumbnails, size: .init(width: 38, height: 52), showsBorder: false)
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                HStack(spacing: 10) {
+                    CoverThumb(profile: profile, arcid: row.arcid, thumbnails: appModel.thumbnails, size: .init(width: 38, height: 52), showsBorder: false)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-                        Text(row.title)
-                            .font(.callout)
-                            .lineLimit(1)
-                    }
+                    Text(row.title)
+                        .font(.callout)
+                        .lineLimit(1)
                 }
-                .buttonStyle(.plain)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    openReader(row.arcid)
+                }
                 .task(id: row.arcid) {
                     if metaByArcid[row.arcid] != nil { return }
                     do {
@@ -787,38 +786,32 @@ private struct LibraryCard: View {
     var body: some View {
         VStack(alignment: .center, spacing: 8) {
             ZStack(alignment: .topLeading) {
-                Button {
-                    openReaderFromCard()
-                } label: {
-                    CoverThumb(profile: profile, arcid: arcid, thumbnails: appModel.thumbnails, size: Self.coverSize, showsBorder: false)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .overlay(alignment: .topLeading) {
-                            if meta?.isnew == true {
-                                CoverBadge(text: "NEW", background: .green.opacity(0.55))
+                CoverThumb(profile: profile, arcid: arcid, thumbnails: appModel.thumbnails, size: Self.coverSize, showsBorder: false)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(alignment: .topLeading) {
+                        if meta?.isnew == true {
+                            CoverBadge(text: "NEW", background: .green.opacity(0.55))
+                                .padding(8)
+                        }
+                    }
+                    .overlay(alignment: .topTrailing) {
+                        ZStack(alignment: .topTrailing) {
+                            if let d = ArchiveMetaHelpers.dateAdded(meta) {
+                                CoverBadge(text: Self.dateFormatter.string(from: d))
                                     .padding(8)
                             }
                         }
-                        .overlay(alignment: .topTrailing) {
-                            ZStack(alignment: .topTrailing) {
-                                if let d = ArchiveMetaHelpers.dateAdded(meta) {
-                                    CoverBadge(text: Self.dateFormatter.string(from: d))
-                                        .padding(8)
-                                }
+                    }
+                    .overlay(alignment: .bottom) {
+                        if let pages = meta?.pagecount, pages > 0 {
+                            HStack {
+                                Spacer(minLength: 0)
+                                CoverBadge(text: "\(pages) pages")
+                                Spacer(minLength: 0)
                             }
+                            .padding(8)
                         }
-                        .overlay(alignment: .bottom) {
-                            if let pages = meta?.pagecount, pages > 0 {
-                                HStack {
-                                    Spacer(minLength: 0)
-                                    CoverBadge(text: "\(pages) pages")
-                                    Spacer(minLength: 0)
-                                }
-                                .padding(8)
-                            }
-                        }
-                }
-                .buttonStyle(.plain)
-                .help("Open reader")
+                    }
                 .onHover { hovering in
                     hoveringCover = hovering
                     updatePopoverVisibility()
@@ -890,12 +883,14 @@ private struct LibraryCard: View {
             }
             .scrollIndicators(.hidden)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .onTapGesture {
-                openReaderFromCard()
-            }
         }
         .padding(10)
         .frame(width: Self.outerCardWidth, height: Self.outerCardHeight, alignment: .top)
+        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .onTapGesture {
+            openReaderFromCard()
+        }
+        .help("Open reader")
         .background(.quaternary.opacity(0.35))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay {
