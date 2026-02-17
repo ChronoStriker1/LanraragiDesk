@@ -23,6 +23,7 @@ struct LibraryView: View {
 
     // Used by list/table view to avoid refetching metadata per-cell.
     @State private var metaByArcid: [String: ArchiveMetadata] = [:]
+    @State private var metadataEpoch: Int = 0
     @State private var listSortOrder: [KeyPathComparator<LibraryListRow>] = [
         .init(\.dateAddedSortKey, order: .reverse)
     ]
@@ -65,6 +66,7 @@ struct LibraryView: View {
                 archives: appModel.archives,
                 onSaved: { updated in
                     metaByArcid[updated.arcid] = updated
+                    metadataEpoch &+= 1
                 },
                 onDelete: { arcid in
                     do {
@@ -72,7 +74,7 @@ struct LibraryView: View {
                         await appModel.thumbnails.invalidate(profile: profile, arcid: arcid)
                         appModel.selection.remove(arcid)
                         metaByArcid[arcid] = nil
-                        vm.refresh(profile: profile)
+                        refreshLibrary()
                         appModel.activity.add(.init(kind: .action, title: "Deleted archive", detail: arcid))
                     } catch {
                         appModel.activity.add(.init(kind: .error, title: "Delete archive failed", detail: "\(arcid)\n\(error)"))
@@ -87,22 +89,22 @@ struct LibraryView: View {
                 queryDraft = vm.query
             }
             if vm.arcids.isEmpty {
-                vm.refresh(profile: profile)
+                refreshLibrary()
             }
             Task { await vm.loadCategories(profile: profile) }
             Task { await prewarmTagSuggestions() }
         }
         .onChange(of: vm.sort) { _, _ in
-            vm.refresh(profile: profile)
+            refreshLibrary()
         }
         .onChange(of: vm.newOnly) { _, _ in
-            vm.refresh(profile: profile)
+            refreshLibrary()
         }
         .onChange(of: vm.untaggedOnly) { _, _ in
-            vm.refresh(profile: profile)
+            refreshLibrary()
         }
         .onChange(of: vm.categoryID) { _, _ in
-            vm.refresh(profile: profile)
+            refreshLibrary()
         }
         .onReceive(appModel.$librarySearchRequest) { request in
             guard let request else { return }
@@ -111,7 +113,7 @@ struct LibraryView: View {
             let normalized = normalizeLANraragiQuery(request.query)
             queryDraft = normalized
             vm.query = normalized
-            vm.refresh(profile: profile)
+            refreshLibrary()
             searchFocused = false
             tagSuggestions = []
             appModel.consumeLibrarySearchRequest(id: request.id)
@@ -165,7 +167,7 @@ struct LibraryView: View {
                         Button("Clear") {
                             queryDraft = ""
                             vm.query = ""
-                            vm.refresh(profile: profile)
+                            refreshLibrary()
                         }
                         .disabled(queryDraft.isEmpty)
                     }
@@ -363,6 +365,12 @@ struct LibraryView: View {
         let normalized = normalizeLANraragiQuery(queryDraft)
         queryDraft = normalized
         vm.query = normalized
+        refreshLibrary()
+    }
+
+    private func refreshLibrary() {
+        metadataEpoch &+= 1
+        metaByArcid.removeAll()
         vm.refresh(profile: profile)
     }
 
@@ -387,6 +395,7 @@ struct LibraryView: View {
                         LibraryCard(
                             profile: profile,
                             arcid: arcid,
+                            metadataEpoch: metadataEpoch,
                             allowHoverDetails: hoveringArchiveResultsArea,
                             onSelectTag: addTagToQuery,
                             onOpenReader: {
@@ -488,7 +497,7 @@ struct LibraryView: View {
                 .onTapGesture {
                     openReader(row.arcid)
                 }
-                .task(id: row.arcid) {
+                .task(id: "\(row.arcid)#\(metadataEpoch)") {
                     if metaByArcid[row.arcid] != nil { return }
                     do {
                         let meta = try await appModel.archives.metadata(profile: profile, arcid: row.arcid)
@@ -760,6 +769,7 @@ private struct LibraryCard: View {
 
     let profile: Profile
     let arcid: String
+    let metadataEpoch: Int
     var allowHoverDetails: Bool = true
     let onSelectTag: (String) -> Void
     let onOpenReader: () -> Void
@@ -897,7 +907,7 @@ private struct LibraryCard: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .strokeBorder(Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 1)
         }
-        .task(id: arcid) {
+        .task(id: "\(arcid)#\(metadataEpoch)") {
             do {
                 let meta = try await appModel.archives.metadata(profile: profile, arcid: arcid)
                 let t = meta.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
