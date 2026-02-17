@@ -17,6 +17,12 @@ struct BatchView: View {
     @State private var pluginRunning: Bool = false
     @State private var pluginRunStatus: String?
     @State private var showPluginSettings: Bool = false
+    @State private var selectedArchiveNames: [String: String] = [:]
+    @State private var selectedNamesTask: Task<Void, Never>?
+    @State private var previewRows: [BatchPreviewRow] = []
+    @State private var previewStatus: String?
+    @State private var previewRunning: Bool = false
+    @State private var previewTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -43,15 +49,21 @@ struct BatchView: View {
                             LazyVStack(alignment: .leading, spacing: 6) {
                                 ForEach(selectedArcidsSorted, id: \.self) { arcid in
                                     HStack(spacing: 8) {
-                                        Text(arcid)
-                                            .font(.caption.monospaced())
-                                            .textSelection(.enabled)
-                                        Spacer()
-                                        Button("Remove") {
+                                        Button {
                                             appModel.selection.remove(arcid)
+                                        } label: {
+                                            Image(systemName: "minus.circle.fill")
+                                                .foregroundStyle(.red)
                                         }
                                         .buttonStyle(.borderless)
                                         .disabled(running || pluginRunning)
+
+                                        Text(displayName(for: arcid))
+                                            .font(.caption)
+                                            .lineLimit(1)
+                                            .textSelection(.enabled)
+                                            .help(arcid)
+                                        Spacer()
                                     }
                                     .padding(.vertical, 2)
                                 }
@@ -63,6 +75,61 @@ struct BatchView: View {
                 .padding(8)
             }
             .debugFrameNumber(5)
+
+            GroupBox("Preview (sample)") {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Button(previewRunning ? "Generating…" : "Generate Preview") {
+                            generatePreview()
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(previewRunning || running || pluginRunning || selectedArcidsSorted.isEmpty)
+
+                        if !previewRows.isEmpty || previewStatus != nil {
+                            Button("Clear") {
+                                previewTask?.cancel()
+                                previewTask = nil
+                                previewRows = []
+                                previewStatus = nil
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(previewRunning)
+                        }
+                        Spacer()
+                    }
+
+                    if let previewStatus {
+                        Text(previewStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if !previewRows.isEmpty {
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 8) {
+                                ForEach(previewRows) { row in
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(row.filename)
+                                            .font(.caption.weight(.semibold))
+                                            .lineLimit(1)
+                                        Text(row.detail)
+                                            .font(.caption2)
+                                            .foregroundStyle(row.kind == .error ? .red : .secondary)
+                                            .textSelection(.enabled)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(8)
+                                    .background(Color.primary.opacity(0.06))
+                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 220)
+                    }
+                }
+                .padding(8)
+            }
+            .debugFrameNumber(6)
 
             GroupBox("Tag operations") {
                 VStack(alignment: .leading, spacing: 12) {
@@ -203,10 +270,21 @@ struct BatchView: View {
         .debugFrameNumber(1)
         .onDisappear {
             task?.cancel()
+            selectedNamesTask?.cancel()
+            previewTask?.cancel()
         }
         .task(id: appModel.selectedProfileID) {
             await loadPlugins()
+            refreshSelectedArchiveNames()
         }
+        .onChange(of: selectedArcidsSorted) { _, _ in
+            refreshSelectedArchiveNames()
+            invalidatePreview()
+        }
+        .onChange(of: addTagsText) { _, _ in invalidatePreview() }
+        .onChange(of: removeTagsText) { _, _ in invalidatePreview() }
+        .onChange(of: selectedPluginID) { _, _ in invalidatePreview() }
+        .onChange(of: pluginArgText) { _, _ in invalidatePreview() }
     }
 
     private func run() {
@@ -392,6 +470,132 @@ struct BatchView: View {
 
     private var selectedArcidsSorted: [String] {
         Array(appModel.selection.arcids).sorted()
+    }
+
+    private func displayName(for arcid: String) -> String {
+        selectedArchiveNames[arcid] ?? arcid
+    }
+
+    private func refreshSelectedArchiveNames() {
+        selectedNamesTask?.cancel()
+        guard let profile = appModel.selectedProfile else {
+            selectedArchiveNames = [:]
+            return
+        }
+        let arcids = selectedArcidsSorted
+        let keep = Set(arcids)
+        selectedArchiveNames = selectedArchiveNames.filter { keep.contains($0.key) }
+
+        selectedNamesTask = Task {
+            for arcid in arcids where !Task.isCancelled {
+                if selectedArchiveNames[arcid] != nil { continue }
+                do {
+                    let meta = try await appModel.archives.metadata(profile: profile, arcid: arcid)
+                    let display = archiveDisplayName(metadata: meta, arcid: arcid)
+                    await MainActor.run {
+                        if appModel.selection.contains(arcid) {
+                            selectedArchiveNames[arcid] = display
+                        }
+                    }
+                } catch {
+                    await MainActor.run {
+                        if appModel.selection.contains(arcid) {
+                            selectedArchiveNames[arcid] = arcid
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func archiveDisplayName(metadata: ArchiveMetadata, arcid: String) -> String {
+        let filename = (metadata.filename ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !filename.isEmpty { return filename }
+        let title = (metadata.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !title.isEmpty { return title }
+        return arcid
+    }
+
+    private func invalidatePreview() {
+        previewTask?.cancel()
+        previewTask = nil
+        previewRows = []
+        previewStatus = nil
+    }
+
+    private func generatePreview(sampleSize: Int = 10) {
+        previewTask?.cancel()
+        guard let profile = appModel.selectedProfile else { return }
+        let arcids = Array(selectedArcidsSorted.prefix(sampleSize))
+        guard !arcids.isEmpty else { return }
+
+        let add = parseTags(addTagsText)
+        let remove = parseTags(removeTagsText)
+        let pluginID = selectedPluginID
+        let hasTagOps = !add.isEmpty || !remove.isEmpty
+        let hasPluginOp = pluginID != nil
+
+        previewRunning = true
+        previewRows = []
+        previewStatus = "Generating preview for \(arcids.count) archives…"
+
+        previewTask = Task {
+            var rows: [BatchPreviewRow] = []
+
+            for arcid in arcids where !Task.isCancelled {
+                do {
+                    let meta = try await appModel.archives.metadata(profile: profile, arcid: arcid)
+                    let filename = archiveDisplayName(metadata: meta, arcid: arcid)
+                    await MainActor.run {
+                        selectedArchiveNames[arcid] = filename
+                    }
+
+                    var details: [String] = []
+                    if hasTagOps {
+                        let oldTags = meta.tags ?? ""
+                        let newTags = applyTagEdits(old: oldTags, add: add, remove: remove)
+                        let changed = normalizeTags(oldTags) != normalizeTags(newTags)
+                        details.append(changed ? "Tags would change to: \(newTags)" : "Tags unchanged.")
+                    }
+                    if let pluginID {
+                        let pluginArg = pluginArgText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if pluginArg.isEmpty {
+                            details.append("Plugin \(pluginID) would run.")
+                        } else {
+                            details.append("Plugin \(pluginID) would run with arg: \(pluginArg)")
+                        }
+                    }
+                    if details.isEmpty {
+                        details.append("No operations selected.")
+                    }
+
+                    rows.append(.init(
+                        arcid: arcid,
+                        filename: filename,
+                        detail: details.joined(separator: "\n"),
+                        kind: .normal
+                    ))
+                } catch {
+                    rows.append(.init(
+                        arcid: arcid,
+                        filename: arcid,
+                        detail: "Preview failed: \(ErrorPresenter.short(error))",
+                        kind: .error
+                    ))
+                }
+            }
+
+            await MainActor.run {
+                previewRows = rows
+                previewRunning = false
+                let suffix = selectedArcidsSorted.count > sampleSize ? " (sample of \(sampleSize))" : ""
+                if !hasTagOps && !hasPluginOp {
+                    previewStatus = "Preview generated\(suffix), but no operations are currently configured."
+                } else {
+                    previewStatus = "Preview generated for \(rows.count) archives\(suffix)."
+                }
+            }
+        }
     }
 
     private func refreshMetadataAfterPluginBatch(
@@ -582,4 +786,17 @@ struct BatchView: View {
             return nil
         }
     }
+}
+
+private struct BatchPreviewRow: Identifiable {
+    enum Kind {
+        case normal
+        case error
+    }
+
+    var id: String { arcid }
+    let arcid: String
+    let filename: String
+    let detail: String
+    let kind: Kind
 }
