@@ -222,17 +222,20 @@ struct BatchView: View {
                         .textFieldStyle(.roundedBorder)
                         .disabled(running || pluginRunning)
 
-                    HStack(spacing: 8) {
-                        Text("Delay (sec)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        TextField("4", text: $pluginDelayText)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 90)
-                            .disabled(running || pluginRunning)
-                    }
-
                     HStack {
+                        HStack(spacing: 8) {
+                            Text("Delay (sec)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            TextField("4", text: $pluginDelayText)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 90)
+                                .disabled(running || pluginRunning)
+                            Text("between runs")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+
                         Button(pluginRunning ? "Queueing…" : "Queue Plugin") {
                             runPluginBatch()
                         }
@@ -595,6 +598,7 @@ struct BatchView: View {
         let add = parseTags(addTagsText)
         let remove = parseTags(removeTagsText)
         let pluginID = selectedPluginID
+        let delaySeconds = sanitizedDelaySeconds(from: pluginDelayText)
         let hasTagOps = !add.isEmpty || !remove.isEmpty
         let hasPluginOp = pluginID != nil
 
@@ -627,10 +631,6 @@ struct BatchView: View {
                         } else {
                             details.append("Plugin \(pluginID) would run with arg: \(pluginArg)")
                         }
-                        let delaySeconds = sanitizedDelaySeconds(from: pluginDelayText)
-                        if delaySeconds > 0 {
-                            details.append("Delay between runs: \(delayDisplay(delaySeconds))s")
-                        }
                     }
                     if details.isEmpty {
                         details.append("No operations selected.")
@@ -658,6 +658,8 @@ struct BatchView: View {
                 let suffix = selectedArcidsSorted.count > sampleSize ? " (sample of \(sampleSize))" : ""
                 if !hasTagOps && !hasPluginOp {
                     previewStatus = "Preview generated\(suffix), but no operations are currently configured."
+                } else if hasPluginOp {
+                    previewStatus = "Preview generated for \(rows.count) archives\(suffix). Plugin delay between runs: \(delayDisplay(delaySeconds))s."
                 } else {
                     previewStatus = "Preview generated for \(rows.count) archives\(suffix)."
                 }
