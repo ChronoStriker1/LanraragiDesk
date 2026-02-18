@@ -37,6 +37,24 @@ struct ActivityView: View {
         let lines: [String]
     }
 
+    private struct DiagnosticBundle: Encodable {
+        struct Environment: Encodable {
+            var appVersion: String
+            var appBuild: String
+            var macos: String
+        }
+        struct ProfileInfo: Encodable {
+            var name: String
+            var endpoint: String
+        }
+
+        var bundleVersion: Int = 1
+        var generatedAt: Date
+        var environment: Environment
+        var profile: ProfileInfo?
+        var events: [ActivityEvent]
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
@@ -68,6 +86,11 @@ struct ActivityView: View {
 
                 Button("Export CSV") {
                     exportCSV()
+                }
+                .disabled(filteredEvents.isEmpty)
+
+                Button("Copy Diagnostic Bundle") {
+                    copyDiagnosticBundle()
                 }
                 .disabled(filteredEvents.isEmpty)
 
@@ -186,6 +209,38 @@ struct ActivityView: View {
                 }
             }
             return false
+        }
+    }
+
+    private func copyDiagnosticBundle() {
+        let info = Bundle.main.infoDictionary
+        let env = DiagnosticBundle.Environment(
+            appVersion: info?["CFBundleShortVersionString"] as? String ?? "",
+            appBuild: info?["CFBundleVersion"] as? String ?? "",
+            macos: ProcessInfo.processInfo.operatingSystemVersionString
+        )
+        let profileInfo: DiagnosticBundle.ProfileInfo? = appModel.selectedProfile.map {
+            DiagnosticBundle.ProfileInfo(name: $0.name, endpoint: $0.baseURL.absoluteString)
+        }
+        let bundle = DiagnosticBundle(
+            generatedAt: Date(),
+            environment: env,
+            profile: profileInfo,
+            events: filteredEvents
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        encoder.dateEncodingStrategy = .iso8601
+        do {
+            let data = try encoder.encode(bundle)
+            if let text = String(data: data, encoding: .utf8) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+                copiedMessage = "Copied diagnostic bundle"
+            }
+        } catch {
+            copiedMessage = "Copy failed"
         }
     }
 

@@ -68,7 +68,9 @@ macOS (Apple Silicon-first) LANraragi desktop client for managing a LANraragi se
   - Pause waits for the current archive to finish safely before stopping
   - Resume re-runs the last in-progress archive before continuing
 - **Activity**
-  - Local activity log with filtering and search
+  - Local activity log with filtering (All / Errors / Actions) and full-text search
+  - **Export JSON / Export CSV** — save the filtered events to a file via a save panel
+  - **Copy Diagnostic Bundle** — copies a JSON bundle to the clipboard containing the filtered events, app version, macOS version, and selected profile endpoint; useful for filing bug reports without manual copy-paste
 - **Window chrome**
   - Sidebar toggle in the titlebar next to macOS traffic-light controls
   - App title text is hidden from the titlebar (no extra `LanraragiDesk` title label in the window header)
@@ -150,7 +152,7 @@ Use `/Users/chronostriker1/git/LanraragiDesk/docs/REGRESSION_CHECKLIST.md` for m
 ## Roadmap (vNext)
 
 - [x] Batch: persist and restore in-progress queue UI state across full app relaunch (including visible resume/cancel context)
-- [ ] Activity: add one-click “Copy full diagnostic bundle” (selected rows + environment + profile endpoint) for faster bug reporting
+- [x] Activity: add one-click "Copy full diagnostic bundle" (selected rows + environment + profile endpoint) for faster bug reporting
 - [ ] Library: add explicit loading/latency diagnostics in UI (request timings for search/list/metadata refresh) to make transient delays explainable
 - [ ] Duplicates: add searchable/sortable columns in the embedded “Not a match” manager (created time, left/right IDs)
 - [ ] Release: run and record full pass of `/Users/chronostriker1/git/LanraragiDesk/docs/REGRESSION_CHECKLIST.md`
