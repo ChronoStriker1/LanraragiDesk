@@ -821,7 +821,10 @@ private struct LibraryCard: View {
     @State private var hoveringCover: Bool = false
     @State private var hoveringPopover: Bool = false
     @State private var hoveringSelectionControl: Bool = false
+    @State private var popoverOpenTask: Task<Void, Never>?
     @State private var popoverCloseTask: Task<Void, Never>?
+    private static let hoverOpenDelayNs: UInt64 = 140_000_000
+    private static let hoverCloseDelayNs: UInt64 = 200_000_000
 
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -947,10 +950,25 @@ private struct LibraryCard: View {
     }
 
     private func updatePopoverVisibility() {
+        popoverOpenTask?.cancel()
         popoverCloseTask?.cancel()
 
         if hoveringCover {
-            showDetails = allowHoverDetails
+            guard allowHoverDetails else {
+                showDetails = false
+                return
+            }
+            // Intent delay prevents accidental retargeting when cursor passes over
+            // narrow popover-arrow gaps between nearby covers.
+            popoverOpenTask = Task {
+                try? await Task.sleep(nanoseconds: Self.hoverOpenDelayNs)
+                if Task.isCancelled { return }
+                await MainActor.run {
+                    if hoveringCover {
+                        showDetails = true
+                    }
+                }
+            }
             return
         }
 
@@ -961,7 +979,7 @@ private struct LibraryCard: View {
 
         // Give the cursor time to move from the cover to the popover without it collapsing immediately.
         popoverCloseTask = Task {
-            try? await Task.sleep(nanoseconds: 200_000_000)
+            try? await Task.sleep(nanoseconds: Self.hoverCloseDelayNs)
             if Task.isCancelled { return }
             await MainActor.run {
                 if !(hoveringCover || hoveringPopover) {
@@ -986,7 +1004,10 @@ private struct LibraryRow: View {
     @State private var hoveringCover: Bool = false
     @State private var hoveringPopover: Bool = false
     @State private var hoveringSelectionControl: Bool = false
+    @State private var popoverOpenTask: Task<Void, Never>?
     @State private var popoverCloseTask: Task<Void, Never>?
+    private static let hoverOpenDelayNs: UInt64 = 140_000_000
+    private static let hoverCloseDelayNs: UInt64 = 200_000_000
 
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -1100,15 +1121,29 @@ private struct LibraryRow: View {
     }
 
     private func updatePopoverVisibility() {
+        popoverOpenTask?.cancel()
         popoverCloseTask?.cancel()
 
-        if hoveringCover || hoveringPopover {
+        if hoveringPopover {
             showDetails = true
             return
         }
 
+        if hoveringCover {
+            popoverOpenTask = Task {
+                try? await Task.sleep(nanoseconds: Self.hoverOpenDelayNs)
+                if Task.isCancelled { return }
+                await MainActor.run {
+                    if hoveringCover {
+                        showDetails = true
+                    }
+                }
+            }
+            return
+        }
+
         popoverCloseTask = Task {
-            try? await Task.sleep(nanoseconds: 200_000_000)
+            try? await Task.sleep(nanoseconds: Self.hoverCloseDelayNs)
             if Task.isCancelled { return }
             await MainActor.run {
                 if !(hoveringCover || hoveringPopover) {
