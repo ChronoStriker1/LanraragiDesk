@@ -294,7 +294,7 @@ struct RootView: View {
                     Spacer()
                 }
 
-                statusBlock
+                statusBlock(profile: profile)
 
                 DisclosureGroup("Advanced") {
                     advancedOptions(profile: profile)
@@ -310,7 +310,7 @@ struct RootView: View {
     }
 
     @ViewBuilder
-    private var statusBlock: some View {
+    private func statusBlock(profile: Profile) -> some View {
         switch appModel.duplicates.status {
         case .idle:
             Text("Ready.")
@@ -332,9 +332,27 @@ struct RootView: View {
                         .foregroundStyle(.secondary)
                 }
             case .failed(let msg):
-                Text("Failed: \(msg)")
-                    .font(.callout)
-                .foregroundStyle(.red)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Duplicate scan failed.")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(.red)
+                    Text(msg)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                    HStack(spacing: 10) {
+                        Button("Retry") {
+                            appModel.duplicates.start(profile: profile)
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        Button("Copy Error") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(msg, forType: .string)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
         }
     }
 

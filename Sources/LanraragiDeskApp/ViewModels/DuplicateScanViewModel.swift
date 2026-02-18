@@ -20,6 +20,7 @@ final class DuplicateScanViewModel: ObservableObject {
     @Published private(set) var result: DuplicateScanResult?
     @Published private(set) var resultRevision: Int = 0
     @Published private(set) var notMatches: [IndexStore.NotDuplicatePair] = []
+    @Published private(set) var hasUndoableNotMatchChange: Bool = false
 
     // Tuning knobs
     @Published var includeExactChecksum: Bool = true
@@ -32,6 +33,12 @@ final class DuplicateScanViewModel: ObservableObject {
 
     private var task: Task<Void, Never>?
     private var runID: UUID?
+    private var notMatchUndoStack: [NotMatchUndoAction] = []
+
+    private enum NotMatchUndoAction {
+        case removed(IndexStore.NotDuplicatePair)
+        case cleared([IndexStore.NotDuplicatePair])
+    }
 
     init(thumbnails: ThumbnailLoader = ThumbnailLoader(), archives: ArchiveLoader = ArchiveLoader()) {
         self.thumbnails = thumbnails
@@ -199,6 +206,10 @@ final class DuplicateScanViewModel: ObservableObject {
 
     func clearNotDuplicateDecisions(profile: Profile) {
         let previousCount = notMatches.count
+        if previousCount > 0 {
+            notMatchUndoStack.append(.cleared(notMatches))
+            hasUndoableNotMatchChange = !notMatchUndoStack.isEmpty
+        }
         do {
             let store = try IndexStore(configuration: .init(url: AppPaths.indexDBURL()))
             try store.clearNotDuplicatePairs(profileID: profile.id)
@@ -235,8 +246,36 @@ final class DuplicateScanViewModel: ObservableObject {
             log(.error, "Failed to remove Not a match pair", detail: "\(pair.arcidA) • \(pair.arcidB)\n\(error)")
             return
         }
+        notMatchUndoStack.append(.removed(pair))
+        hasUndoableNotMatchChange = !notMatchUndoStack.isEmpty
         notMatches.removeAll { $0 == pair }
         log(.action, "Removed Not a match pair", detail: "\(pair.arcidA) • \(pair.arcidB)")
+    }
+
+    func undoLastNotDuplicateChange(profile: Profile) {
+        guard let action = notMatchUndoStack.popLast() else { return }
+        hasUndoableNotMatchChange = !notMatchUndoStack.isEmpty
+
+        do {
+            let store = try IndexStore(configuration: .init(url: AppPaths.indexDBURL()))
+            switch action {
+            case .removed(let pair):
+                try store.addNotDuplicatePair(profileID: profile.id, arcidA: pair.arcidA, arcidB: pair.arcidB)
+                if !notMatches.contains(pair) {
+                    notMatches.insert(pair, at: 0)
+                }
+                log(.action, "Undo removed Not a match pair", detail: "\(pair.arcidA) • \(pair.arcidB)")
+            case .cleared(let pairs):
+                for pair in pairs {
+                    try store.addNotDuplicatePair(profileID: profile.id, arcidA: pair.arcidA, arcidB: pair.arcidB)
+                }
+                mergeRestoredNotMatches(pairs)
+                log(.action, "Undo cleared Not a match pairs", detail: "\(pairs.count) pairs")
+            }
+        } catch {
+            status = .failed("Failed to undo Not a match change: \(error)")
+            log(.error, "Failed to undo Not a match change", detail: String(describing: error))
+        }
     }
 
     func deleteArchive(profile: Profile, arcid: String) async throws {
@@ -353,5 +392,17 @@ final class DuplicateScanViewModel: ObservableObject {
         }
 
         return removed
+    }
+
+    private func mergeRestoredNotMatches(_ pairs: [IndexStore.NotDuplicatePair]) {
+        if pairs.isEmpty { return }
+        for pair in pairs where !notMatches.contains(pair) {
+            notMatches.append(pair)
+        }
+        notMatches.sort { a, b in
+            if a.createdAt != b.createdAt { return a.createdAt > b.createdAt }
+            if a.arcidA != b.arcidA { return a.arcidA < b.arcidA }
+            return a.arcidB < b.arcidB
+        }
     }
 }

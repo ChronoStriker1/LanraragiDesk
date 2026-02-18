@@ -25,11 +25,21 @@ struct NotMatchesView: View {
             }
 
             if filteredPairs.isEmpty {
-                ContentUnavailableView(
-                    "No “Not a match” pairs",
-                    systemImage: "nosign",
-                    description: Text("Pairs you mark as “Not a match” appear here. Removing one allows it to show up in future scans again.")
-                )
+                Group {
+                    if appModel.duplicates.notMatches.isEmpty {
+                        ContentUnavailableView(
+                            "No “Not a match” pairs",
+                            systemImage: "nosign",
+                            description: Text("Pairs you mark as “Not a match” appear here. Removing one allows it to show up in future scans again.")
+                        )
+                    } else {
+                        ContentUnavailableView(
+                            "No matches for search",
+                            systemImage: "magnifyingglass",
+                            description: Text("Try different IDs or clear the search terms.")
+                        )
+                    }
+                }
                 .frame(maxWidth: .infinity, minHeight: embedded ? 120 : 240)
             } else {
                 ScrollView(.vertical) {
@@ -78,8 +88,14 @@ struct NotMatchesView: View {
     private var filteredPairs: [IndexStore.NotDuplicatePair] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if q.isEmpty { return appModel.duplicates.notMatches }
+        let tokens = q
+            .split(whereSeparator: { $0 == " " || $0 == "," })
+            .map { String($0).lowercased() }
+            .filter { !$0.isEmpty }
+        if tokens.isEmpty { return appModel.duplicates.notMatches }
         return appModel.duplicates.notMatches.filter { p in
-            p.arcidA.localizedCaseInsensitiveContains(q) || p.arcidB.localizedCaseInsensitiveContains(q)
+            let hay = "\(p.arcidA) \(p.arcidB)".lowercased()
+            return tokens.allSatisfy { hay.contains($0) }
         }
     }
 
@@ -99,6 +115,11 @@ struct NotMatchesView: View {
             TextField("Search ID…", text: $query)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 260)
+
+            Button("Undo Last Change") {
+                appModel.duplicates.undoLastNotDuplicateChange(profile: profile)
+            }
+            .disabled(!appModel.duplicates.hasUndoableNotMatchChange)
 
             Button("Refresh") {
                 Task { await appModel.duplicates.loadNotDuplicatePairs(profile: profile) }
@@ -124,6 +145,11 @@ struct NotMatchesView: View {
             TextField("Search…", text: $query)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 220)
+
+            Button("Undo") {
+                appModel.duplicates.undoLastNotDuplicateChange(profile: profile)
+            }
+            .disabled(!appModel.duplicates.hasUndoableNotMatchChange)
 
             Button("Refresh") {
                 Task { await appModel.duplicates.loadNotDuplicatePairs(profile: profile) }
