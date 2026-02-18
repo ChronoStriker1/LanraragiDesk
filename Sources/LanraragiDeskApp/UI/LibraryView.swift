@@ -803,8 +803,8 @@ private struct LibraryListRow: Identifiable, Hashable {
 
 private struct LibraryCard: View {
     static let outerCardWidth: CGFloat = 196
-    private static let outerCardHeight: CGFloat = 340
-    private static let coverSize: CGSize = .init(width: 160, height: 210)
+    private static let outerCardHeight: CGFloat = 300
+    private static let coverSize: CGSize = .init(width: 196, height: 300)
 
     @EnvironmentObject private var appModel: AppModel
 
@@ -836,34 +836,20 @@ private struct LibraryCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .center, spacing: 8) {
-            ZStack(alignment: .topLeading) {
-                CoverThumb(profile: profile, arcid: arcid, thumbnails: appModel.thumbnails, size: Self.coverSize, showsBorder: false)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(alignment: .topLeading) {
-                        if meta?.isnew == true {
-                            CoverBadge(text: "NEW", background: .green.opacity(0.55))
-                                .padding(8)
-                        }
-                    }
-                    .overlay(alignment: .topTrailing) {
-                        ZStack(alignment: .topTrailing) {
-                            if let d = ArchiveMetaHelpers.dateAdded(meta) {
-                                CoverBadge(text: Self.dateFormatter.string(from: d))
-                                    .padding(8)
-                            }
-                        }
-                    }
-                    .overlay(alignment: .bottom) {
-                        if let pages = meta?.pagecount, pages > 0 {
-                            HStack {
-                                Spacer(minLength: 0)
-                                CoverBadge(text: "\(pages) pages")
-                                Spacer(minLength: 0)
-                            }
+        ZStack(alignment: .bottom) {
+            CoverThumb(profile: profile, arcid: arcid, thumbnails: appModel.thumbnails, size: Self.coverSize, showsBorder: false)
+                .overlay(alignment: .topLeading) {
+                    if meta?.isnew == true {
+                        CoverBadge(text: "NEW", background: .green.opacity(0.55))
                             .padding(8)
-                        }
                     }
+                }
+                .overlay(alignment: .topTrailing) {
+                    if let d = ArchiveMetaHelpers.dateAdded(meta) {
+                        CoverBadge(text: Self.dateFormatter.string(from: d))
+                            .padding(8)
+                    }
+                }
                 .onHover { hovering in
                     hoveringCover = hovering
                     updatePopoverVisibility()
@@ -884,74 +870,66 @@ private struct LibraryCard: View {
                     }
                 }
 
-                if hoveringCover || hoveringSelectionControl || appModel.selection.contains(arcid) {
-                    // Keep selection as a separate button so the cover's single-click open stays reliable.
-                    Button {
-                        appModel.selection.toggle(arcid)
-                    } label: {
-                        Image(systemName: appModel.selection.contains(arcid) ? "checkmark.circle.fill" : "circle")
-                            .imageScale(.large)
-                            .foregroundStyle(appModel.selection.contains(arcid) ? .green : .white)
-                            .padding(8)
-                            .background(.black.opacity(0.22))
-                            .clipShape(Circle())
-                            .shadow(color: .black.opacity(0.35), radius: 2, x: 0, y: 1)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Select for batch operations")
-                    .onHover { hovering in
-                        hoveringSelectionControl = hovering
-                    }
-                    .padding(16)
-                    .zIndex(200)
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.82)],
+                startPoint: .init(x: 0.5, y: 0.45),
+                endPoint: .bottom
+            )
+            .allowsHitTesting(false)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                let artistLine = ArchiveMetaHelpers.artists(meta).joined(separator: ", ")
+                let groupLine = ArchiveMetaHelpers.groups(meta).joined(separator: ", ")
+                let secondaryLine: String? = artistLine.isEmpty ? (groupLine.isEmpty ? nil : groupLine) : artistLine
+                if let secondaryLine {
+                    Text(secondaryLine)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.75))
+                        .lineLimit(1)
                 }
             }
-
-            ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.callout)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .center)
-
-                    let artistLine = ArchiveMetaHelpers.artists(meta).joined(separator: ", ")
-                    Text("Artist: " + (artistLine.isEmpty ? "—" : artistLine))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .center)
-
-                    let groupLine = ArchiveMetaHelpers.groups(meta).joined(separator: ", ")
-                    Text("Group: " + (groupLine.isEmpty ? "—" : groupLine))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                }
-                .frame(maxWidth: .infinity, alignment: .center)
-            }
-            .scrollIndicators(.hidden)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .allowsHitTesting(false)
         }
-        .padding(10)
-        .frame(width: Self.outerCardWidth, height: Self.outerCardHeight, alignment: .top)
-        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .frame(width: Self.outerCardWidth, height: Self.outerCardHeight)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(.white.opacity(0.10), lineWidth: 1)
+        }
+        .overlay(alignment: .topLeading) {
+            if hoveringCover || hoveringSelectionControl || appModel.selection.contains(arcid) {
+                // Keep selection as a separate button so the cover's single-click open stays reliable.
+                Button {
+                    appModel.selection.toggle(arcid)
+                } label: {
+                    Image(systemName: appModel.selection.contains(arcid) ? "checkmark.circle.fill" : "circle")
+                        .imageScale(.large)
+                        .foregroundStyle(appModel.selection.contains(arcid) ? .green : .white)
+                        .padding(8)
+                        .background(.black.opacity(0.22))
+                        .clipShape(Circle())
+                        .shadow(color: .black.opacity(0.35), radius: 2, x: 0, y: 1)
+                }
+                .buttonStyle(.plain)
+                .help("Select for batch operations")
+                .onHover { hovering in
+                    hoveringSelectionControl = hovering
+                }
+                .padding(16)
+            }
+        }
+        .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 4)
+        .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .onTapGesture {
             openReaderFromCard()
         }
         .help("Open reader")
-        .background(.quaternary.opacity(0.35))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 1)
-        }
         .task(id: "\(arcid)#\(metadataEpoch)") {
             do {
                 let meta = try await appModel.archives.metadata(profile: profile, arcid: arcid)

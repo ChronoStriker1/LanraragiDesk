@@ -135,6 +135,7 @@ struct RootView: View {
             Image(systemName: systemImage)
                 .font(.system(size: 14, weight: .regular))
                 .frame(width: 18)
+                .foregroundStyle(section == target ? Color.accentColor : Color.primary.opacity(0.88))
             Text(title)
                 .font(.body.weight(.medium))
             Spacer(minLength: 0)
@@ -142,10 +143,6 @@ struct RootView: View {
         .foregroundStyle(section == target ? Color.primary : Color.primary.opacity(0.88))
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(section == target ? Color.primary.opacity(0.12) : Color.clear)
-        )
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .onTapGesture {
             section = target

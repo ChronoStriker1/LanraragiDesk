@@ -126,9 +126,9 @@ struct StatisticsView: View {
     private var statsHeaderCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 18) {
-                StatPill(systemImage: "books.vertical.fill", title: "Archives", value: serverInfo?.total_archives.map(String.init) ?? "—")
-                StatPill(systemImage: "tags.fill", title: "Different tags", value: String(allWords.count))
-                StatPill(systemImage: "book.fill", title: "Pages read", value: serverInfo?.total_pages_read.map(String.init) ?? "—")
+                StatPill(systemImage: "books.vertical.fill", title: "Archives", value: serverInfo?.total_archives.map(String.init) ?? "—", iconColor: .blue)
+                StatPill(systemImage: "tags.fill", title: "Different tags", value: String(allWords.count), iconColor: .purple)
+                StatPill(systemImage: "book.fill", title: "Pages read", value: serverInfo?.total_pages_read.map(String.init) ?? "—", iconColor: .orange)
                 Spacer()
             }
 
@@ -356,23 +356,30 @@ private struct StatPill: View {
     let systemImage: String
     let title: String
     let value: String
+    var iconColor: Color = .secondary
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: systemImage)
-                .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(iconColor.opacity(0.15))
+                    .frame(width: 38, height: 38)
+                Image(systemName: systemImage)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(iconColor)
+            }
+            VStack(alignment: .leading, spacing: 1) {
                 Text(value)
-                    .font(.headline.monospacedDigit())
+                    .font(.title2.bold().monospacedDigit())
                 Text(title)
-                    .font(.caption2)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(.quaternary.opacity(0.3))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.quaternary.opacity(0.35))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 
