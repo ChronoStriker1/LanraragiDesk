@@ -1270,7 +1270,7 @@ private struct HoverTagCloud: View {
             }
             .padding(.horizontal, 2)
         }
-        .scrollIndicators(.hidden)
+        .scrollIndicators(.visible)
         .frame(maxHeight: 220)
     }
 }
