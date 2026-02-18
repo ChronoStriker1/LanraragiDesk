@@ -859,6 +859,7 @@ private struct LibraryCard: View {
                         title: meta?.title ?? title,
                         summary: meta?.summary ?? "",
                         tags: meta?.tags ?? "",
+                        pageCount: meta?.pagecount ?? 0,
                         onSelectTag: { rawTag in
                             onSelectTag(rawTag)
                             showDetails = false
@@ -924,7 +925,9 @@ private struct LibraryCard: View {
                 .padding(16)
             }
         }
-        .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 4)
+        .shadow(color: .black.opacity(hoveringCover ? 0.42 : 0.28), radius: hoveringCover ? 18 : 8, x: 0, y: hoveringCover ? 8 : 4)
+        .scaleEffect(hoveringCover ? 1.04 : 1.0)
+        .animation(.spring(response: 0.25, dampingFraction: 0.75), value: hoveringCover)
         .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .onTapGesture {
             openReaderFromCard()
@@ -1047,6 +1050,7 @@ private struct LibraryRow: View {
                         title: meta?.title ?? title,
                         summary: meta?.summary ?? "",
                         tags: meta?.tags ?? "",
+                        pageCount: meta?.pagecount ?? 0,
                         onSelectTag: { rawTag in
                             onSelectTag(rawTag)
                             showDetails = false
@@ -1150,63 +1154,56 @@ private struct ArchiveHoverDetailsView: View {
     let title: String
     let summary: String
     let tags: String
+    let pageCount: Int
     let onSelectTag: (String) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title.isEmpty ? "Untitled" : title)
-                .font(.headline)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            Divider()
-
-            ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Summary")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        if !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Text(summary)
-                                .font(.callout)
-                                .textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        } else {
-                            Text("No summary.")
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Tags")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        TagGroupsView(tags: tags, onSelectTag: onSelectTag)
-                    }
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 8) {
+                Text(title.isEmpty ? "Untitled" : title)
+                    .font(.subheadline.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if pageCount > 0 {
+                    Text("\(pageCount) pp")
+                        .font(.caption2.monospacedDigit().weight(.semibold))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(.quaternary)
+                        .clipShape(Capsule())
+                        .fixedSize()
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .scrollIndicators(.visible)
+
+            let trimmedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedSummary.isEmpty {
+                Divider()
+                Text(trimmedSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(4)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+
+            let trimmedTags = tags.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedTags.isEmpty {
+                Divider()
+                HoverTagCloud(tags: trimmedTags, onSelectTag: onSelectTag)
+            }
         }
         .padding(14)
-        .frame(width: 520, height: 460)
+        .frame(width: 300)
     }
 }
 
-private struct TagGroupsView: View {
+private struct HoverTagCloud: View {
     let tags: String
     let onSelectTag: (String) -> Void
 
     private struct TagItem: Hashable {
-        var namespace: String
-        var value: String
         var display: String
-        var rawToken: String
+        var token: String
     }
 
     private static let humanDateFormatter: DateFormatter = {
@@ -1217,93 +1214,48 @@ private struct TagGroupsView: View {
     }()
 
     private var items: [TagItem] {
-        let raw = tags
+        tags
             .split(separator: ",")
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-
-        guard !raw.isEmpty else { return [] }
-
-        return raw.map { tok in
-            let (ns, v) = TagParser.splitNamespace(tok)
-            let display: String
-            if TagParser.isDateNamespace(ns), let d = TagParser.parseDateValue(v) {
-                display = "\(ns):\(Self.humanDateFormatter.string(from: d))"
-            } else {
-                display = tok
+            .map { tok in
+                let (ns, v) = TagParser.splitNamespace(tok)
+                let display: String
+                if TagParser.isDateNamespace(ns), let d = TagParser.parseDateValue(v) {
+                    display = "\(ns):\(Self.humanDateFormatter.string(from: d))"
+                } else {
+                    display = tok
+                }
+                return TagItem(display: display, token: tok)
             }
-            return TagItem(namespace: ns, value: v, display: display, rawToken: tok)
-        }
-    }
-
-    private var groups: [(String, [TagItem])] {
-        let grouped = Dictionary(grouping: items) { $0.namespace.isEmpty ? "tag" : $0.namespace.lowercased() }
-        let keys = grouped.keys.sorted { a, b in
-            // Show un-namespaced tags first, then alphabetical.
-            if a == "tag", b != "tag" { return true }
-            if a != "tag", b == "tag" { return false }
-            return a.localizedCaseInsensitiveCompare(b) == .orderedAscending
-        }
-        return keys.map { k in
-            let values = (grouped[k] ?? []).sorted { a, b in
-                a.display.localizedCaseInsensitiveCompare(b.display) == .orderedAscending
-            }
-            return (k, values)
-        }
     }
 
     var body: some View {
-        if items.isEmpty {
-            Text("No tags.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        } else {
-            VStack(alignment: .leading, spacing: 12) {
-                ForEach(groups, id: \.0) { ns, items in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(ns == "tag" ? "Tags" : ns)
+        ScrollView(.vertical) {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 80, maximum: 200), spacing: 5, alignment: .leading)],
+                alignment: .leading,
+                spacing: 5
+            ) {
+                ForEach(items, id: \.token) { tag in
+                    Button {
+                        onSelectTag(tag.token)
+                    } label: {
+                        Text(tag.display)
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(items, id: \.self) { t in
-                                TagChip(text: t.display) {
-                                    onSelectTag(t.rawToken)
-                                }
-                            }
-                        }
+                            .lineLimit(1)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(.quaternary.opacity(0.6))
+                            .clipShape(Capsule())
                     }
+                    .buttonStyle(.plain)
+                    .help("Search: \(tag.display)")
                 }
             }
         }
-    }
-}
-
-private struct TagChip: View {
-    let text: String
-    let onClick: () -> Void
-
-    var body: some View {
-        Text(text)
-            .font(.callout)
-            .multilineTextAlignment(.leading)
-            .lineLimit(nil)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(.quaternary.opacity(0.35))
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 1)
-            }
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .onTapGesture {
-                onClick()
-            }
-            .help("Click to add to Library search")
+        .scrollIndicators(.hidden)
+        .frame(maxHeight: 180)
     }
 }
 
