@@ -1201,7 +1201,7 @@ private struct HoverTagCloud: View {
     let tags: String
     let onSelectTag: (String) -> Void
 
-    private struct TagItem: Hashable {
+    private struct TagItem {
         var display: String
         var token: String
     }
@@ -1213,8 +1213,8 @@ private struct HoverTagCloud: View {
         return f
     }()
 
-    private var items: [TagItem] {
-        tags
+    private var groups: [(namespace: String, items: [TagItem])] {
+        let parsed: [TagItem] = tags
             .split(separator: ",")
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -1228,34 +1228,103 @@ private struct HoverTagCloud: View {
                 }
                 return TagItem(display: display, token: tok)
             }
+
+        let bucket = Dictionary(grouping: parsed) { item -> String in
+            let (ns, _) = TagParser.splitNamespace(item.token)
+            return ns.isEmpty ? "tag" : ns.lowercased()
+        }
+        let keys = bucket.keys.sorted { a, b in
+            if a == "tag", b != "tag" { return true }
+            if a != "tag", b == "tag" { return false }
+            return a.localizedCaseInsensitiveCompare(b) == .orderedAscending
+        }
+        return keys.compactMap { k in
+            guard let items = bucket[k] else { return nil }
+            let sorted = items.sorted { $0.display.localizedCaseInsensitiveCompare($1.display) == .orderedAscending }
+            return (namespace: k, items: sorted)
+        }
     }
 
     var body: some View {
         ScrollView(.vertical) {
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 80, maximum: 200), spacing: 5, alignment: .leading)],
-                alignment: .leading,
-                spacing: 5
-            ) {
-                ForEach(items, id: \.token) { tag in
-                    Button {
-                        onSelectTag(tag.token)
-                    } label: {
-                        Text(tag.display)
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(groups, id: \.namespace) { group in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(group.namespace == "tag" ? "Tags" : group.namespace)
                             .font(.caption2)
-                            .lineLimit(1)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(.quaternary.opacity(0.6))
-                            .clipShape(Capsule())
+                            .foregroundStyle(.secondary)
+                        TagPillFlow(spacing: 4) {
+                            ForEach(group.items, id: \.token) { tag in
+                                Button {
+                                    onSelectTag(tag.token)
+                                } label: {
+                                    Text(tag.display)
+                                        .font(.caption2)
+                                        .padding(.horizontal, 7)
+                                        .padding(.vertical, 3)
+                                        .background(.quaternary.opacity(0.6))
+                                        .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .help("Search: \(tag.display)")
+                            }
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .help("Search: \(tag.display)")
                 }
             }
         }
         .scrollIndicators(.hidden)
-        .frame(maxHeight: 180)
+        .frame(maxHeight: 220)
+    }
+}
+
+/// A simple wrapping flow layout. Lays children left-to-right, wrapping to a
+/// new row when the next child would exceed the available width.
+private struct TagPillFlow: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        layout(proposal: proposal, subviews: subviews).totalSize
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = layout(proposal: ProposedViewSize(bounds.size), subviews: subviews)
+        for (subview, origin) in zip(subviews, result.origins) {
+            subview.place(
+                at: CGPoint(x: bounds.minX + origin.x, y: bounds.minY + origin.y),
+                proposal: .unspecified
+            )
+        }
+    }
+
+    private struct LayoutResult {
+        var origins: [CGPoint]
+        var totalSize: CGSize
+    }
+
+    private func layout(proposal: ProposedViewSize, subviews: Subviews) -> LayoutResult {
+        let maxWidth = proposal.width ?? .infinity
+        var origins: [CGPoint] = []
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > maxWidth {
+                y += rowHeight + spacing
+                x = 0
+                rowHeight = 0
+            }
+            origins.append(CGPoint(x: x, y: y))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+
+        return LayoutResult(
+            origins: origins,
+            totalSize: CGSize(width: maxWidth, height: y + rowHeight)
+        )
     }
 }
 
