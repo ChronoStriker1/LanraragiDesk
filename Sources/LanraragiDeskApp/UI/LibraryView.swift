@@ -882,7 +882,7 @@ private struct LibraryCard: View {
                 Text(title)
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(.white)
-                    .lineLimit(2)
+                    .lineLimit(nil)
                 let artistLine = ArchiveMetaHelpers.artists(meta).joined(separator: ", ")
                 let groupLine = ArchiveMetaHelpers.groups(meta).joined(separator: ", ")
                 let secondaryLine: String? = artistLine.isEmpty ? (groupLine.isEmpty ? nil : groupLine) : artistLine
@@ -1181,7 +1181,6 @@ private struct ArchiveHoverDetailsView: View {
                 Text(trimmedSummary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(4)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
             }
