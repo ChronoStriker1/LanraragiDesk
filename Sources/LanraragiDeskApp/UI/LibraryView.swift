@@ -1254,23 +1254,21 @@ private struct HoverTagCloud: View {
                             .foregroundStyle(.secondary)
                         TagPillFlow(spacing: 4) {
                             ForEach(group.items, id: \.token) { tag in
-                                Button {
-                                    onSelectTag(tag.token)
-                                } label: {
-                                    Text(tag.display)
-                                        .font(.caption2)
-                                        .padding(.horizontal, 7)
-                                        .padding(.vertical, 3)
-                                        .background(.quaternary.opacity(0.6))
-                                        .clipShape(Capsule())
-                                }
-                                .buttonStyle(.plain)
-                                .help("Search: \(tag.display)")
+                                Text(tag.display)
+                                    .font(.caption2)
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 3)
+                                    .background(.quaternary.opacity(0.6))
+                                    .clipShape(Capsule())
+                                    .contentShape(Capsule())
+                                    .onTapGesture { onSelectTag(tag.token) }
+                                    .help("Search: \(tag.display)")
                             }
                         }
                     }
                 }
             }
+            .padding(.horizontal, 2)
         }
         .scrollIndicators(.hidden)
         .frame(maxHeight: 220)
