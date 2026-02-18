@@ -820,6 +820,7 @@ private struct LibraryCard: View {
     @State private var showDetails: Bool = false
     @State private var hoveringCover: Bool = false
     @State private var hoveringPopover: Bool = false
+    @State private var hoveringSelectionControl: Bool = false
     @State private var popoverCloseTask: Task<Void, Never>?
 
     private static let dateFormatter: DateFormatter = {
@@ -883,7 +884,7 @@ private struct LibraryCard: View {
                     }
                 }
 
-                if hoveringCover || appModel.selection.contains(arcid) {
+                if hoveringCover || hoveringSelectionControl || appModel.selection.contains(arcid) {
                     // Keep selection as a separate button so the cover's single-click open stays reliable.
                     Button {
                         appModel.selection.toggle(arcid)
@@ -898,6 +899,9 @@ private struct LibraryCard: View {
                     }
                     .buttonStyle(.plain)
                     .help("Select for batch operations")
+                    .onHover { hovering in
+                        hoveringSelectionControl = hovering
+                    }
                     .padding(16)
                     .zIndex(200)
                 }
@@ -1000,6 +1004,7 @@ private struct LibraryRow: View {
     @State private var showDetails: Bool = false
     @State private var hoveringCover: Bool = false
     @State private var hoveringPopover: Bool = false
+    @State private var hoveringSelectionControl: Bool = false
     @State private var popoverCloseTask: Task<Void, Never>?
 
     private static let dateFormatter: DateFormatter = {
@@ -1019,7 +1024,7 @@ private struct LibraryRow: View {
                             CoverBadge(text: "NEW", background: .green.opacity(0.55), font: .caption2.weight(.bold))
                         }
 
-                        if hoveringCover || appModel.selection.contains(arcid) {
+                        if hoveringCover || hoveringSelectionControl || appModel.selection.contains(arcid) {
                             Button {
                                 appModel.selection.toggle(arcid)
                             } label: {
@@ -1033,6 +1038,9 @@ private struct LibraryRow: View {
                             }
                             .buttonStyle(.plain)
                             .help("Select for batch operations")
+                            .onHover { hovering in
+                                hoveringSelectionControl = hovering
+                            }
                             .zIndex(200)
                         }
                     }
