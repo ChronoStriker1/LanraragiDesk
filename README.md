@@ -143,14 +143,14 @@ Project layout:
 
 See `CONTRIBUTING.md` (includes a rule to keep Markdown docs updated alongside code changes).
 
-## Roadmap (short)
+## Stability Checklist
 
-- [x] Profile + API connectivity
-- [x] Fingerprint index (SQLite) + duplicate candidate scan
-- [x] Manual review UI + persistent "Not a match"
-- [x] Core client features (library/reader/metadata editor/batch/plugins/activity)
-- [x] Optional statistics page that mirrors LANraragi stats
-- [x] Plugins: job status tracking UI (running/finished/failed)
-- [x] Activity: structured entries + export/severity UX
-- [x] Reader: add optional "Open in LANraragi" action and complete narrow-window verification
-- [x] Duplicates: better "Not a match" management (search/undo) and additional error-path UX polish
+Use `/Users/chronostriker1/git/LanraragiDesk/docs/REGRESSION_CHECKLIST.md` for manual verification before releases or large merges.
+
+## Roadmap (vNext)
+
+- [ ] Batch: persist and restore in-progress queue UI state across full app relaunch (including visible resume/cancel context)
+- [ ] Activity: add one-click “Copy full diagnostic bundle” (selected rows + environment + profile endpoint) for faster bug reporting
+- [ ] Library: add explicit loading/latency diagnostics in UI (request timings for search/list/metadata refresh) to make transient delays explainable
+- [ ] Duplicates: add searchable/sortable columns in the embedded “Not a match” manager (created time, left/right IDs)
+- [ ] Release: run and record full pass of `/Users/chronostriker1/git/LanraragiDesk/docs/REGRESSION_CHECKLIST.md`
