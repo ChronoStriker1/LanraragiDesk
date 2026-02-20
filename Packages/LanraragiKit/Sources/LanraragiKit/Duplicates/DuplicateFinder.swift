@@ -10,24 +10,32 @@ public struct DuplicateScanConfig: Sendable {
     /// Buckets larger than this are skipped to avoid quadratic blowups.
     public var bucketMaxSize: Int
 
+    /// Exact-checksum groups larger than this are skipped.
+    /// LANraragi serves the same placeholder thumbnail for unprocessed archives,
+    /// so a large cluster sharing one checksum is almost certainly not real duplicates.
+    public var exactMaxGroupSize: Int
+
     public init(
         includeExactChecksum: Bool = true,
         includeApproximate: Bool = true,
         dHashThreshold: Int = 6,
         aHashThreshold: Int = 6,
-        bucketMaxSize: Int = 64
+        bucketMaxSize: Int = 64,
+        exactMaxGroupSize: Int = 20
     ) {
         self.includeExactChecksum = includeExactChecksum
         self.includeApproximate = includeApproximate
         self.dHashThreshold = dHashThreshold
         self.aHashThreshold = aHashThreshold
         self.bucketMaxSize = bucketMaxSize
+        self.exactMaxGroupSize = exactMaxGroupSize
     }
 }
 
 public struct DuplicateScanStats: Sendable, Equatable {
     public var archives: Int
     public var exactGroups: Int
+    public var skippedExactGroups: Int
     public var approximateCandidates: Int
     public var approximateEdges: Int
     public var skippedBuckets: Int
@@ -37,6 +45,7 @@ public struct DuplicateScanStats: Sendable, Equatable {
     public init(
         archives: Int,
         exactGroups: Int,
+        skippedExactGroups: Int = 0,
         approximateCandidates: Int,
         approximateEdges: Int,
         skippedBuckets: Int,
@@ -45,6 +54,7 @@ public struct DuplicateScanStats: Sendable, Equatable {
     ) {
         self.archives = archives
         self.exactGroups = exactGroups
+        self.skippedExactGroups = skippedExactGroups
         self.approximateCandidates = approximateCandidates
         self.approximateEdges = approximateEdges
         self.skippedBuckets = skippedBuckets
@@ -151,6 +161,7 @@ public enum DuplicateFinder {
         pairs.reserveCapacity(min(50_000, n))
 
         var exactGroupCount = 0
+        var skippedExactGroups = 0
         if config.includeExactChecksum {
             // Union identical thumbnail checksums.
             var byChecksum: [Data: [Int]] = [:]
@@ -162,6 +173,12 @@ public enum DuplicateFinder {
 
             for (_, idxs) in byChecksum {
                 if idxs.count < 2 { continue }
+                // Large clusters sharing one thumbnail almost always indicate a LANraragi
+                // placeholder/fallback cover, not real duplicates. Skip them.
+                if idxs.count > config.exactMaxGroupSize {
+                    skippedExactGroups += 1
+                    continue
+                }
                 exactGroupCount += 1
 
                 // Generate a "star" set of pairs (anchor + others) to avoid O(k^2) pair explosions.
@@ -278,6 +295,7 @@ public enum DuplicateFinder {
         let stats = DuplicateScanStats(
             archives: n,
             exactGroups: exactGroupCount,
+            skippedExactGroups: skippedExactGroups,
             approximateCandidates: approximateCandidates,
             approximateEdges: approximateEdges,
             skippedBuckets: skippedBuckets,

@@ -26,6 +26,7 @@ struct PairReviewView: View {
     @State private var query: String = ""
     @State private var matchFilter: MatchFilter = .both
     @State private var errorText: String?
+    @State private var showMatchLegend: Bool = false
 
     private enum MatchFilter: String, CaseIterable, Hashable {
         case both
@@ -68,6 +69,25 @@ struct PairReviewView: View {
                 selection = nil
             }
         }
+        .focusable()
+        .focusEffectDisabled()
+        .onMoveCommand { dir in
+            switch dir {
+            case .up: movePair(by: -1)
+            case .down: movePair(by: 1)
+            default: break
+            }
+        }
+    }
+
+    private func movePair(by delta: Int) {
+        let ordered = orderedPairsForNavigation()
+        guard !ordered.isEmpty else { return }
+        if let sel = selection, let idx = ordered.firstIndex(of: sel) {
+            selection = ordered[max(0, min(ordered.count - 1, idx + delta))]
+        } else {
+            selection = delta >= 0 ? ordered.first : ordered.last
+        }
     }
 
     private var header: some View {
@@ -76,7 +96,7 @@ struct PairReviewView: View {
                 Text("Review Matches")
                     .font(.title2)
                     .bold()
-                Text("Pairs: \(filteredPairs.count)  •  Archives scanned: \(result.stats.archives)  •  Time: \(String(format: "%.1fs", result.stats.durationSeconds))")
+                Text("Exact: \(totalExactCount)  •  Similar: \(totalSimilarCount)  •  Scanned: \(result.stats.archives)  •  \(String(format: "%.1fs", result.stats.durationSeconds))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -102,6 +122,17 @@ struct PairReviewView: View {
                     Image(systemName: "gearshape")
                 }
                 .menuStyle(.borderlessButton)
+
+                Button {
+                    showMatchLegend.toggle()
+                } label: {
+                    Image(systemName: "questionmark.circle")
+                }
+                .buttonStyle(.borderless)
+                .help("Explain match indicators")
+                .popover(isPresented: $showMatchLegend, arrowEdge: .bottom) {
+                    MatchLegendPopover()
+                }
             }
         }
         .padding(14)
@@ -134,18 +165,26 @@ struct PairReviewView: View {
         filteredPairs.filter { $0.reason == .similarCover }.sorted { $0.score < $1.score }
     }
 
+    private var totalExactCount: Int {
+        result.pairs.filter { $0.reason == .exactCover }.count
+    }
+
+    private var totalSimilarCount: Int {
+        result.pairs.filter { $0.reason == .similarCover }.count
+    }
+
     private var pairList: some View {
         ScrollView(.vertical) {
             LazyVStack(alignment: .leading, spacing: 6) {
                 if matchFilter == .both || matchFilter == .exact {
-                    sectionHeader("Exact")
+                    sectionHeader("Exact", count: exactPairs.count)
                     ForEach(exactPairs, id: \.self) { p in
                         pairRow(p)
                     }
                 }
 
                 if matchFilter == .both || matchFilter == .similar {
-                    sectionHeader("Similar")
+                    sectionHeader("Similar", count: similarPairs.count)
                         .padding(.top, 4)
                     ForEach(similarPairs, id: \.self) { p in
                         pairRow(p)
@@ -164,17 +203,20 @@ struct PairReviewView: View {
     }
 
     @ViewBuilder
-    private func sectionHeader(_ title: String) -> some View {
-        HStack {
+    private func sectionHeader(_ title: String, count: Int) -> some View {
+        HStack(spacing: 5) {
             Text(title)
-                .font(.caption)
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(.quaternary.opacity(0.45))
-                .clipShape(Capsule())
+            Text("\(count)")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.tertiary)
             Spacer(minLength: 0)
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.quaternary.opacity(0.45))
+        .clipShape(Capsule())
         .frame(maxWidth: .infinity)
     }
 
@@ -201,6 +243,7 @@ struct PairReviewView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { selection = p }
+        .help("\(p.arcidA)  /  \(p.arcidB)")
     }
 
     private func orderedPairsForNavigation() -> [DuplicateScanResult.Pair] {
@@ -296,14 +339,16 @@ private struct PairRowView: View {
                 arcid: pair.arcidA,
                 thumbnails: thumbnails,
                 size: ReviewLayout.pairCoverSize,
-                contentInset: 0
+                contentInset: 0,
+                showsBorder: false
             )
             CoverThumb(
                 profile: profile,
                 arcid: pair.arcidB,
                 thumbnails: thumbnails,
                 size: ReviewLayout.pairCoverSize,
-                contentInset: 0
+                contentInset: 0,
+                showsBorder: false
             )
         }
         .frame(width: ReviewLayout.pairListWidth, alignment: .leading)
@@ -311,6 +356,20 @@ private struct PairRowView: View {
             RoundedRectangle(cornerRadius: 4, style: .continuous)
                 .fill(reasonColor.opacity(0.9))
                 .frame(width: 4)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if pair.reason == .similarCover,
+               let d = pair.dHashDistance,
+               let a = pair.aHashDistance {
+                Text("d\(d) a\(a)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(scoreColor(d + a).opacity(0.88))
+                    .clipShape(Capsule())
+                    .padding(5)
+            }
         }
         .contextMenu {
             Button("Not a match") { markNotDuplicate(pair) }
@@ -324,6 +383,12 @@ private struct PairRowView: View {
         case .similarCover:
             return .orange
         }
+    }
+
+    private func scoreColor(_ score: Int) -> Color {
+        if score <= 4 { return .green }
+        if score <= 8 { return .yellow }
+        return .orange
     }
 }
 
@@ -343,8 +408,6 @@ private struct PairCompareView: View {
     @State private var metaB: ArchiveMetadata?
     @State private var pagesScrollMinY: CGFloat = 0
     @State private var isDetailsCollapsed: Bool = false
-    @State private var panelScrollY: CGFloat = 0
-    @State private var panelScrollActiveID: Int? = nil
     @EnvironmentObject private var appModel: AppModel
     @Environment(\.openWindow) private var openWindow
 
@@ -459,73 +522,68 @@ private struct PairCompareView: View {
     private var topBar: some View {
         let tagRows = TagCompareGrouper.rows(tagsA: metaA?.tags, tagsB: metaB?.tags, maxGroups: 8, maxTagsPerGroup: 18)
 
-        // Top align panels so a taller tag list on one side doesn't vertically-center the other side,
-        // which creates a changing gap above the shorter side.
-        return HStack(alignment: .top, spacing: 0) {
-            ArchiveComparePanel(
-                profile: profile,
-                arcid: pair.arcidA,
-                meta: metaA,
-                other: metaB,
-                tagRows: tagRows,
-                showingLeft: true,
-                thumbnails: thumbnails,
-                collapsed: isDetailsCollapsed,
-                scrollY: $panelScrollY,
-                scrollActiveID: $panelScrollActiveID,
-                scrollID: 0,
-                onRead: {
-                    openReader(pair.arcidA)
-                },
-                onEdit: {
-                    editingArcid = pair.arcidA
-                },
-                onNotMatch: {
-                    markNotDuplicate(pair)
-                    goNext()
-                },
-                onDelete: { confirmDeleteArcid = pair.arcidA }
-            )
-            .id(pair.arcidA)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .debugFrameNumber(5)
+        // Shared ScrollView so both archive panels scroll together.
+        return ScrollView(.vertical) {
+            HStack(alignment: .top, spacing: 0) {
+                ArchiveComparePanel(
+                    profile: profile,
+                    arcid: pair.arcidA,
+                    meta: metaA,
+                    other: metaB,
+                    tagRows: tagRows,
+                    showingLeft: true,
+                    thumbnails: thumbnails,
+                    collapsed: isDetailsCollapsed,
+                    onRead: {
+                        openReader(pair.arcidA)
+                    },
+                    onEdit: {
+                        editingArcid = pair.arcidA
+                    },
+                    onNotMatch: {
+                        markNotDuplicate(pair)
+                        goNext()
+                    },
+                    onDelete: { confirmDeleteArcid = pair.arcidA }
+                )
+                .id(pair.arcidA)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .debugFrameNumber(5)
 
-            ZStack(alignment: .top) {
-                Divider()
+                Color(nsColor: .separatorColor)
+                    .opacity(0.6)
+                    .frame(width: 1)
                     .padding(.vertical, 10)
-                    .frame(maxHeight: .infinity)
-            }
-            .frame(width: 28)
-            .debugFrameNumber(6)
+                    .frame(width: 24)
+                    .debugFrameNumber(6)
 
-            ArchiveComparePanel(
-                profile: profile,
-                arcid: pair.arcidB,
-                meta: metaB,
-                other: metaA,
-                tagRows: tagRows,
-                showingLeft: false,
-                thumbnails: thumbnails,
-                collapsed: isDetailsCollapsed,
-                scrollY: $panelScrollY,
-                scrollActiveID: $panelScrollActiveID,
-                scrollID: 1,
-                onRead: {
-                    openReader(pair.arcidB)
-                },
-                onEdit: {
-                    editingArcid = pair.arcidB
-                },
-                onNotMatch: {
-                    markNotDuplicate(pair)
-                    goNext()
-                },
-                onDelete: { confirmDeleteArcid = pair.arcidB }
-            )
-            .id(pair.arcidB)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .debugFrameNumber(8)
+                ArchiveComparePanel(
+                    profile: profile,
+                    arcid: pair.arcidB,
+                    meta: metaB,
+                    other: metaA,
+                    tagRows: tagRows,
+                    showingLeft: false,
+                    thumbnails: thumbnails,
+                    collapsed: isDetailsCollapsed,
+                    onRead: {
+                        openReader(pair.arcidB)
+                    },
+                    onEdit: {
+                        editingArcid = pair.arcidB
+                    },
+                    onNotMatch: {
+                        markNotDuplicate(pair)
+                        goNext()
+                    },
+                    onDelete: { confirmDeleteArcid = pair.arcidB }
+                )
+                .id(pair.arcidB)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .debugFrameNumber(8)
+            }
         }
+        .scrollIndicators(.visible)
     }
 
     private func openReader(_ arcid: String) {
@@ -548,9 +606,6 @@ private struct ArchiveComparePanel: View {
     let showingLeft: Bool
     let thumbnails: ThumbnailLoader
     let collapsed: Bool
-    @Binding var scrollY: CGFloat
-    @Binding var scrollActiveID: Int?
-    let scrollID: Int
     let onRead: () -> Void
     let onEdit: () -> Void
     let onNotMatch: () -> Void
@@ -570,28 +625,15 @@ private struct ArchiveComparePanel: View {
                 onDelete: onDelete
             )
 
-            ScrollView(.vertical) {
-                SyncedScrollBridge(
-                    id: scrollID,
-                    offsetY: $scrollY,
-                    activeID: $scrollActiveID
-                )
-                .frame(width: 1, height: 1)
-                .opacity(0.001)
-                .allowsHitTesting(false)
+            ArchiveSideDetails(meta: meta, other: other)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                ArchiveSideDetails(meta: meta, other: other)
+            if !collapsed {
+                ArchiveSideTags(tagRows: tagRows, showingLeft: showingLeft)
                     .frame(maxWidth: .infinity, alignment: .leading)
-
-                if !collapsed {
-                    ArchiveSideTags(tagRows: tagRows, showingLeft: showingLeft)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.top, 10)
-                        .padding(.trailing, 4)
-                }
+                    .padding(.top, 10)
+                    .padding(.trailing, 4)
             }
-            .scrollIndicators(.visible)
-            .frame(maxHeight: .infinity, alignment: .top)
         }
         .padding(collapsed ? 8 : 12)
         .background(.quaternary.opacity(0.35))
@@ -600,7 +642,6 @@ private struct ArchiveComparePanel: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 1)
         }
-        .frame(maxHeight: .infinity, alignment: .top)
     }
 }
 
@@ -1224,7 +1265,7 @@ private struct SyncedPagesGridView: View {
                     .frame(minHeight: tileHeight + 12)
                     .overlay(alignment: .center) {
                         Rectangle()
-                            .fill(Color(nsColor: .separatorColor))
+                            .fill(Color(nsColor: .separatorColor).opacity(0.5))
                             .frame(width: 1)
                             .padding(.vertical, 6)
                             .allowsHitTesting(false)
@@ -1388,129 +1429,71 @@ private struct ScrollOffsetObserver: NSViewRepresentable {
     }
 }
 
-private struct SyncedScrollBridge: NSViewRepresentable {
-    let id: Int
-    @Binding var offsetY: CGFloat
-    @Binding var activeID: Int?
+private struct MatchLegendPopover: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Match Indicators")
+                .font(.headline)
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(
-            id: id,
-            getOffset: { offsetY },
-            setOffset: { offsetY = $0 },
-            getActive: { activeID },
-            setActive: { activeID = $0 }
-        )
-    }
+            VStack(alignment: .leading, spacing: 10) {
+                legendRow(
+                    color: .green,
+                    title: "Exact match",
+                    detail: "Both archives share the same cover thumbnail (SHA-256 identical). Likely the same file or a direct re-upload."
+                )
+                legendRow(
+                    color: .orange,
+                    title: "Similar match",
+                    detail: "Covers look visually similar based on perceptual hashing (dHash + aHash). May be different versions, crops, or re-encodes."
+                )
+            }
 
-    func makeNSView(context: Context) -> NSView {
-        let v = NSView(frame: .zero)
-        DispatchQueue.main.async {
-            context.coordinator.attach(to: v)
-            context.coordinator.applyOffsetFromModel()
-        }
-        return v
-    }
+            Divider()
 
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async {
-            context.coordinator.attach(to: nsView)
-            context.coordinator.applyOffsetFromModel()
-        }
-    }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Score badge  d3 a4")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                Text("Appears on similar matches. **d** = dHash distance, **a** = aHash distance (0–64). Lower means more similar.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
-    @MainActor
-    final class Coordinator: NSObject {
-        private let id: Int
-        private let getOffset: () -> CGFloat
-        private let setOffset: (CGFloat) -> Void
-        private let getActive: () -> Int?
-        private let setActive: (Int?) -> Void
-
-        private weak var scrollView: NSScrollView?
-        private weak var clipView: NSClipView?
-        private var attachRetries: Int = 0
-        private var isProgrammatic: Bool = false
-
-        init(
-            id: Int,
-            getOffset: @escaping () -> CGFloat,
-            setOffset: @escaping (CGFloat) -> Void,
-            getActive: @escaping () -> Int?,
-            setActive: @escaping (Int?) -> Void
-        ) {
-            self.id = id
-            self.getOffset = getOffset
-            self.setOffset = setOffset
-            self.getActive = getActive
-            self.setActive = setActive
-        }
-
-        func attach(to view: NSView) {
-            guard let sv = findScrollView(from: view) else {
-                if attachRetries < 12 {
-                    attachRetries += 1
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self, weak view] in
-                        guard let self, let view else { return }
-                        self.attach(to: view)
-                    }
+                HStack(spacing: 8) {
+                    scoreSwatch(color: .green, label: "≤ 4  very close")
+                    scoreSwatch(color: .yellow, label: "≤ 8  similar")
+                    scoreSwatch(color: .orange, label: "> 8  loose")
                 }
-                return
+                .padding(.top, 2)
             }
-            if scrollView === sv { return }
-            scrollView = sv
-            attachRetries = 0
+        }
+        .padding(16)
+        .frame(width: 340)
+    }
 
-            if let old = clipView {
-                NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: old)
+    private func legendRow(color: Color, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(color.opacity(0.9))
+                .frame(width: 4, height: 36)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-
-            let clip = sv.contentView
-            clipView = clip
-            clip.postsBoundsChangedNotifications = true
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(boundsDidChange(_:)),
-                name: NSView.boundsDidChangeNotification,
-                object: clip
-            )
         }
+    }
 
-        func applyOffsetFromModel() {
-            guard let sv = scrollView, let clip = clipView else { return }
-            // Only the non-active view should follow the shared offset.
-            if getActive() == id { return }
-
-            let target = max(0, getOffset())
-            let current = clip.bounds.origin.y
-            if abs(current - target) < 0.5 { return }
-
-            isProgrammatic = true
-            clip.scroll(to: NSPoint(x: 0, y: target))
-            sv.reflectScrolledClipView(clip)
-            isProgrammatic = false
-        }
-
-        private func findScrollView(from view: NSView) -> NSScrollView? {
-            var v: NSView? = view
-            while let cur = v {
-                if let sv = cur as? NSScrollView { return sv }
-                v = cur.superview
-            }
-            return view.enclosingScrollView
-        }
-
-        @objc private func boundsDidChange(_ note: Notification) {
-            guard !isProgrammatic else { return }
-            guard let clip = note.object as? NSClipView else { return }
-            setActive(id)
-            setOffset(clip.bounds.origin.y)
-        }
-
-        deinit {
-            if let clipView {
-                NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: clipView)
-            }
+    private func scoreSwatch(color: Color, label: String) -> some View {
+        HStack(spacing: 5) {
+            Capsule()
+                .fill(color.opacity(0.88))
+                .frame(width: 10, height: 10)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 }
@@ -1562,7 +1545,7 @@ private struct PageThumbTile: View {
     @State private var resolutionText: String?
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .bottom) {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(.quaternary)
 
@@ -1575,42 +1558,51 @@ private struct PageThumbTile: View {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFit()
-                    .padding(6)
             } else if let errorText {
-                Text(errorText)
-                    .font(.caption2)
-                    .foregroundStyle(.red)
-                    .padding(8)
+                Image(systemName: "photo")
+                    .foregroundStyle(.secondary)
+                    .help(errorText)
             } else {
                 ProgressView()
             }
 
-            if url != nil {
-                Text("\(pageIndex + 1)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(.thinMaterial)
-                    .clipShape(Capsule())
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(6)
-            }
+            // Bottom gradient + page number — mirrors the library card title treatment.
+            if image != nil {
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.72)],
+                    startPoint: .init(x: 0.5, y: 0.45),
+                    endPoint: .bottom
+                )
+                .allowsHitTesting(false)
 
-            if let resolutionText, url != nil {
-                Text(resolutionText)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(.thinMaterial)
-                    .clipShape(Capsule())
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                    .padding(6)
+                Text("\(pageIndex + 1)")
+                    .font(.caption2.monospacedDigit().weight(.medium))
+                    .foregroundStyle(.white)
+                    .padding(.bottom, 6)
+                    .allowsHitTesting(false)
             }
         }
         .frame(maxWidth: .infinity)
         .frame(height: tileHeight)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            // Resolution badge at top-right.
+            if let resolutionText, image != nil {
+                Text(resolutionText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(.thinMaterial)
+                    .clipShape(Capsule())
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(5)
+            }
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+        }
         .onHover { inside in
             guard hoverPreviewEnabled else { return }
             hovering = inside && (url != nil) && (image != nil)

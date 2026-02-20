@@ -13,6 +13,7 @@ struct ReaderView: View {
     @AppStorage("reader.twoPageSpread") private var twoPageSpread: Bool = false
     @AppStorage("reader.fitMode") private var fitModeRaw: String = ReaderFitMode.fit.rawValue
     @AppStorage("reader.zoomPercent") private var zoomPercent: Double = 100
+    @AppStorage("reader.sidebarVisible") private var sidebarVisible: Bool = false
 
     @State private var pages: [URL] = []
     @State private var pageIndex: Int = 0
@@ -45,19 +46,45 @@ struct ReaderView: View {
             )
             .ignoresSafeArea()
 
-            content
-                .padding(18)
-                .background(
-                    KeyDownCatcher { event in
-                        handleKeyDown(event)
-                    }
-                    .frame(width: 0, height: 0)
-                )
+            HStack(spacing: 0) {
+                if sidebarVisible && !pages.isEmpty, let profile = currentProfile {
+                    ReaderPageSidebar(
+                        profile: profile,
+                        arcid: route.arcid,
+                        pages: pages,
+                        currentIndex: pageIndex,
+                        onJump: { idx in
+                            pageIndex = idx
+                            restartAutoAdvance(reason: .userInteraction)
+                        },
+                        onSetCover: { setPageAsCover(pageNumber: $0) }
+                    )
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+                }
+                content
+                    .padding(18)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(KeyDownCatcher { handleKeyDown($0) }.frame(width: 0, height: 0))
+            }
+            .animation(.easeInOut(duration: 0.2), value: sidebarVisible)
         }
         .navigationTitle("")
         .toolbar {
             ToolbarItem(placement: .principal) {
                 pageNavigationToolbarControl
+            }
+
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    sidebarVisible.toggle()
+                } label: {
+                    Image(systemName: "sidebar.left")
+                        .imageScale(.medium)
+                        .foregroundStyle(sidebarVisible ? Color.accentColor : Color.primary)
+                }
+                .buttonStyle(.plain)
+                .help(sidebarVisible ? "Hide page filmstrip" : "Show page filmstrip")
+                .disabled(pages.isEmpty)
             }
 
             ToolbarItemGroup(placement: .primaryAction) {
@@ -632,6 +659,23 @@ struct ReaderView: View {
         }
     }
 
+    private func setPageAsCover(pageNumber: Int) {
+        guard let profile = currentProfile else { return }
+        Task {
+            do {
+                try await appModel.archives.updateThumbnail(
+                    profile: profile, arcid: route.arcid, page: pageNumber)
+                appModel.activity.add(.init(
+                    kind: .action, title: "Cover updated",
+                    detail: "Page \(pageNumber)", component: "Reader"))
+            } catch {
+                appModel.activity.add(.init(
+                    kind: .error, title: "Cover update failed",
+                    detail: String(describing: error), component: "Reader"))
+            }
+        }
+    }
+
     private func openInLANraragi() {
         guard
             let profile = currentProfile,
@@ -714,6 +758,134 @@ private struct ReaderCanvas: View {
             let wScale = availableW / max(1, totalW)
             let hScale = availableH / max(1, px.height)
             return min(10, min(wScale, hScale))
+        }
+    }
+}
+
+private struct ReaderPageSidebar: View {
+    @EnvironmentObject private var appModel: AppModel
+
+    let profile: Profile
+    let arcid: String
+    let pages: [URL]
+    let currentIndex: Int
+    let onJump: (Int) -> Void
+    let onSetCover: (Int) -> Void  // 1-indexed page number
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Pages")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(pages.count)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+
+            Divider()
+
+            ScrollViewReader { proxy in
+                ScrollView(.vertical) {
+                    LazyVStack(spacing: 8) {
+                        ForEach(Array(pages.enumerated()), id: \.offset) { idx, url in
+                            PageThumbnailCell(
+                                profile: profile,
+                                url: url,
+                                pageNumber: idx + 1,
+                                isCurrent: idx == currentIndex,
+                                onTap: { onJump(idx) },
+                                onSetCover: { onSetCover(idx + 1) }
+                            )
+                            .id(idx)
+                        }
+                    }
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 10)
+                }
+                .scrollIndicators(.visible)
+                .onChange(of: currentIndex) { _, newIdx in
+                    withAnimation { proxy.scrollTo(newIdx, anchor: .center) }
+                }
+                .onAppear { proxy.scrollTo(currentIndex, anchor: .center) }
+            }
+        }
+        .frame(width: 130)
+        .background(.thinMaterial)
+    }
+}
+
+private struct PageThumbnailCell: View {
+    @EnvironmentObject private var appModel: AppModel
+
+    let profile: Profile
+    let url: URL
+    let pageNumber: Int
+    let isCurrent: Bool
+    let onTap: () -> Void
+    let onSetCover: () -> Void
+
+    @State private var thumbnail: NSImage?
+    @State private var isLoading = true
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            Group {
+                if let thumbnail {
+                    Image(nsImage: thumbnail)
+                        .resizable()
+                        .scaledToFit()
+                } else if isLoading {
+                    Rectangle()
+                        .fill(.quaternary.opacity(0.35))
+                        .frame(height: 150)
+                        .overlay { ProgressView().controlSize(.mini) }
+                } else {
+                    Rectangle()
+                        .fill(.quaternary.opacity(0.35))
+                        .frame(height: 150)
+                        .overlay {
+                            Image(systemName: "photo")
+                                .foregroundStyle(.secondary)
+                        }
+                }
+            }
+            .frame(width: 110)
+
+            Text("\(pageNumber)")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.white)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(.black.opacity(0.55))
+                .clipShape(Capsule())
+                .padding(.bottom, 5)
+        }
+        .frame(width: 110)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(isCurrent ? Color.accentColor : Color.clear, lineWidth: 2)
+        }
+        .shadow(color: isCurrent ? Color.accentColor.opacity(0.4) : .clear, radius: 5)
+        .contentShape(Rectangle())
+        .onTapGesture { onTap() }
+        .contextMenu {
+            Button("Set as Cover") { onSetCover() }
+        }
+        .task(id: url) {
+            isLoading = true
+            thumbnail = nil
+            do {
+                let bytes = try await appModel.archives.bytes(profile: profile, url: url)
+                thumbnail = ImageDownsampler.thumbnail(from: bytes, maxPixelSize: 240)
+            } catch {
+                // placeholder shown on failure
+            }
+            isLoading = false
         }
     }
 }
