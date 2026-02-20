@@ -26,6 +26,10 @@ enum AppPaths {
         appSupportDirectory().appendingPathComponent("activity.json")
     }
 
+    static func savedBatchQueriesURL() -> URL {
+        appSupportDirectory().appendingPathComponent("saved-batch-queries.json")
+    }
+
     private static func serverID(baseURL: URL) -> String {
         let s = baseURL.absoluteString.lowercased()
         let digest = SHA256.hash(data: Data(s.utf8))

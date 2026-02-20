@@ -7,6 +7,7 @@ struct RootView: View {
 
     @State private var showNotMatchesPanel: Bool = false
     @State private var collapseRunCard: Bool = false
+    @State private var advancedExpanded: Bool = false
     @State private var section: Section = .library
     @State private var sidebarVisible: Bool = true
     @AppStorage("sidebar.showStatistics") private var showStatisticsPage: Bool = false
@@ -135,6 +136,7 @@ struct RootView: View {
             Image(systemName: systemImage)
                 .font(.system(size: 14, weight: .regular))
                 .frame(width: 18)
+                .foregroundStyle(section == target ? Color.accentColor : Color.primary.opacity(0.88))
             Text(title)
                 .font(.body.weight(.medium))
             Spacer(minLength: 0)
@@ -142,10 +144,6 @@ struct RootView: View {
         .foregroundStyle(section == target ? Color.primary : Color.primary.opacity(0.88))
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(section == target ? Color.primary.opacity(0.12) : Color.clear)
-        )
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .onTapGesture {
             section = target
@@ -296,11 +294,30 @@ struct RootView: View {
 
                 statusBlock(profile: profile)
 
-                DisclosureGroup("Advanced") {
-                    advancedOptions(profile: profile)
-                        .padding(.top, 8)
+                VStack(alignment: .leading, spacing: 8) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.16)) {
+                            advancedExpanded.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: advancedExpanded ? "chevron.down" : "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Text("Advanced")
+                                .font(.callout)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
+                    if advancedExpanded {
+                        advancedOptions(profile: profile)
+                            .padding(.top, 4)
+                    }
                 }
-                .font(.callout)
             }
         }
         .padding(18)

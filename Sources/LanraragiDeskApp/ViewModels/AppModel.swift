@@ -11,6 +11,7 @@ final class AppModel: ObservableObject {
     }
 
     let profileStore: ProfileStore
+    let savedQueryStore: SavedQueryStore
     @Published var selectedProfileID: Profile.ID?
     @Published var profileEditorMode: ProfileEditorMode?
     @Published var librarySearchRequest: LibrarySearchRequest?
@@ -29,6 +30,7 @@ final class AppModel: ObservableObject {
 
     init() {
         self.profileStore = ProfileStore()
+        self.savedQueryStore = SavedQueryStore()
         self.archives = ArchiveLoader()
         self.thumbnails = ThumbnailLoader()
         self.activity = ActivityStore()
@@ -43,6 +45,10 @@ final class AppModel: ObservableObject {
         // SwiftUI doesn't automatically observe nested ObservableObjects through a parent EnvironmentObject.
         // Forward child changes so views reading `appModel.profileStore...` / `appModel.indexing...` update.
         profileStore.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+
+        savedQueryStore.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
 

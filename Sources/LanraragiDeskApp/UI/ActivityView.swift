@@ -105,80 +105,101 @@ struct ActivityView: View {
                     .background(.thinMaterial)
                     .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             } else {
-                List {
-                    ForEach(filteredEvents) { e in
-                        let rendered = renderEvent(e)
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(alignment: .firstTextBaseline) {
-                                Image(systemName: severitySymbol(for: e.kind))
-                                    .foregroundStyle(severityColor(for: e.kind))
-                                    .font(.caption.weight(.semibold))
-                                Text(rendered.title)
-                                    .font(.callout)
-                                if let component = e.component, !component.isEmpty {
-                                    Text(component)
-                                        .font(.caption2.weight(.semibold))
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
-                                        .background(Color.primary.opacity(0.08))
-                                        .clipShape(Capsule())
-                                }
-                                Spacer()
-                                Text(Self.formatter.string(from: e.date))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if let subtitle = rendered.subtitle, !subtitle.isEmpty {
-                                Text(subtitle)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .textSelection(.enabled)
-                            }
-                            if !rendered.lines.isEmpty {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    ForEach(Array(rendered.lines.enumerated()), id: \.offset) { _, line in
-                                        Text("• \(line)")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .textSelection(.enabled)
+                ScrollView {
+                    LazyVStack(spacing: 6) {
+                        ForEach(filteredEvents) { e in
+                            let rendered = renderEvent(e)
+                            HStack(alignment: .top, spacing: 0) {
+                                Rectangle()
+                                    .fill(severityColor(for: e.kind))
+                                    .frame(width: 4)
+
+                                HStack(alignment: .top, spacing: 10) {
+                                    ZStack {
+                                        Circle()
+                                            .fill(severityColor(for: e.kind).opacity(0.15))
+                                            .frame(width: 28, height: 28)
+                                        Image(systemName: severitySymbol(for: e.kind))
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(severityColor(for: e.kind))
+                                    }
+
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack(alignment: .firstTextBaseline) {
+                                            Text(rendered.title)
+                                                .font(.callout.weight(.semibold))
+                                            if let component = e.component, !component.isEmpty {
+                                                Text(component)
+                                                    .font(.caption2.weight(.semibold))
+                                                    .padding(.horizontal, 6)
+                                                    .padding(.vertical, 2)
+                                                    .background(severityColor(for: e.kind).opacity(0.15))
+                                                    .foregroundStyle(severityColor(for: e.kind))
+                                                    .clipShape(Capsule())
+                                            }
+                                            Spacer()
+                                            Text(Self.formatter.string(from: e.date))
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        if let subtitle = rendered.subtitle, !subtitle.isEmpty {
+                                            Text(subtitle)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .textSelection(.enabled)
+                                        }
+                                        if !rendered.lines.isEmpty {
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                ForEach(Array(rendered.lines.enumerated()), id: \.offset) { _, line in
+                                                    Text("• \(line)")
+                                                        .font(.caption)
+                                                        .foregroundStyle(.secondary)
+                                                        .textSelection(.enabled)
+                                                }
+                                            }
+                                        }
+                                        if let metadata = e.metadata, !metadata.isEmpty {
+                                            HStack(spacing: 6) {
+                                                ForEach(metadata.sorted(by: { $0.key < $1.key }), id: \.key) { pair in
+                                                    Text("\(pair.key): \(pair.value)")
+                                                        .font(.caption2.monospaced())
+                                                        .padding(.horizontal, 6)
+                                                        .padding(.vertical, 2)
+                                                        .background(Color.primary.opacity(0.06))
+                                                        .clipShape(Capsule())
+                                                }
+                                            }
+                                        }
                                     }
                                 }
+                                .padding(.vertical, 10)
+                                .padding(.trailing, 12)
+                                .padding(.leading, 10)
                             }
-                            if let metadata = e.metadata, !metadata.isEmpty {
-                                HStack(spacing: 6) {
-                                    ForEach(metadata.sorted(by: { $0.key < $1.key }), id: \.key) { pair in
-                                        Text("\(pair.key): \(pair.value)")
-                                            .font(.caption2.monospaced())
-                                            .padding(.horizontal, 6)
-                                            .padding(.vertical, 2)
-                                            .background(Color.primary.opacity(0.06))
-                                            .clipShape(Capsule())
-                                    }
+                            .background(Color.primary.opacity(0.04))
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .onTapGesture {
+                                if e.kind == .error {
+                                    copyEventToClipboard(e)
                                 }
                             }
-                        }
-                        .padding(.vertical, 4)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            if e.kind == .error {
-                                copyEventToClipboard(e)
-                            }
-                        }
-                        .contextMenu {
-                            Button("Copy Entry") {
-                                copyEventToClipboard(e)
+                            .contextMenu {
+                                Button("Copy Entry") {
+                                    copyEventToClipboard(e)
+                                }
                             }
                         }
                     }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
                 }
-                .listStyle(.inset)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(18)
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .debugFrameNumber(1)
     }
 

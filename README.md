@@ -17,7 +17,7 @@ macOS (Apple Silicon-first) LANraragi desktop client for managing a LANraragi se
   - Server-side paging (scales to large libraries)
   - Default sort: **Newest added first** (`date_added desc`) with automatic fallback to Title when unsupported
   - Cover overlays: **NEW**, **Date added**, **Page count**
-  - Hover a cover to show the selection checkbox (top-left)
+  - Hover a cover to show the selection checkbox (top-left); selected archives keep a persistent visible checkmark
   - Shows **Artist** and **Group** (when present) under the title (on separate lines)
   - Hover details only activate while the cursor is inside the archive results panel
   - Hover a cover to see full **Title**, **Summary**, and grouped **Tags** (click tags to add them to search)
@@ -28,6 +28,7 @@ macOS (Apple Silicon-first) LANraragi desktop client for managing a LANraragi se
   - Search bar includes inline query tips (negation and wildcard examples)
   - List view uses a table with columns: Select, Title, New, Date, Artist, Group, Tags (sortable and re-orderable)
   - Filters: New only, Untagged only, Category (server-backed)
+  - One-click **Select All Results** across the full current query (not just currently loaded cards)
   - Right-click: open Reader, open in browser, edit metadata, copy archive id
   - Open in browser opens LANraragi reader URLs (`/reader?id=<arcid>`)
   - Adaptive grid layout that fits constrained panel widths
@@ -52,23 +53,37 @@ macOS (Apple Silicon-first) LANraragi desktop client for managing a LANraragi se
   - Reader toolbar adapts for narrow windows to keep page-turn and auto-advance controls accessible
 - **Metadata editor**
   - Edit title/tags/summary
+  - Save skips no-op metadata updates when nothing changed
   - Save uses LANraragi-compatible metadata update payloads (title/tags/summary are always sent)
   - Supports cover override by setting thumbnail from a selected archive page
   - Supports deleting the current archive with confirmation
   - Queue selected metadata plugins against the current archive
   - Delete flow handles already-removed archives safely across Library and Duplicates
   - Tags are shown grouped/sorted like Library hover tags (chip-based editor; raw CSV field hidden)
+  - `source`/URL tags open in the browser directly (supports `http://`, `https://`, and host-only values)
   - Date tags are rendered in human-readable form
   - Click-to-remove tag chips plus tag autocomplete from server database stats (configurable cache)
+  - Summary editor is positioned under the title and auto-collapses when empty
   - Title and summary inputs use full-width editor sections for stable text placement while typing/editing
 - **Batch**
   - Bulk add/remove tags for selected archives
   - Queue selected metadata plugins for selected archives
+  - Find-archives query builder with saved queries (load/save/delete) and server-backed filters
+  - Selected archive staging list (filename-first) with per-item remove controls
+  - Plugin queue includes:
+    - Plugin picker + optional URL/arg input
+    - Plugin settings disclosure (boolean options rendered as switches)
+    - Save mode selector: **Combine plugin data with existing** or **Replace current data**
+    - Configurable per-archive delay (defaults to 4 seconds when no plugin-specific value is available)
+    - **Preview Before Queue** (enabled by default) to preview metadata changes on a sample without saving
   - Tag and plugin queues support pause/resume and recoverable checkpoints after app restart
   - Pause waits for the current archive to finish safely before stopping
   - Resume re-runs the last in-progress archive before continuing
+  - Live log panel shows timestamped per-archive progress and metadata before/after deltas
 - **Activity**
   - Local activity log with filtering (All / Errors / Actions) and full-text search
+  - Human-readable event cards with structured metadata chips
+  - Click an error row (or use context menu) to copy the full entry to clipboard
   - **Export JSON / Export CSV** — save the filtered events to a file via a save panel
   - **Copy Diagnostic Bundle** — copies a JSON bundle to the clipboard containing the filtered events, app version, macOS version, and selected profile endpoint; useful for filing bug reports without manual copy-paste
 - **Window chrome**
@@ -103,8 +118,9 @@ macOS (Apple Silicon-first) LANraragi desktop client for managing a LANraragi se
 The app writes local data under your user Library directories:
 
 - Fingerprint index DB: `~/Library/Application Support/LanraragiDesk/index.sqlite`
-- Tag suggestion cache: `~/Library/Caches/LanraragiDesk/tag-stats-<hash>.json`
+- Tag suggestion cache: `~/Library/Application Support/LanraragiDesk/Cache/tagstats-<hash>.json`
 - Activity log: `~/Library/Application Support/LanraragiDesk/activity.json`
+- Saved batch queries: `~/Library/Application Support/LanraragiDesk/saved-batch-queries.json`
 
 ## Build (Developer)
 

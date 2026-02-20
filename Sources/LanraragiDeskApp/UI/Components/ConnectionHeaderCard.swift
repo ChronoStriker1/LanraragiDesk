@@ -6,7 +6,17 @@ struct ConnectionHeaderCard: View {
     let profile: Profile
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .center, spacing: 16) {
+            Image("AppHero")
+                .resizable()
+                .scaledToFill()
+                .frame(width: 128, height: 128)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(.black, lineWidth: 2)
+                }
+
             VStack(alignment: .leading, spacing: 4) {
                 Text("LanraragiDesk")
                     .font(.system(size: 34, weight: .bold, design: .rounded))
@@ -17,17 +27,19 @@ struct ConnectionHeaderCard: View {
 
             Spacer()
 
-            HStack(spacing: 10) {
-                Button(appModel.connectionStatus == .testing ? "Testing…" : "Test Connection") {
-                    Task { await appModel.testConnection() }
+            VStack(alignment: .trailing, spacing: 10) {
+                HStack(spacing: 10) {
+                    Button(appModel.connectionStatus == .testing ? "Testing…" : "Test Connection") {
+                        Task { await appModel.testConnection() }
+                    }
+                    .disabled(appModel.connectionStatus == .testing)
+
+                    Button("Connection…") {
+                        appModel.profileEditorMode = .edit(profile)
+                    }
                 }
-                .disabled(appModel.connectionStatus == .testing)
 
                 ConnectionStatusPill(status: appModel.connectionStatus)
-
-                Button("Connection…") {
-                    appModel.profileEditorMode = .edit(profile)
-                }
             }
         }
         .padding(18)

@@ -803,8 +803,8 @@ private struct LibraryListRow: Identifiable, Hashable {
 
 private struct LibraryCard: View {
     static let outerCardWidth: CGFloat = 196
-    private static let outerCardHeight: CGFloat = 340
-    private static let coverSize: CGSize = .init(width: 160, height: 210)
+    private static let outerCardHeight: CGFloat = 300
+    private static let coverSize: CGSize = .init(width: 196, height: 300)
 
     @EnvironmentObject private var appModel: AppModel
 
@@ -821,7 +821,10 @@ private struct LibraryCard: View {
     @State private var hoveringCover: Bool = false
     @State private var hoveringPopover: Bool = false
     @State private var hoveringSelectionControl: Bool = false
+    @State private var popoverOpenTask: Task<Void, Never>?
     @State private var popoverCloseTask: Task<Void, Never>?
+    private static let hoverOpenDelayNs: UInt64 = 140_000_000
+    private static let hoverCloseDelayNs: UInt64 = 200_000_000
 
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -836,34 +839,20 @@ private struct LibraryCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .center, spacing: 8) {
-            ZStack(alignment: .topLeading) {
-                CoverThumb(profile: profile, arcid: arcid, thumbnails: appModel.thumbnails, size: Self.coverSize, showsBorder: false)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(alignment: .topLeading) {
-                        if meta?.isnew == true {
-                            CoverBadge(text: "NEW", background: .green.opacity(0.55))
-                                .padding(8)
-                        }
-                    }
-                    .overlay(alignment: .topTrailing) {
-                        ZStack(alignment: .topTrailing) {
-                            if let d = ArchiveMetaHelpers.dateAdded(meta) {
-                                CoverBadge(text: Self.dateFormatter.string(from: d))
-                                    .padding(8)
-                            }
-                        }
-                    }
-                    .overlay(alignment: .bottom) {
-                        if let pages = meta?.pagecount, pages > 0 {
-                            HStack {
-                                Spacer(minLength: 0)
-                                CoverBadge(text: "\(pages) pages")
-                                Spacer(minLength: 0)
-                            }
+        ZStack(alignment: .bottom) {
+            CoverThumb(profile: profile, arcid: arcid, thumbnails: appModel.thumbnails, size: Self.coverSize, showsBorder: false)
+                .overlay(alignment: .topLeading) {
+                    if meta?.isnew == true {
+                        CoverBadge(text: "NEW", background: .green.opacity(0.55))
                             .padding(8)
-                        }
                     }
+                }
+                .overlay(alignment: .topTrailing) {
+                    if let d = ArchiveMetaHelpers.dateAdded(meta) {
+                        CoverBadge(text: Self.dateFormatter.string(from: d))
+                            .padding(8)
+                    }
+                }
                 .onHover { hovering in
                     hoveringCover = hovering
                     updatePopoverVisibility()
@@ -873,6 +862,7 @@ private struct LibraryCard: View {
                         title: meta?.title ?? title,
                         summary: meta?.summary ?? "",
                         tags: meta?.tags ?? "",
+                        pageCount: meta?.pagecount ?? 0,
                         onSelectTag: { rawTag in
                             onSelectTag(rawTag)
                             showDetails = false
@@ -884,74 +874,68 @@ private struct LibraryCard: View {
                     }
                 }
 
-                if hoveringCover || hoveringSelectionControl || appModel.selection.contains(arcid) {
-                    // Keep selection as a separate button so the cover's single-click open stays reliable.
-                    Button {
-                        appModel.selection.toggle(arcid)
-                    } label: {
-                        Image(systemName: appModel.selection.contains(arcid) ? "checkmark.circle.fill" : "circle")
-                            .imageScale(.large)
-                            .foregroundStyle(appModel.selection.contains(arcid) ? .green : .white)
-                            .padding(8)
-                            .background(.black.opacity(0.22))
-                            .clipShape(Circle())
-                            .shadow(color: .black.opacity(0.35), radius: 2, x: 0, y: 1)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Select for batch operations")
-                    .onHover { hovering in
-                        hoveringSelectionControl = hovering
-                    }
-                    .padding(16)
-                    .zIndex(200)
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.82)],
+                startPoint: .init(x: 0.5, y: 0.45),
+                endPoint: .bottom
+            )
+            .allowsHitTesting(false)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(nil)
+                let artistLine = ArchiveMetaHelpers.artists(meta).joined(separator: ", ")
+                let groupLine = ArchiveMetaHelpers.groups(meta).joined(separator: ", ")
+                let secondaryLine: String? = artistLine.isEmpty ? (groupLine.isEmpty ? nil : groupLine) : artistLine
+                if let secondaryLine {
+                    Text(secondaryLine)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.75))
+                        .lineLimit(1)
                 }
             }
-
-            ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.callout)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .center)
-
-                    let artistLine = ArchiveMetaHelpers.artists(meta).joined(separator: ", ")
-                    Text("Artist: " + (artistLine.isEmpty ? "—" : artistLine))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .center)
-
-                    let groupLine = ArchiveMetaHelpers.groups(meta).joined(separator: ", ")
-                    Text("Group: " + (groupLine.isEmpty ? "—" : groupLine))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                }
-                .frame(maxWidth: .infinity, alignment: .center)
-            }
-            .scrollIndicators(.hidden)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .allowsHitTesting(false)
         }
-        .padding(10)
-        .frame(width: Self.outerCardWidth, height: Self.outerCardHeight, alignment: .top)
-        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .frame(width: Self.outerCardWidth, height: Self.outerCardHeight)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(.white.opacity(0.10), lineWidth: 1)
+        }
+        .overlay(alignment: .topLeading) {
+            if hoveringCover || hoveringSelectionControl || appModel.selection.contains(arcid) {
+                // Keep selection as a separate button so the cover's single-click open stays reliable.
+                Button {
+                    appModel.selection.toggle(arcid)
+                } label: {
+                    Image(systemName: appModel.selection.contains(arcid) ? "checkmark.circle.fill" : "circle")
+                        .imageScale(.large)
+                        .foregroundStyle(appModel.selection.contains(arcid) ? .green : .white)
+                        .padding(8)
+                        .background(.black.opacity(0.22))
+                        .clipShape(Circle())
+                        .shadow(color: .black.opacity(0.35), radius: 2, x: 0, y: 1)
+                }
+                .buttonStyle(.plain)
+                .help("Select for batch operations")
+                .onHover { hovering in
+                    hoveringSelectionControl = hovering
+                }
+                .padding(16)
+            }
+        }
+        .shadow(color: .black.opacity(hoveringCover ? 0.42 : 0.28), radius: hoveringCover ? 18 : 8, x: 0, y: hoveringCover ? 8 : 4)
+        .scaleEffect(hoveringCover ? 1.04 : 1.0)
+        .animation(.spring(response: 0.25, dampingFraction: 0.75), value: hoveringCover)
+        .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .onTapGesture {
             openReaderFromCard()
         }
         .help("Open reader")
-        .background(.quaternary.opacity(0.35))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 1)
-        }
         .task(id: "\(arcid)#\(metadataEpoch)") {
             do {
                 let meta = try await appModel.archives.metadata(profile: profile, arcid: arcid)
@@ -966,10 +950,25 @@ private struct LibraryCard: View {
     }
 
     private func updatePopoverVisibility() {
+        popoverOpenTask?.cancel()
         popoverCloseTask?.cancel()
 
         if hoveringCover {
-            showDetails = allowHoverDetails
+            guard allowHoverDetails else {
+                showDetails = false
+                return
+            }
+            // Intent delay prevents accidental retargeting when cursor passes over
+            // narrow popover-arrow gaps between nearby covers.
+            popoverOpenTask = Task {
+                try? await Task.sleep(nanoseconds: Self.hoverOpenDelayNs)
+                if Task.isCancelled { return }
+                await MainActor.run {
+                    if hoveringCover {
+                        showDetails = true
+                    }
+                }
+            }
             return
         }
 
@@ -980,7 +979,7 @@ private struct LibraryCard: View {
 
         // Give the cursor time to move from the cover to the popover without it collapsing immediately.
         popoverCloseTask = Task {
-            try? await Task.sleep(nanoseconds: 200_000_000)
+            try? await Task.sleep(nanoseconds: Self.hoverCloseDelayNs)
             if Task.isCancelled { return }
             await MainActor.run {
                 if !(hoveringCover || hoveringPopover) {
@@ -1005,7 +1004,10 @@ private struct LibraryRow: View {
     @State private var hoveringCover: Bool = false
     @State private var hoveringPopover: Bool = false
     @State private var hoveringSelectionControl: Bool = false
+    @State private var popoverOpenTask: Task<Void, Never>?
     @State private var popoverCloseTask: Task<Void, Never>?
+    private static let hoverOpenDelayNs: UInt64 = 140_000_000
+    private static let hoverCloseDelayNs: UInt64 = 200_000_000
 
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -1069,6 +1071,7 @@ private struct LibraryRow: View {
                         title: meta?.title ?? title,
                         summary: meta?.summary ?? "",
                         tags: meta?.tags ?? "",
+                        pageCount: meta?.pagecount ?? 0,
                         onSelectTag: { rawTag in
                             onSelectTag(rawTag)
                             showDetails = false
@@ -1118,15 +1121,29 @@ private struct LibraryRow: View {
     }
 
     private func updatePopoverVisibility() {
+        popoverOpenTask?.cancel()
         popoverCloseTask?.cancel()
 
-        if hoveringCover || hoveringPopover {
+        if hoveringPopover {
             showDetails = true
             return
         }
 
+        if hoveringCover {
+            popoverOpenTask = Task {
+                try? await Task.sleep(nanoseconds: Self.hoverOpenDelayNs)
+                if Task.isCancelled { return }
+                await MainActor.run {
+                    if hoveringCover {
+                        showDetails = true
+                    }
+                }
+            }
+            return
+        }
+
         popoverCloseTask = Task {
-            try? await Task.sleep(nanoseconds: 200_000_000)
+            try? await Task.sleep(nanoseconds: Self.hoverCloseDelayNs)
             if Task.isCancelled { return }
             await MainActor.run {
                 if !(hoveringCover || hoveringPopover) {
@@ -1172,63 +1189,55 @@ private struct ArchiveHoverDetailsView: View {
     let title: String
     let summary: String
     let tags: String
+    let pageCount: Int
     let onSelectTag: (String) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title.isEmpty ? "Untitled" : title)
-                .font(.headline)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            Divider()
-
-            ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Summary")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        if !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Text(summary)
-                                .font(.callout)
-                                .textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        } else {
-                            Text("No summary.")
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Tags")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        TagGroupsView(tags: tags, onSelectTag: onSelectTag)
-                    }
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 8) {
+                Text(title.isEmpty ? "Untitled" : title)
+                    .font(.subheadline.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if pageCount > 0 {
+                    Text("\(pageCount) pp")
+                        .font(.caption2.monospacedDigit().weight(.semibold))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(.quaternary)
+                        .clipShape(Capsule())
+                        .fixedSize()
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .scrollIndicators(.visible)
+
+            let trimmedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedSummary.isEmpty {
+                Divider()
+                Text(trimmedSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+
+            let trimmedTags = tags.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedTags.isEmpty {
+                Divider()
+                HoverTagCloud(tags: trimmedTags, onSelectTag: onSelectTag)
+            }
         }
         .padding(14)
-        .frame(width: 520, height: 460)
+        .frame(width: 300)
     }
 }
 
-private struct TagGroupsView: View {
+private struct HoverTagCloud: View {
     let tags: String
     let onSelectTag: (String) -> Void
 
-    private struct TagItem: Hashable {
-        var namespace: String
-        var value: String
+    private struct TagItem {
         var display: String
-        var rawToken: String
+        var token: String
     }
 
     private static let humanDateFormatter: DateFormatter = {
@@ -1238,94 +1247,116 @@ private struct TagGroupsView: View {
         return f
     }()
 
-    private var items: [TagItem] {
-        let raw = tags
+    private var groups: [(namespace: String, items: [TagItem])] {
+        let parsed: [TagItem] = tags
             .split(separator: ",")
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-
-        guard !raw.isEmpty else { return [] }
-
-        return raw.map { tok in
-            let (ns, v) = TagParser.splitNamespace(tok)
-            let display: String
-            if TagParser.isDateNamespace(ns), let d = TagParser.parseDateValue(v) {
-                display = "\(ns):\(Self.humanDateFormatter.string(from: d))"
-            } else {
-                display = tok
+            .map { tok in
+                let (ns, v) = TagParser.splitNamespace(tok)
+                let display: String
+                if TagParser.isDateNamespace(ns), let d = TagParser.parseDateValue(v) {
+                    display = "\(ns):\(Self.humanDateFormatter.string(from: d))"
+                } else {
+                    display = tok
+                }
+                return TagItem(display: display, token: tok)
             }
-            return TagItem(namespace: ns, value: v, display: display, rawToken: tok)
-        }
-    }
 
-    private var groups: [(String, [TagItem])] {
-        let grouped = Dictionary(grouping: items) { $0.namespace.isEmpty ? "tag" : $0.namespace.lowercased() }
-        let keys = grouped.keys.sorted { a, b in
-            // Show un-namespaced tags first, then alphabetical.
+        let bucket = Dictionary(grouping: parsed) { item -> String in
+            let (ns, _) = TagParser.splitNamespace(item.token)
+            return ns.isEmpty ? "tag" : ns.lowercased()
+        }
+        let keys = bucket.keys.sorted { a, b in
             if a == "tag", b != "tag" { return true }
             if a != "tag", b == "tag" { return false }
             return a.localizedCaseInsensitiveCompare(b) == .orderedAscending
         }
-        return keys.map { k in
-            let values = (grouped[k] ?? []).sorted { a, b in
-                a.display.localizedCaseInsensitiveCompare(b.display) == .orderedAscending
-            }
-            return (k, values)
+        return keys.compactMap { k in
+            guard let items = bucket[k] else { return nil }
+            let sorted = items.sorted { $0.display.localizedCaseInsensitiveCompare($1.display) == .orderedAscending }
+            return (namespace: k, items: sorted)
         }
     }
 
     var body: some View {
-        if items.isEmpty {
-            Text("No tags.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        } else {
-            VStack(alignment: .leading, spacing: 12) {
-                ForEach(groups, id: \.0) { ns, items in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(ns == "tag" ? "Tags" : ns)
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(groups, id: \.namespace) { group in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(group.namespace == "tag" ? "Tags" : group.namespace)
                             .font(.caption2)
                             .foregroundStyle(.secondary)
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(items, id: \.self) { t in
-                                TagChip(text: t.display) {
-                                    onSelectTag(t.rawToken)
-                                }
+                        TagPillFlow(spacing: 4) {
+                            ForEach(group.items, id: \.token) { tag in
+                                Text(tag.display)
+                                    .font(.caption2)
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 3)
+                                    .background(.quaternary.opacity(0.6))
+                                    .clipShape(Capsule())
+                                    .contentShape(Capsule())
+                                    .onTapGesture { onSelectTag(tag.token) }
+                                    .help("Search: \(tag.display)")
                             }
                         }
                     }
                 }
             }
+            .padding(.horizontal, 2)
         }
+        .scrollIndicators(.visible)
+        .frame(maxHeight: 220)
     }
 }
 
-private struct TagChip: View {
-    let text: String
-    let onClick: () -> Void
+/// A simple wrapping flow layout. Lays children left-to-right, wrapping to a
+/// new row when the next child would exceed the available width.
+private struct TagPillFlow: Layout {
+    var spacing: CGFloat = 6
 
-    var body: some View {
-        Text(text)
-            .font(.callout)
-            .multilineTextAlignment(.leading)
-            .lineLimit(nil)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(.quaternary.opacity(0.35))
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 1)
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        layout(proposal: proposal, subviews: subviews).totalSize
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = layout(proposal: ProposedViewSize(bounds.size), subviews: subviews)
+        for (subview, origin) in zip(subviews, result.origins) {
+            subview.place(
+                at: CGPoint(x: bounds.minX + origin.x, y: bounds.minY + origin.y),
+                proposal: .unspecified
+            )
+        }
+    }
+
+    private struct LayoutResult {
+        var origins: [CGPoint]
+        var totalSize: CGSize
+    }
+
+    private func layout(proposal: ProposedViewSize, subviews: Subviews) -> LayoutResult {
+        let maxWidth = proposal.width ?? .infinity
+        var origins: [CGPoint] = []
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > maxWidth {
+                y += rowHeight + spacing
+                x = 0
+                rowHeight = 0
             }
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .onTapGesture {
-                onClick()
-            }
-            .help("Click to add to Library search")
+            origins.append(CGPoint(x: x, y: y))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+
+        return LayoutResult(
+            origins: origins,
+            totalSize: CGSize(width: maxWidth, height: y + rowHeight)
+        )
     }
 }
 
