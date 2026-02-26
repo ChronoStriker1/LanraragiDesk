@@ -38,6 +38,9 @@ macOS (Apple Silicon-first) LANraragi desktop client for managing a LANraragi se
   - Finds **exact** and **similar** cover matches
   - Review as **pairs** with side-by-side comparison
   - Actions: delete left/right, mark “Not a match” (persisted locally and excluded from future scans)
+  - Inline per-side metadata editing directly in the compare workspace (no modal required)
+  - Duplicates editor supports the same metadata workflow as Library (title/tags/summary/plugins/cover page/delete)
+  - Page preview tiles support direct `Set as cover` actions during pair review
   - Duplicates workflow events are logged to Activity (scan start/complete/fail/cancel, exclusions, removals, deletes)
   - Synced page preview scrolling for visual verification
   - Integrated review workspace directly in the Duplicates page

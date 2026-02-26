@@ -9,6 +9,7 @@ actor ArchiveLoader {
     private let limiter = AsyncLimiter(limit: 4)
 
     private var apiKeyByProfileID: [UUID: String] = [:]
+    private var clientByProfileID: [UUID: LANraragiClient] = [:]
 
     private var metaCache: [String: ArchiveMetadata] = [:]
     private var metaInflight: [String: Task<ArchiveMetadata, Error>] = [:]
@@ -37,9 +38,9 @@ actor ArchiveLoader {
         if let m = metaCache[arcid] { return m }
         if let t = metaInflight[arcid] { return try await t.value }
 
+        let client = try makeClient(profile: profile)
         let task = Task<ArchiveMetadata, Error> {
             try await limiter.withPermit {
-                let client = try await makeClient(profile: profile)
                 return try await client.getArchiveMetadata(arcid: arcid)
             }
         }
@@ -59,7 +60,7 @@ actor ArchiveLoader {
         tags: String,
         summary: String
     ) async throws -> ArchiveMetadata {
-        let client = try await makeClient(profile: profile)
+        let client = try makeClient(profile: profile)
         try await limiter.withPermit {
             try await client.updateArchiveMetadata(arcid: arcid, title: title, tags: tags, summary: summary)
         }
@@ -77,14 +78,14 @@ actor ArchiveLoader {
         arcid: String,
         page: Int? = nil
     ) async throws {
-        let client = try await makeClient(profile: profile)
+        let client = try makeClient(profile: profile)
         try await limiter.withPermit {
             try await client.updateArchiveThumbnail(arcid: arcid, page: page)
         }
     }
 
     func deleteArchive(profile: Profile, arcid: String) async throws {
-        let client = try await makeClient(profile: profile)
+        let client = try makeClient(profile: profile)
         do {
             try await limiter.withPermit {
                 try await client.deleteArchive(arcid: arcid)
@@ -109,9 +110,9 @@ actor ArchiveLoader {
         if let s = metaRawCache[arcid] { return s }
         if let t = metaRawInflight[arcid] { return try await t.value }
 
+        let client = try makeClient(profile: profile)
         let task = Task<String, Error> {
             try await limiter.withPermit {
-                let client = try await makeClient(profile: profile)
                 let data = try await client.getArchiveMetadataRaw(arcid: arcid)
 
                 guard
@@ -138,9 +139,9 @@ actor ArchiveLoader {
         if let p = pagesCache[arcid], p.count > 1 { return p }
         if let t = pagesInflight[arcid] { return try await t.value }
 
+        let client = try makeClient(profile: profile)
         let task = Task<[URL], Error> {
             try await limiter.withPermit {
-                let client = try await makeClient(profile: profile)
                 let resp: ArchiveFilesResponse
                 do {
                     let initial = try await client.getArchiveFiles(arcid: arcid, force: false)
@@ -181,9 +182,9 @@ actor ArchiveLoader {
         let inflightKey = String(key)
         if let t = bytesInflight[inflightKey] { return try await t.value }
 
+        let client = try makeClient(profile: profile)
         let task = Task<Data, Error> {
             try await limiter.withPermit {
-                let client = try await makeClient(profile: profile)
                 return try await client.fetchBytes(url: url)
             }
         }
@@ -198,7 +199,11 @@ actor ArchiveLoader {
         return data
     }
 
-    private func makeClient(profile: Profile) async throws -> LANraragiClient {
+    private func makeClient(profile: Profile) throws -> LANraragiClient {
+        if let cached = clientByProfileID[profile.id] {
+            return cached
+        }
+
         let apiKeyString: String
         if let cached = apiKeyByProfileID[profile.id] {
             apiKeyString = cached
@@ -211,12 +216,14 @@ actor ArchiveLoader {
             apiKeyByProfileID[profile.id] = loaded
         }
 
-        return LANraragiClient(configuration: .init(
+        let client = LANraragiClient(configuration: .init(
             baseURL: profile.baseURL,
             apiKey: LANraragiAPIKey(apiKeyString),
             acceptLanguage: profile.language,
             maxConnectionsPerHost: AppSettings.maxConnectionsPerHost(defaultValue: 8)
         ))
+        clientByProfileID[profile.id] = client
+        return client
     }
 }
 

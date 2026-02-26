@@ -12,8 +12,8 @@ private enum CoverThumbCache {
         return c
     }()
 
-    nonisolated static func key(arcid: String, size: CGSize, contentInset: CGFloat) -> NSString {
-        "\(arcid)|\(Int(size.width))x\(Int(size.height))|inset=\(Int(contentInset))" as NSString
+    nonisolated static func key(arcid: String, size: CGSize, contentInset: CGFloat, reloadToken: Int) -> NSString {
+        "\(arcid)|\(Int(size.width))x\(Int(size.height))|inset=\(Int(contentInset))|rev=\(reloadToken)" as NSString
     }
 }
 
@@ -24,6 +24,7 @@ struct CoverThumb: View {
     let size: CGSize
     let contentInset: CGFloat
     let showsBorder: Bool
+    let reloadToken: Int
 
     @State private var image: NSImage?
     @State private var errorText: String?
@@ -37,7 +38,8 @@ struct CoverThumb: View {
         thumbnails: ThumbnailLoader,
         size: CGSize = .init(width: 56, height: 72),
         contentInset: CGFloat = 4,
-        showsBorder: Bool = true
+        showsBorder: Bool = true,
+        reloadToken: Int = 0
     ) {
         self.profile = profile
         self.arcid = arcid
@@ -45,6 +47,7 @@ struct CoverThumb: View {
         self.size = size
         self.contentInset = contentInset
         self.showsBorder = showsBorder
+        self.reloadToken = reloadToken
     }
 
     var body: some View {
@@ -87,9 +90,9 @@ struct CoverThumb: View {
                     .strokeBorder(Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 1)
             }
         }
-        .task(id: arcid) {
+        .task(id: "\(arcid)|\(reloadToken)") {
             // When switching between pairs, the view may be reused; reload for the new arcid.
-            let cacheKey = CoverThumbCache.key(arcid: arcid, size: size, contentInset: contentInset)
+            let cacheKey = CoverThumbCache.key(arcid: arcid, size: size, contentInset: contentInset, reloadToken: reloadToken)
             if let cached = await MainActor.run(body: { CoverThumbCache.images.object(forKey: cacheKey) }) {
                 image = cached
                 errorText = nil
@@ -127,7 +130,7 @@ struct CoverThumb: View {
 
     private func fetch() async throws -> NSImage? {
         let bytes = try await thumbnails.thumbnailBytes(profile: profile, arcid: arcid)
-        return await MainActor.run { NSImage(data: bytes) }
+        return NSImage(data: bytes)
     }
 }
 

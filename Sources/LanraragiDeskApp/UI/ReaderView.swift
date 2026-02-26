@@ -477,7 +477,7 @@ struct ReaderView: View {
             do {
                 let bytesA = try await appModel.archives.bytes(profile: profile, url: urlA)
                 let pxA = ImageDownsampler.pixelSize(from: bytesA)
-                let imgA = await MainActor.run { ImageDownsampler.thumbnail(from: bytesA, maxPixelSize: 2400) }
+                let imgA = ImageDownsampler.thumbnail(from: bytesA, maxPixelSize: 2400)
                 if Task.isCancelled { return }
                 if let imgA {
                     self.image = imgA
@@ -489,7 +489,7 @@ struct ReaderView: View {
                 if let urlB {
                     let bytesB = try await appModel.archives.bytes(profile: profile, url: urlB)
                     let pxB = ImageDownsampler.pixelSize(from: bytesB)
-                    let imgB = await MainActor.run { ImageDownsampler.thumbnail(from: bytesB, maxPixelSize: 2400) }
+                    let imgB = ImageDownsampler.thumbnail(from: bytesB, maxPixelSize: 2400)
                     if Task.isCancelled { return }
                     self.imageB = imgB
                     self.imageBPixelSize = pxB

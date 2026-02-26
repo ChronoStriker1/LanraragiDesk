@@ -27,6 +27,7 @@ struct PairReviewView: View {
     @State private var matchFilter: MatchFilter = .both
     @State private var errorText: String?
     @State private var showMatchLegend: Bool = false
+    @State private var coverReloadByArcid: [String: Int] = [:]
 
     private enum MatchFilter: String, CaseIterable, Hashable {
         case both
@@ -226,6 +227,8 @@ struct PairReviewView: View {
             profile: profile,
             pair: p,
             thumbnails: thumbnails,
+            coverReloadA: coverReloadToken(for: p.arcidA),
+            coverReloadB: coverReloadToken(for: p.arcidB),
             markNotDuplicate: { pair in
                 let next = nextPair(after: pair)
                 markNotDuplicate(pair)
@@ -317,6 +320,9 @@ struct PairReviewView: View {
                 reportError: { msg in
                     errorText = msg
                 },
+                onCoverUpdated: { arcid in
+                    coverReloadByArcid[arcid, default: 0] &+= 1
+                },
                 goNext: {
                     self.selection = next
                 }
@@ -324,12 +330,18 @@ struct PairReviewView: View {
             .debugFrameNumber(3)
         )
     }
+
+    private func coverReloadToken(for arcid: String) -> Int {
+        coverReloadByArcid[arcid, default: 0]
+    }
 }
 
 private struct PairRowView: View {
     let profile: Profile
     let pair: DuplicateScanResult.Pair
     let thumbnails: ThumbnailLoader
+    let coverReloadA: Int
+    let coverReloadB: Int
     let markNotDuplicate: (DuplicateScanResult.Pair) -> Void
 
     var body: some View {
@@ -340,7 +352,8 @@ private struct PairRowView: View {
                 thumbnails: thumbnails,
                 size: ReviewLayout.pairCoverSize,
                 contentInset: 0,
-                showsBorder: false
+                showsBorder: false,
+                reloadToken: coverReloadA
             )
             CoverThumb(
                 profile: profile,
@@ -348,7 +361,8 @@ private struct PairRowView: View {
                 thumbnails: thumbnails,
                 size: ReviewLayout.pairCoverSize,
                 contentInset: 0,
-                showsBorder: false
+                showsBorder: false,
+                reloadToken: coverReloadB
             )
         }
         .frame(width: ReviewLayout.pairListWidth, alignment: .leading)
@@ -400,14 +414,24 @@ private struct PairCompareView: View {
     let markNotDuplicate: (DuplicateScanResult.Pair) -> Void
     let deleteArchive: (String) async throws -> Void
     let reportError: (String) -> Void
+    let onCoverUpdated: (String) -> Void
     let goNext: () -> Void
 
+    private enum InlineEditorSide {
+        case left
+        case right
+    }
+
     @State private var confirmDeleteArcid: String?
-    @State private var editingArcid: String?
+    @State private var activeInlineEditorSide: InlineEditorSide?
+    @State private var isInlineEditorVisible: Bool = false
     @State private var metaA: ArchiveMetadata?
     @State private var metaB: ArchiveMetadata?
     @State private var pagesScrollMinY: CGFloat = 0
     @State private var isDetailsCollapsed: Bool = false
+    @State private var pageCoverStatusText: String?
+    @State private var coverUpdateInFlightArcids: Set<String> = []
+    @State private var coverReloadByArcid: [String: Int] = [:]
     @EnvironmentObject private var appModel: AppModel
     @Environment(\.openWindow) private var openWindow
 
@@ -420,10 +444,18 @@ private struct PairCompareView: View {
             let expandedTop = max(240, min(maxTopFromMinPages, available * 0.82))
             // Collapsed state keeps header + metadata; Tags collapse away.
             let collapsedTop = max(200, min(expandedTop, available * 0.34))
-            let topHeight = isDetailsCollapsed ? collapsedTop : expandedTop
+            let topHeight = isInlineEditorVisible ? expandedTop : (isDetailsCollapsed ? collapsedTop : expandedTop)
 
             VStack(alignment: .leading, spacing: 8) {
-                topBar
+                if let pageCoverStatusText, !pageCoverStatusText.isEmpty {
+                    Text(pageCoverStatusText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 4)
+                        .textSelection(.enabled)
+                }
+
+                topBar(topHeight: topHeight)
                     // Keep 5 and 8 mirrored in height; overflow scrolls internally.
                     .frame(height: topHeight, alignment: .top)
                     .animation(.snappy(duration: 0.2), value: isDetailsCollapsed)
@@ -433,6 +465,11 @@ private struct PairCompareView: View {
                     arcidA: pair.arcidA,
                     arcidB: pair.arcidB,
                     archives: archives,
+                    isSettingCoverA: coverUpdateInFlightArcids.contains(pair.arcidA),
+                    isSettingCoverB: coverUpdateInFlightArcids.contains(pair.arcidB),
+                    onSetCoverFromPage: { arcid, page in
+                        await setCoverFromPage(arcid: arcid, page: page)
+                    },
                     scrollMinY: $pagesScrollMinY
                 )
                 .debugFrameNumber(7)
@@ -472,30 +509,13 @@ private struct PairCompareView: View {
         } message: {
             Text("This removes the archive from LANraragi. This cannot be undone.")
         }
-        .sheet(item: Binding(
-            get: { editingArcid.map(ArcidBox.init) },
-            set: { editingArcid = $0?.arcid }
-        )) { box in
-            let arcid = box.arcid
-            ArchiveMetadataEditorView(
-                profile: profile,
-                arcid: arcid,
-                initialMeta: arcid == pair.arcidA ? metaA : (arcid == pair.arcidB ? metaB : nil),
-                archives: archives,
-                onSaved: { updated in
-                    if updated.arcid == pair.arcidA { metaA = updated }
-                    if updated.arcid == pair.arcidB { metaB = updated }
-                },
-                onDelete: { deletingArcid in
-                    try await deleteArchive(deletingArcid)
-                    await MainActor.run {
-                        goNext()
-                    }
-                }
-            )
-        }
         .task(id: "\(pair.arcidA)|\(pair.arcidB)") {
             isDetailsCollapsed = false
+            pageCoverStatusText = nil
+            coverUpdateInFlightArcids = []
+            coverReloadByArcid = [:]
+            isInlineEditorVisible = false
+            activeInlineEditorSide = nil
             metaA = nil
             metaB = nil
             do {
@@ -508,6 +528,9 @@ private struct PairCompareView: View {
             }
         }
         .onChange(of: pagesScrollMinY) { _, v in
+            if isInlineEditorVisible {
+                return
+            }
             // Hysteresis avoids flicker around the top of the pages grid.
             let collapseAt: CGFloat = -18
             let expandAt: CGFloat = -4
@@ -519,71 +542,86 @@ private struct PairCompareView: View {
         }
     }
 
-    private var topBar: some View {
+    @ViewBuilder
+    private func topBar(topHeight: CGFloat) -> some View {
         let tagRows = TagCompareGrouper.rows(tagsA: metaA?.tags, tagsB: metaB?.tags, maxGroups: 8, maxTagsPerGroup: 18)
 
-        // Shared ScrollView so both archive panels scroll together.
-        return ScrollView(.vertical) {
-            HStack(alignment: .top, spacing: 0) {
-                ArchiveComparePanel(
-                    profile: profile,
-                    arcid: pair.arcidA,
-                    meta: metaA,
-                    other: metaB,
-                    tagRows: tagRows,
-                    showingLeft: true,
-                    thumbnails: thumbnails,
-                    collapsed: isDetailsCollapsed,
-                    onRead: {
-                        openReader(pair.arcidA)
-                    },
-                    onEdit: {
-                        editingArcid = pair.arcidA
-                    },
-                    onNotMatch: {
-                        markNotDuplicate(pair)
-                        goNext()
-                    },
-                    onDelete: { confirmDeleteArcid = pair.arcidA }
-                )
-                .id(pair.arcidA)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .debugFrameNumber(5)
+        ZStack(alignment: .top) {
+            // Shared ScrollView so both archive panels scroll together.
+            ScrollView(.vertical) {
+                HStack(alignment: .top, spacing: 0) {
+                    ArchiveComparePanel(
+                        profile: profile,
+                        arcid: pair.arcidA,
+                        coverReloadToken: coverReloadToken(for: pair.arcidA),
+                        meta: metaA,
+                        other: metaB,
+                        tagRows: tagRows,
+                        showingLeft: true,
+                        thumbnails: thumbnails,
+                        collapsed: isDetailsCollapsed,
+                        onRead: {
+                            openReader(pair.arcidA)
+                        },
+                        onEdit: {
+                            isDetailsCollapsed = false
+                            activeInlineEditorSide = .left
+                            isInlineEditorVisible = true
+                        },
+                        onNotMatch: {
+                            markNotDuplicate(pair)
+                            goNext()
+                        },
+                        onDelete: { confirmDeleteArcid = pair.arcidA }
+                    )
+                    .id(pair.arcidA)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .debugFrameNumber(5)
 
-                Color(nsColor: .separatorColor)
-                    .opacity(0.6)
-                    .frame(width: 1)
-                    .padding(.vertical, 10)
-                    .frame(width: 24)
-                    .debugFrameNumber(6)
+                    Color(nsColor: .separatorColor)
+                        .opacity(0.6)
+                        .frame(width: 1)
+                        .padding(.vertical, 10)
+                        .frame(width: 24)
+                        .debugFrameNumber(6)
 
-                ArchiveComparePanel(
-                    profile: profile,
-                    arcid: pair.arcidB,
-                    meta: metaB,
-                    other: metaA,
-                    tagRows: tagRows,
-                    showingLeft: false,
-                    thumbnails: thumbnails,
-                    collapsed: isDetailsCollapsed,
-                    onRead: {
-                        openReader(pair.arcidB)
-                    },
-                    onEdit: {
-                        editingArcid = pair.arcidB
-                    },
-                    onNotMatch: {
-                        markNotDuplicate(pair)
-                        goNext()
-                    },
-                    onDelete: { confirmDeleteArcid = pair.arcidB }
-                )
-                .id(pair.arcidB)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .debugFrameNumber(8)
+                    ArchiveComparePanel(
+                        profile: profile,
+                        arcid: pair.arcidB,
+                        coverReloadToken: coverReloadToken(for: pair.arcidB),
+                        meta: metaB,
+                        other: metaA,
+                        tagRows: tagRows,
+                        showingLeft: false,
+                        thumbnails: thumbnails,
+                        collapsed: isDetailsCollapsed,
+                        onRead: {
+                            openReader(pair.arcidB)
+                        },
+                        onEdit: {
+                            isDetailsCollapsed = false
+                            activeInlineEditorSide = .right
+                            isInlineEditorVisible = true
+                        },
+                        onNotMatch: {
+                            markNotDuplicate(pair)
+                            goNext()
+                        },
+                        onDelete: { confirmDeleteArcid = pair.arcidB }
+                    )
+                    .id(pair.arcidB)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .debugFrameNumber(8)
+                }
+            }
+            .scrollIndicators(.visible)
+
+            if isInlineEditorVisible, let side = activeInlineEditorSide {
+                inlineEditor(for: side, topHeight: topHeight)
+                    .transition(side == .left ? .move(edge: .leading) : .move(edge: .trailing))
             }
         }
-        .scrollIndicators(.visible)
+        .animation(.snappy(duration: 0.2), value: isInlineEditorVisible)
     }
 
     private func openReader(_ arcid: String) {
@@ -591,15 +629,92 @@ private struct PairCompareView: View {
         openWindow(id: "reader")
     }
 
-    private struct ArcidBox: Identifiable {
-        let arcid: String
-        var id: String { arcid }
+    private func coverReloadToken(for arcid: String) -> Int {
+        coverReloadByArcid[arcid, default: 0]
+    }
+
+    @ViewBuilder
+    private func inlineEditor(for side: InlineEditorSide, topHeight: CGFloat) -> some View {
+        let arcid = (side == .left) ? pair.arcidA : pair.arcidB
+        let initialMeta = (side == .left) ? metaA : metaB
+
+        ArchiveMetadataEditorView(
+            profile: profile,
+            arcid: arcid,
+            initialMeta: initialMeta,
+            archives: archives,
+            onSaved: { updated in
+                if updated.arcid == pair.arcidA { metaA = updated }
+                if updated.arcid == pair.arcidB { metaB = updated }
+                coverReloadByArcid[updated.arcid, default: 0] &+= 1
+                onCoverUpdated(updated.arcid)
+                withAnimation(.snappy(duration: 0.18)) {
+                    isInlineEditorVisible = false
+                }
+                activeInlineEditorSide = nil
+            },
+            onDelete: { deletingArcid in
+                try await deleteArchive(deletingArcid)
+                await MainActor.run {
+                    isInlineEditorVisible = false
+                    activeInlineEditorSide = nil
+                    goNext()
+                }
+            },
+            onCancel: {
+                withAnimation(.snappy(duration: 0.18)) {
+                    isInlineEditorVisible = false
+                }
+                activeInlineEditorSide = nil
+            },
+            isEmbedded: true
+        )
+        .frame(maxWidth: 640, maxHeight: topHeight)
+        .padding(8)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.16), radius: 18, x: side == .left ? 8 : -8, y: 8)
+        .frame(maxWidth: .infinity, alignment: side == .left ? .leading : .trailing)
+    }
+
+    private func setCoverFromPage(arcid: String, page: Int) async {
+        if coverUpdateInFlightArcids.contains(arcid) {
+            return
+        }
+        coverUpdateInFlightArcids.insert(arcid)
+        defer { coverUpdateInFlightArcids.remove(arcid) }
+
+        do {
+            try await archives.updateThumbnail(profile: profile, arcid: arcid, page: page)
+            await appModel.thumbnails.invalidate(profile: profile, arcid: arcid)
+            if arcid == pair.arcidA {
+                metaA = try? await archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
+            } else if arcid == pair.arcidB {
+                metaB = try? await archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
+            }
+            coverReloadByArcid[arcid, default: 0] &+= 1
+            onCoverUpdated(arcid)
+            pageCoverStatusText = "\(arcid): cover updated to page \(page)."
+            appModel.activity.add(.init(kind: .action, title: "Updated archive cover", detail: "\(arcid) • page \(page)"))
+        } catch {
+            if Task.isCancelled || ErrorPresenter.isCancellationLike(error) {
+                return
+            }
+            pageCoverStatusText = "\(arcid): cover update failed (\(ErrorPresenter.short(error)))."
+            reportError("Cover update failed for \(arcid): \(ErrorPresenter.short(error))")
+            appModel.activity.add(.init(kind: .error, title: "Cover update failed", detail: "\(arcid) • page \(page)\n\(error)"))
+        }
     }
 }
 
 private struct ArchiveComparePanel: View {
     let profile: Profile
     let arcid: String
+    let coverReloadToken: Int
     let meta: ArchiveMetadata?
     let other: ArchiveMetadata?
     let tagRows: [TagCompareGrouper.Row]
@@ -617,6 +732,7 @@ private struct ArchiveComparePanel: View {
             ArchiveSideHeader(
                 profile: profile,
                 arcid: arcid,
+                coverReloadToken: coverReloadToken,
                 meta: meta,
                 thumbnails: thumbnails,
                 onRead: onRead,
@@ -761,6 +877,7 @@ private enum TagGrouper {
 private struct ArchiveSideHeader: View {
     let profile: Profile
     let arcid: String
+    let coverReloadToken: Int
     let meta: ArchiveMetadata?
     let thumbnails: ThumbnailLoader
     let onRead: () -> Void
@@ -771,7 +888,7 @@ private struct ArchiveSideHeader: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             ZStack(alignment: .topTrailing) {
-                CoverThumb(profile: profile, arcid: arcid, thumbnails: thumbnails, size: .init(width: 64, height: 82))
+                CoverThumb(profile: profile, arcid: arcid, thumbnails: thumbnails, size: .init(width: 64, height: 82), reloadToken: coverReloadToken)
                 if meta?.isnew == true {
                     Image(systemName: "sparkles")
                         .font(.caption2)
@@ -1163,6 +1280,9 @@ private struct SyncedPagesGridView: View {
     let arcidA: String
     let arcidB: String
     let archives: ArchiveLoader
+    let isSettingCoverA: Bool
+    let isSettingCoverB: Bool
+    let onSetCoverFromPage: (String, Int) async -> Void
     @Binding var scrollMinY: CGFloat
 
     @State private var pagesA: [URL] = []
@@ -1176,12 +1296,18 @@ private struct SyncedPagesGridView: View {
         arcidA: String,
         arcidB: String,
         archives: ArchiveLoader,
+        isSettingCoverA: Bool,
+        isSettingCoverB: Bool,
+        onSetCoverFromPage: @escaping (String, Int) async -> Void,
         scrollMinY: Binding<CGFloat> = .constant(0)
     ) {
         self.profile = profile
         self.arcidA = arcidA
         self.arcidB = arcidB
         self.archives = archives
+        self.isSettingCoverA = isSettingCoverA
+        self.isSettingCoverB = isSettingCoverB
+        self.onSetCoverFromPage = onSetCoverFromPage
         self._scrollMinY = scrollMinY
     }
 
@@ -1237,23 +1363,29 @@ private struct SyncedPagesGridView: View {
                                 HStack(alignment: .top, spacing: centerGap) {
                                     PageGridSide(
                                         profile: profile,
+                                        arcid: arcidA,
                                         pages: pagesA,
                                         unavailable: pagesA.isEmpty && errorA != nil,
                                         startIndex: start,
                                         count: cols,
                                         tileHeight: tileHeight,
-                                        archives: archives
+                                        archives: archives,
+                                        isSettingCover: isSettingCoverA,
+                                        onSetCoverFromPage: onSetCoverFromPage
                                     )
                                     .frame(width: sideWidth)
 
                                     PageGridSide(
                                         profile: profile,
+                                        arcid: arcidB,
                                         pages: pagesB,
                                         unavailable: pagesB.isEmpty && errorB != nil,
                                         startIndex: start,
                                         count: cols,
                                         tileHeight: tileHeight,
-                                        archives: archives
+                                        archives: archives,
+                                        isSettingCover: isSettingCoverB,
+                                        onSetCoverFromPage: onSetCoverFromPage
                                     )
                                     .frame(width: sideWidth)
                                 }
@@ -1500,12 +1632,15 @@ private struct MatchLegendPopover: View {
 
 private struct PageGridSide: View {
     let profile: Profile
+    let arcid: String
     let pages: [URL]
     let unavailable: Bool
     let startIndex: Int
     let count: Int
     let tileHeight: CGFloat
     let archives: ArchiveLoader
+    let isSettingCover: Bool
+    let onSetCoverFromPage: (String, Int) async -> Void
 
     var body: some View {
         LazyVGrid(
@@ -1517,11 +1652,14 @@ private struct PageGridSide: View {
                 let idx = startIndex + offset
                 PageThumbTile(
                     profile: profile,
+                    arcid: arcid,
                     pageIndex: idx,
                     url: (idx < pages.count) ? pages[idx] : nil,
                     unavailable: unavailable,
                     tileHeight: tileHeight,
-                    archives: archives
+                    archives: archives,
+                    isSettingCover: isSettingCover,
+                    onSetCoverFromPage: onSetCoverFromPage
                 )
             }
         }
@@ -1530,11 +1668,14 @@ private struct PageGridSide: View {
 
 private struct PageThumbTile: View {
     let profile: Profile
+    let arcid: String
     let pageIndex: Int
     let url: URL?
     let unavailable: Bool
     let tileHeight: CGFloat
     let archives: ArchiveLoader
+    let isSettingCover: Bool
+    let onSetCoverFromPage: (String, Int) async -> Void
 
     @AppStorage("review.hoverPagePreview") private var hoverPreviewEnabled: Bool = true
 
@@ -1607,6 +1748,14 @@ private struct PageThumbTile: View {
             guard hoverPreviewEnabled else { return }
             hovering = inside && (url != nil) && (image != nil)
         }
+        .contextMenu {
+            Button(isSettingCover ? "Setting cover…" : "Set as cover (page \(pageIndex + 1))") {
+                Task {
+                    await onSetCoverFromPage(arcid, pageIndex + 1)
+                }
+            }
+            .disabled(url == nil || isSettingCover)
+        }
         .popover(isPresented: $hovering, arrowEdge: .trailing) {
             if let fullImage {
                 Image(nsImage: fullImage)
@@ -1631,7 +1780,7 @@ private struct PageThumbTile: View {
             do {
                 let bytes = try await archives.bytes(profile: profile, url: url)
                 let res = ImageDownsampler.resolutionText(from: bytes)
-                let img = await MainActor.run { ImageDownsampler.thumbnail(from: bytes, maxPixelSize: 540) }
+                let img = ImageDownsampler.thumbnail(from: bytes, maxPixelSize: 540)
                 if let img {
                     image = img
                     resolutionText = res
@@ -1651,7 +1800,7 @@ private struct PageThumbTile: View {
         guard fullImage == nil, let url else { return }
         do {
             let bytes = try await archives.bytes(profile: profile, url: url)
-            let img = await MainActor.run { ImageDownsampler.thumbnail(from: bytes, maxPixelSize: 1600) }
+            let img = ImageDownsampler.thumbnail(from: bytes, maxPixelSize: 1600)
             await MainActor.run { fullImage = img }
         } catch {
             // Ignore preview failures; tiles still work.

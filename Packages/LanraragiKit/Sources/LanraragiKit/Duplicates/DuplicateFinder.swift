@@ -15,13 +15,24 @@ public struct DuplicateScanConfig: Sendable {
     /// so a large cluster sharing one checksum is almost certainly not real duplicates.
     public var exactMaxGroupSize: Int
 
+    /// Exact-checksum groups are also skipped if the same checksum appears in at least
+    /// this many archives and exceeds the share threshold below. This catches
+    /// placeholder/fallback covers in smaller libraries.
+    public var exactFrequentMinCount: Int
+
+    /// Share of the indexed library (0...1) beyond which an exact checksum is treated
+    /// as a likely placeholder/fallback and skipped (when min-count is also met).
+    public var exactFrequentShareThreshold: Double
+
     public init(
         includeExactChecksum: Bool = true,
         includeApproximate: Bool = true,
         dHashThreshold: Int = 6,
         aHashThreshold: Int = 6,
         bucketMaxSize: Int = 64,
-        exactMaxGroupSize: Int = 20
+        exactMaxGroupSize: Int = 20,
+        exactFrequentMinCount: Int = 3,
+        exactFrequentShareThreshold: Double = 0.02
     ) {
         self.includeExactChecksum = includeExactChecksum
         self.includeApproximate = includeApproximate
@@ -29,6 +40,8 @@ public struct DuplicateScanConfig: Sendable {
         self.aHashThreshold = aHashThreshold
         self.bucketMaxSize = bucketMaxSize
         self.exactMaxGroupSize = exactMaxGroupSize
+        self.exactFrequentMinCount = max(2, exactFrequentMinCount)
+        self.exactFrequentShareThreshold = min(max(0, exactFrequentShareThreshold), 1)
     }
 }
 
@@ -173,9 +186,11 @@ public enum DuplicateFinder {
 
             for (_, idxs) in byChecksum {
                 if idxs.count < 2 { continue }
+                let isLikelyFrequentPlaceholder = idxs.count >= config.exactFrequentMinCount &&
+                    Double(idxs.count) / Double(max(1, n)) >= config.exactFrequentShareThreshold
                 // Large clusters sharing one thumbnail almost always indicate a LANraragi
                 // placeholder/fallback cover, not real duplicates. Skip them.
-                if idxs.count > config.exactMaxGroupSize {
+                if idxs.count > config.exactMaxGroupSize || isLikelyFrequentPlaceholder {
                     skippedExactGroups += 1
                     continue
                 }

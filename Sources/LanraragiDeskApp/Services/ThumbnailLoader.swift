@@ -10,6 +10,8 @@ actor ThumbnailLoader {
 
     private let cache = NSCache<NSString, NSData>()
     private var inflight: [String: Task<Data, Error>] = [:]
+    private var apiKeyByProfileID: [UUID: String] = [:]
+    private var clientByProfileID: [UUID: LANraragiClient] = [:]
 
     init() {
         cache.totalCostLimit = 256 * 1024 * 1024 // ~256MB
@@ -27,22 +29,9 @@ actor ThumbnailLoader {
             return try await t.value
         }
 
-        let account = "apiKey.\(profile.id.uuidString)"
-        guard let apiKeyString = try KeychainService.getString(account: account) else {
-            throw ThumbnailError.missingAPIKey
-        }
-
-        let baseURL = profile.baseURL
-        let acceptLanguage = profile.language
-
+        let client = try makeClient(profile: profile)
         let task = Task<Data, Error> {
             try await limiter.withPermit {
-                let client = LANraragiClient(configuration: .init(
-                    baseURL: baseURL,
-                    apiKey: LANraragiAPIKey(apiKeyString),
-                    acceptLanguage: acceptLanguage,
-                    maxConnectionsPerHost: AppSettings.maxConnectionsPerHost(defaultValue: 8)
-                ))
                 return try await client.fetchCoverThumbnailBytes(arcid: arcid)
             }
         }
@@ -60,6 +49,33 @@ actor ThumbnailLoader {
         cache.removeObject(forKey: key)
         inflight[String(key)]?.cancel()
         inflight[String(key)] = nil
+    }
+
+    private func makeClient(profile: Profile) throws -> LANraragiClient {
+        if let cached = clientByProfileID[profile.id] {
+            return cached
+        }
+
+        let apiKeyString: String
+        if let cached = apiKeyByProfileID[profile.id] {
+            apiKeyString = cached
+        } else {
+            let account = "apiKey.\(profile.id.uuidString)"
+            guard let loaded = try KeychainService.getString(account: account) else {
+                throw ThumbnailError.missingAPIKey
+            }
+            apiKeyString = loaded
+            apiKeyByProfileID[profile.id] = loaded
+        }
+
+        let client = LANraragiClient(configuration: .init(
+            baseURL: profile.baseURL,
+            apiKey: LANraragiAPIKey(apiKeyString),
+            acceptLanguage: profile.language,
+            maxConnectionsPerHost: AppSettings.maxConnectionsPerHost(defaultValue: 8)
+        ))
+        clientByProfileID[profile.id] = client
+        return client
     }
 }
 

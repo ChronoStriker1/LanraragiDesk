@@ -1,32 +1,40 @@
 # AGENTS.md (Project Guidance)
 
-This file defines repo-specific guidance for sessions started in `/Users/chronostriker1/git/LanraragiDesk`.
+The role of this file is to describe common mistakes and confusion points that agents might encounter as they work in this project. If you ever encounter something in the project that surprises you please alert the developer working with you and indicate this is the case in the AgentMD file to help prevent future agents from having the same issue.
 
-## Inheritance
+## Project
 
-- Workspace guidance: `/Users/chronostriker1/git/AGENTS.md`
-- Home guidance: `/Users/chronostriker1/AGENTS.md`
+Native macOS desktop client for LANraragi (manga/doujinshi server), with a deduplication workbench. Apple Silicon-first, macOS 14+.
 
-## Local scope
+## Known servers and paths
 
-- Keep only repo-specific rules, workflows, and pitfalls here.
-- Put cross-repo rules in `/Users/chronostriker1/git/AGENTS.md`.
+- Unraid server:
+  - Host: `192.168.2.4`
+  - User: `root`
+  - Auth: SSH keys (no interactive password expected)
 
-## Project Memory (Codex Managed)
+## Build
 
-- Purpose: Native macOS desktop client for LANraragi.
-- Stack: Swift/Xcode project.
-- Key files: `LanraragiDesk.xcodeproj`, `Sources/`, `Packages/`, `project.yml`.
-- Useful commands:
-  - Build (CLI): `xcodebuild -project LanraragiDesk.xcodeproj -scheme LanraragiDesk -configuration Debug build`
-- Edit notes: treat `.derived/` and generated build artifacts as runtime output.
+**Requirements:** Xcode 15+, Swift 6, [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 
-## End Project Memory
+```sh
+# Regenerate Xcode project after editing project.yml
+xcodegen generate
 
-## Upstream AGENTS Sync Rule
+# Open and build/run in Xcode
+open LanraragiDesk.xcodeproj
 
-- If new stable guidance discovered here applies to multiple git repos, update `/Users/chronostriker1/git/AGENTS.md` in the same task.
-- If it applies across the home workspace, also update `/Users/chronostriker1/AGENTS.md` in the same task.
-- Keep purely repo-specific details in this local project AGENTS file.
+# CLI build
+xcodebuild -project LanraragiDesk.xcodeproj -scheme LanraragiDesk -configuration Debug build
+```
 
-## End Upstream AGENTS Sync Rule
+`.derived/` and build artifacts are runtime output — do not commit them.
+
+**Swift 6 strict mode is active:** all warnings are errors (both Swift and Clang). Fix any warnings introduced by changes before considering work complete.
+
+After code changes, verify with a CLI build and report which files were changed and that the build passed.
+
+## Agent gotchas (observed)
+
+- Avoid creating a new `LANraragiClient` for every thumbnail/page byte request. Each client owns its own `URLSession`; doing this in hot paths can spawn excessive concurrent connections and make the macOS UI appear frozen under heavy cover/page loading. Reuse clients per profile inside loader actors.
+- Avoid forcing image decode/downsampling through `MainActor` in grid-heavy views (`CoverThumb`, duplicate review page tiles, reader). Decoding many images on the main thread can cause long UI stalls.

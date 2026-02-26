@@ -40,6 +40,9 @@ Use this checklist before release tags and after larger feature batches.
 ## Duplicates
 
 - Run duplicate scan and confirm groups/pairs render.
+- Open inline edit from left and right sides; verify editor stays fully visible even after scrolling page previews.
+- Save metadata changes from inline duplicates editor and confirm values refresh in compare panel without leaving the pair.
+- Use page tile context menu `Set as cover (page N)` on both sides and confirm cover thumbs refresh in compare + pair list.
 - Mark pair as `Not a match`; confirm it disappears from results.
 - Open embedded `Not a match` manager, search by arcid, remove a pair, and undo.
 - Force an error-path (bad connection or cancelled run) and verify failed-state actions (`Retry`, `Copy Error`) work.

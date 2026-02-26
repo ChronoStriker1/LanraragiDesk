@@ -9,6 +9,8 @@ struct ArchiveMetadataEditorView: View {
     let archives: ArchiveLoader
     let onSaved: @MainActor (ArchiveMetadata) -> Void
     let onDelete: @MainActor (String) async throws -> Void
+    let onCancel: (@MainActor () -> Void)?
+    let isEmbedded: Bool
 
     @EnvironmentObject private var appModel: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -37,6 +39,26 @@ struct ArchiveMetadataEditorView: View {
     @State private var pluginRunStatus: String?
     @State private var showPluginSettings: Bool = false
     @State private var showSummaryEditor: Bool = false
+
+    init(
+        profile: Profile,
+        arcid: String,
+        initialMeta: ArchiveMetadata?,
+        archives: ArchiveLoader,
+        onSaved: @escaping @MainActor (ArchiveMetadata) -> Void,
+        onDelete: @escaping @MainActor (String) async throws -> Void,
+        onCancel: (@MainActor () -> Void)? = nil,
+        isEmbedded: Bool = false
+    ) {
+        self.profile = profile
+        self.arcid = arcid
+        self.initialMeta = initialMeta
+        self.archives = archives
+        self.onSaved = onSaved
+        self.onDelete = onDelete
+        self.onCancel = onCancel
+        self.isEmbedded = isEmbedded
+    }
 
     private var groupedTags: [MetadataTagFormatter.Group] {
         MetadataTagFormatter.grouped(tags: tags)
@@ -301,7 +323,7 @@ struct ArchiveMetadataEditorView: View {
                 .disabled(isLoading || isUpdatingCover || isDeleting || pluginRunning)
 
                 Spacer()
-                Button("Cancel") { dismiss() }
+                Button("Cancel") { closeEditor() }
                 Button(isLoading ? "Saving…" : "Save") {
                     Task { await save() }
                 }
@@ -310,7 +332,7 @@ struct ArchiveMetadataEditorView: View {
             }
         }
         .padding(20)
-        .frame(minWidth: 640, minHeight: 520)
+        .frame(minWidth: isEmbedded ? 520 : 640, minHeight: isEmbedded ? 420 : 520)
         .confirmationDialog(
             "Delete archive?",
             isPresented: $confirmDelete,
@@ -396,7 +418,7 @@ struct ArchiveMetadataEditorView: View {
         let hasChanges = editedTitle != loadedTitle || editedTags != loadedTags || editedSummary != loadedSummary
 
         if !hasChanges {
-            dismiss()
+            closeEditor()
             return
         }
 
@@ -425,7 +447,7 @@ struct ArchiveMetadataEditorView: View {
             )
             onSaved(updated)
             appModel.activity.add(.init(kind: .action, title: "Updated metadata", detail: arcid))
-            dismiss()
+            closeEditor()
         } catch {
             if Task.isCancelled { return }
             errorText = ErrorPresenter.short(error)
@@ -520,10 +542,18 @@ struct ArchiveMetadataEditorView: View {
 
         do {
             try await onDelete(arcid)
-            dismiss()
+            closeEditor()
         } catch {
             if Task.isCancelled { return }
             errorText = ErrorPresenter.short(error)
+        }
+    }
+
+    private func closeEditor() {
+        if let onCancel {
+            onCancel()
+        } else {
+            dismiss()
         }
     }
 

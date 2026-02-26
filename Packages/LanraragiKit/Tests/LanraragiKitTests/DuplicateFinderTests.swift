@@ -64,4 +64,36 @@ final class DuplicateFinderTests: XCTestCase {
         XCTAssertEqual(result.pairs.count, 1)
         XCTAssertEqual(result.pairs[0].reason, .similarCover)
     }
+
+    func testExactChecksumSkipsFrequentPlaceholderCluster() async throws {
+        let shared = Data([0x99])
+        let other = Data([0x10])
+
+        // 4/6 archives share one checksum; with a 50% threshold this should be treated
+        // as a frequent placeholder-like checksum and skipped.
+        let fps: [IndexStore.ScanFingerprint] = [
+            .init(arcid: "a", checksumSHA256: shared, dHashCenter90: 1, aHashCenter90: 1),
+            .init(arcid: "b", checksumSHA256: shared, dHashCenter90: 1, aHashCenter90: 1),
+            .init(arcid: "c", checksumSHA256: shared, dHashCenter90: 1, aHashCenter90: 1),
+            .init(arcid: "d", checksumSHA256: shared, dHashCenter90: 1, aHashCenter90: 1),
+            .init(arcid: "e", checksumSHA256: other, dHashCenter90: 2, aHashCenter90: 2),
+            .init(arcid: "f", checksumSHA256: Data([0x11]), dHashCenter90: 3, aHashCenter90: 3),
+        ]
+
+        let result = try await DuplicateFinder.scan(
+            fingerprints: fps,
+            notDuplicates: [],
+            config: .init(
+                includeExactChecksum: true,
+                includeApproximate: false,
+                exactMaxGroupSize: 20,
+                exactFrequentMinCount: 3,
+                exactFrequentShareThreshold: 0.5
+            )
+        )
+
+        XCTAssertTrue(result.groups.isEmpty)
+        XCTAssertTrue(result.pairs.isEmpty)
+        XCTAssertEqual(result.stats.skippedExactGroups, 1)
+    }
 }
