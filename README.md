@@ -172,6 +172,3 @@ Use `/Users/chronostriker1/git/LanraragiDesk/docs/REGRESSION_CHECKLIST.md` for m
 
 - [x] Batch: persist and restore in-progress queue UI state across full app relaunch (including visible resume/cancel context)
 - [x] Activity: add one-click "Copy full diagnostic bundle" (selected rows + environment + profile endpoint) for faster bug reporting
-- [ ] Library: add explicit loading/latency diagnostics in UI (request timings for search/list/metadata refresh) to make transient delays explainable
-- [ ] Duplicates: add searchable/sortable columns in the embedded “Not a match” manager (created time, left/right IDs)
-- [ ] Release: run and record full pass of `/Users/chronostriker1/git/LanraragiDesk/docs/REGRESSION_CHECKLIST.md`
