@@ -197,6 +197,25 @@ public final class LANraragiClient: @unchecked Sendable {
         return try await getJSON(path: "/api/search", queryItems: queryItems)
     }
 
+    public func randomSearch(
+        filter: String = "",
+        category: String = "",
+        count: Int = 5,
+        newOnly: Bool = false,
+        untaggedOnly: Bool = false,
+        groupByTanks: Bool = true
+    ) async throws -> RandomArchiveSearch {
+        let queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "filter", value: filter),
+            URLQueryItem(name: "category", value: category),
+            URLQueryItem(name: "count", value: String(max(1, count))),
+            URLQueryItem(name: "newonly", value: newOnly ? "true" : "false"),
+            URLQueryItem(name: "untaggedonly", value: untaggedOnly ? "true" : "false"),
+            URLQueryItem(name: "groupby_tanks", value: groupByTanks ? "true" : "false"),
+        ]
+        return try await getJSON(path: "/api/search/random", queryItems: queryItems)
+    }
+
     public func regenerateThumbnails(force: Bool) async throws -> MinionJob {
         let queryItems = [URLQueryItem(name: "force", value: force ? "1" : "0")]
         return try await postJSON(path: "/api/regen_thumbs", queryItems: queryItems, body: nil)

@@ -2149,159 +2149,168 @@ private struct FindArchivesCard: View {
     }
 
     var body: some View {
-        GroupBox {
-            if expanded {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach($conditions) { $condition in
-                        ConditionRowView(
-                            condition: $condition,
-                            categories: categories,
-                            onRemove: { conditions.removeAll { $0.id == condition.id } }
-                        )
-                    }
+        DisclosureGroup(isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach($conditions) { $condition in
+                    ConditionRowView(
+                        condition: $condition,
+                        categories: categories,
+                        onRemove: { conditions.removeAll { $0.id == condition.id } }
+                    )
+                }
 
-                    HStack {
-                        let hasCategoryCondition = conditions.contains { $0.type == .serverCategory }
-                        Menu {
-                            ForEach(BatchQueryCondition.ConditionType.allCases, id: \.self) { type in
-                                Button(type.label) {
-                                    conditions.append(BatchQueryCondition(type: type))
-                                }
-                                .disabled(type == .serverCategory && hasCategoryCondition)
+                HStack(spacing: 8) {
+                    Text("Main page searches")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    mainPageSearchPresetButton(kind: .newArchives)
+                    mainPageSearchPresetButton(kind: .untaggedArchives)
+
+                    Spacer()
+                }
+
+                HStack {
+                    let hasCategoryCondition = conditions.contains { $0.type == .serverCategory }
+                    Menu {
+                        ForEach(BatchQueryCondition.ConditionType.allCases, id: \.self) { type in
+                            Button(type.label) {
+                                conditions.append(BatchQueryCondition(type: type))
                             }
-                        } label: {
-                            Label("Add Condition", systemImage: "plus")
+                            .disabled(type == .serverCategory && hasCategoryCondition)
                         }
-                        .fixedSize()
+                    } label: {
+                        Label("Add Condition", systemImage: "plus")
+                    }
+                    .fixedSize()
 
+                    Spacer()
+
+                    Button("Search") {
+                        searchTask?.cancel()
+                        searchStatus = .loading
+                        searchTask = Task { await runSearch() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(conditions.isEmpty)
+                }
+
+                Divider()
+
+                Text("Saved Queries")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                let profileQueries = appModel.savedQueryStore.queries(for: profile.id)
+                HStack(spacing: 8) {
+                    Picker("Saved query", selection: $selectedSavedQueryID) {
+                        Text("Select a query").tag(Optional<UUID>.none)
+                        ForEach(profileQueries) { q in
+                            Text(q.name).tag(Optional(q.id))
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+
+                    Button("Load") {
+                        if let id = selectedSavedQueryID,
+                           let q = profileQueries.first(where: { $0.id == id }) {
+                            conditions = q.conditions
+                        }
+                    }
+                    .disabled(selectedSavedQueryID == nil)
+
+                    Button("Save as…") {
+                        saveNameDraft = ""
+                        showSaveSheet = true
+                    }
+                    .disabled(conditions.isEmpty)
+
+                    Button("Delete", role: .destructive) {
+                        if let id = selectedSavedQueryID {
+                            appModel.savedQueryStore.delete(id: id)
+                            selectedSavedQueryID = nil
+                        }
+                    }
+                    .disabled(selectedSavedQueryID == nil)
+                }
+
+                switch searchStatus {
+                case .idle:
+                    EmptyView()
+                case .loading:
+                    HStack(spacing: 6) {
+                        ProgressView().scaleEffect(0.7)
+                        Text("Searching…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                case .failed(let msg):
+                    Text("Search failed: \(msg)")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                case .results(let arcids):
+                    Divider()
+                    HStack {
+                        Text("Results: \(arcids.count) archives")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
                         Spacer()
-
-                        Button("Search") {
-                            searchTask?.cancel()
-                            searchStatus = .loading
-                            searchTask = Task { await runSearch() }
+                        Button("Add \(selectedResultIDs.count) to Selection") {
+                            appModel.selection.add(selectedResultIDs)
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(conditions.isEmpty)
+                        .disabled(selectedResultIDs.isEmpty)
                     }
-
-                    Divider()
-
-                    Text("Saved Queries")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
-                    let profileQueries = appModel.savedQueryStore.queries(for: profile.id)
-                    HStack(spacing: 8) {
-                        Picker("Saved query", selection: $selectedSavedQueryID) {
-                            Text("Select a query").tag(Optional<UUID>.none)
-                            ForEach(profileQueries) { q in
-                                Text(q.name).tag(Optional(q.id))
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
-
-                        Button("Load") {
-                            if let id = selectedSavedQueryID,
-                               let q = profileQueries.first(where: { $0.id == id }) {
-                                conditions = q.conditions
-                            }
-                        }
-                        .disabled(selectedSavedQueryID == nil)
-
-                        Button("Save as…") {
-                            saveNameDraft = ""
-                            showSaveSheet = true
-                        }
-                        .disabled(conditions.isEmpty)
-
-                        Button("Delete", role: .destructive) {
-                            if let id = selectedSavedQueryID {
-                                appModel.savedQueryStore.delete(id: id)
-                                selectedSavedQueryID = nil
-                            }
-                        }
-                        .disabled(selectedSavedQueryID == nil)
-                    }
-
-                    switch searchStatus {
-                    case .idle:
-                        EmptyView()
-                    case .loading:
-                        HStack(spacing: 6) {
-                            ProgressView().scaleEffect(0.7)
-                            Text("Searching…")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    case .failed(let msg):
-                        Text("Search failed: \(msg)")
+                    HStack(spacing: 12) {
+                        Button("Select all") { selectedResultIDs = Set(arcids) }
+                            .buttonStyle(.bordered)
                             .font(.caption)
-                            .foregroundStyle(.red)
-                    case .results(let arcids):
-                        Divider()
-                        HStack {
-                            Text("Results: \(arcids.count) archives")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Button("Add \(selectedResultIDs.count) to Selection") {
-                                appModel.selection.add(selectedResultIDs)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(selectedResultIDs.isEmpty)
-                        }
-                        HStack(spacing: 12) {
-                            Button("Select all") { selectedResultIDs = Set(arcids) }
-                                .buttonStyle(.borderless)
-                                .font(.caption)
-                            Button("Select none") { selectedResultIDs.removeAll() }
-                                .buttonStyle(.borderless)
-                                .font(.caption)
-                            Spacer()
-                        }
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 4) {
-                                ForEach(arcids, id: \.self) { arcid in
-                                    QueryResultRowView(
-                                        profile: profile,
-                                        arcid: arcid,
-                                        isSelected: Binding(
-                                            get: { selectedResultIDs.contains(arcid) },
-                                            set: { checked in
-                                                if checked {
-                                                    selectedResultIDs.insert(arcid)
-                                                } else {
-                                                    selectedResultIDs.remove(arcid)
-                                                }
-                                            }
-                                        )
-                                    )
-                                }
-                            }
-                        }
-                        .frame(maxHeight: 260)
+                        Button("Select none") { selectedResultIDs.removeAll() }
+                            .buttonStyle(.bordered)
+                            .font(.caption)
+                        Spacer()
                     }
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 4) {
+                            ForEach(arcids, id: \.self) { arcid in
+                                QueryResultRowView(
+                                    profile: profile,
+                                    arcid: arcid,
+                                    isSelected: Binding(
+                                        get: { selectedResultIDs.contains(arcid) },
+                                        set: { checked in
+                                            if checked {
+                                                selectedResultIDs.insert(arcid)
+                                            } else {
+                                                selectedResultIDs.remove(arcid)
+                                            }
+                                        }
+                                    )
+                                )
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 260)
                 }
-                .padding(.top, 8)
             }
+            .padding(.top, 8)
         } label: {
             Button {
-                withAnimation(.easeInOut(duration: 0.16)) {
-                    expanded.toggle()
-                }
+                expanded.toggle()
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
                     Text("Find Archives")
                         .font(.headline)
+                    Spacer(minLength: 0)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
         }
+        .padding(18)
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .task(id: profile.id) {
             await loadCategories()
         }
@@ -2334,6 +2343,39 @@ private struct FindArchivesCard: View {
         .onDisappear {
             searchTask?.cancel()
         }
+    }
+
+    private func applyMainPageSearch(_ kind: MainPageCarouselKind) {
+        let target = kind.batchConditionType
+        let hasTarget = conditions.contains { $0.type == target }
+        conditions.removeAll { $0.type == .newOnly || $0.type == .untaggedOnly }
+        if !hasTarget {
+            conditions.append(BatchQueryCondition(type: target))
+        }
+    }
+
+    @ViewBuilder
+    private func mainPageSearchPresetButton(kind: MainPageCarouselKind) -> some View {
+        let isActive = conditions.contains { $0.type == kind.batchConditionType }
+        Button {
+            applyMainPageSearch(kind)
+        } label: {
+            Text(kind.title)
+                .font(.caption)
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(isActive ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.06))
+                .clipShape(Capsule())
+                .overlay {
+                    Capsule()
+                        .strokeBorder(
+                            isActive ? Color.accentColor.opacity(0.45) : Color(nsColor: .separatorColor).opacity(0.45),
+                            lineWidth: 1
+                        )
+                }
+        }
+        .buttonStyle(.plain)
     }
 
     private func loadCategories() async {

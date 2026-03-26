@@ -49,6 +49,9 @@ struct LibraryView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
             }
 
+            MainPageCarouselsView(profile: profile)
+                .environmentObject(appModel)
+
             if let err = vm.errorText {
                 Text("Error: \(err)")
                     .font(.callout)

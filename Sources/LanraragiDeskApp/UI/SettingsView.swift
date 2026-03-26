@@ -9,6 +9,8 @@ struct SettingsView: View {
     @State private var thumbsJobStatus: String?
     @State private var forceThumbs: Bool = false
     @State private var maxConnectionsPerHost: Int = 8
+    @State private var debugSectionExpanded: Bool = false
+    @State private var secretSectionExpanded: Bool = false
 
     @AppStorage("reader.readingDirection") private var readingDirectionRaw: String = ReaderDirection.ltr.rawValue
     @AppStorage("debug.showFrameNumbers") private var showFrameNumbers: Bool = false
@@ -62,18 +64,6 @@ struct SettingsView: View {
             }
 
             Divider()
-
-            GroupBox("UI labels") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Toggle("Show region numbers", isOn: $showFrameNumbers)
-                        .font(.callout)
-                    Text("Adds numbered overlays to key panels so you can refer to specific areas when requesting changes.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(8)
-            }
-            .debugFrameNumber(1)
 
             GroupBox("Sidebar") {
                 VStack(alignment: .leading, spacing: 10) {
@@ -193,6 +183,37 @@ struct SettingsView: View {
                 .padding(8)
             }
             .debugFrameNumber(7)
+
+            GroupBox("Debug") {
+                DisclosureGroup(isExpanded: $debugSectionExpanded) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Toggle("Show region numbers", isOn: $showFrameNumbers)
+                            .font(.callout)
+                        Text("Adds numbered overlays to key panels so you can refer to specific areas when requesting changes.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 6)
+                } label: {
+                    Text("UI labels")
+                        .font(.callout.weight(.semibold))
+                }
+                .padding(8)
+            }
+            .debugFrameNumber(8)
+
+            DisclosureGroup(isExpanded: $secretSectionExpanded) {
+                GroupBox("English Titles Only") {
+                    EnglishTitlesOnlySecretView()
+                        .environmentObject(appModel)
+                        .padding(8)
+                }
+                .padding(.top, 6)
+            } label: {
+                Text("Secret")
+                    .font(.callout.weight(.semibold))
+            }
+            .debugFrameNumber(9)
 
             Spacer(minLength: 0)
         }

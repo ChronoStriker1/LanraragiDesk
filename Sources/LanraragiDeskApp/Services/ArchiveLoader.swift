@@ -84,6 +84,22 @@ actor ArchiveLoader {
         }
     }
 
+    func randomArchives(
+        profile: Profile,
+        kind: MainPageCarouselKind,
+        count: Int = 8
+    ) async throws -> [ArchiveMetadata] {
+        let client = try makeClient(profile: profile)
+        let resp = try await limiter.withPermit {
+            try await client.randomSearch(
+                count: count,
+                newOnly: kind.isNewOnly,
+                untaggedOnly: kind.isUntaggedOnly
+            )
+        }
+        return resp.data
+    }
+
     func deleteArchive(profile: Profile, arcid: String) async throws {
         let client = try makeClient(profile: profile)
         do {
