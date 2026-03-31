@@ -101,6 +101,14 @@ struct OpenAITranslationService {
         let choices: [Choice]
     }
 
+    private struct ModelsResponse: Decodable {
+        struct Model: Decodable {
+            let id: String
+        }
+
+        let data: [Model]
+    }
+
     private struct OutputEnvelope: Decodable {
         let items: [BatchResult]
     }
@@ -193,5 +201,23 @@ struct OpenAITranslationService {
 
         let envelope = try JSONDecoder().decode(OutputEnvelope.self, from: Data(content.utf8))
         return envelope.items
+    }
+
+    func availableModelIDs(apiKey: String) async throws -> [String] {
+        var req = URLRequest(url: URL(string: "https://api.openai.com/v1/models")!)
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse else { throw ServiceError.invalidResponse }
+        guard (200...299).contains(http.statusCode) else {
+            if let msg = String(data: data, encoding: .utf8), !msg.isEmpty {
+                throw NSError(domain: "OpenAITranslationService", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: msg])
+            }
+            throw NSError(domain: "OpenAITranslationService", code: http.statusCode)
+        }
+
+        let decoded = try JSONDecoder().decode(ModelsResponse.self, from: data)
+        return decoded.data.map(\.id)
     }
 }
