@@ -8,32 +8,106 @@ final class EnglishTitlesOnlyViewModel: ObservableObject {
     }
 
     @Published var openAIKey: String = ""
+    @Published var selectedProvider: TitleTranslationProvider
     @Published var selectedModel: String
+    @Published var availableModels: [String]
     @Published var isBusy: Bool = false
     @Published var statusText: String?
+    @Published var modelStatusText: String?
+    @Published var providerStatusText: String?
     @Published var progress = TitleNormalizationProgress(stage: .finished, scanned: 0, candidates: 0, translated: 0, applied: 0, failed: 0, message: "Idle")
     @Published var plan: TitleNormalizationPlan?
     @Published var failures: [TitleNormalizationApplyResult.Failure] = []
     @Published var eventLog: [String] = []
 
     private let runService = TitleNormalizationRunService()
+    private let translationService = OpenAITranslationService()
+    private let codexService = CodexCLITranslationService()
     private var activeTask: Task<Void, Never>?
     private static let openAIKeyAccount = "openai.apiKey"
+    private static let providerDefaultsKey = "secret.englishTitlesOnly.provider"
     private static let modelDefaultsKey = "secret.englishTitlesOnly.model"
+    private static let openAIBuiltInModels: [String] = [
+        "gpt-5.4-mini",
+        "gpt-5.4-nano"
+    ]
+    private static let codexBuiltInModels: [String] = [
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "gpt-5-codex",
+        "gpt-5.2-codex"
+    ]
 
     init() {
-        self.selectedModel = UserDefaults.standard.string(forKey: Self.modelDefaultsKey) ?? "gpt-4.1-mini"
+        let persistedProvider = TitleTranslationProvider(rawValue: UserDefaults.standard.string(forKey: Self.providerDefaultsKey) ?? "") ?? .openAIAPI
+        let persistedModel = UserDefaults.standard.string(forKey: Self.modelDefaultsKey) ?? Self.defaultModel(for: persistedProvider)
+        let initialModel = Self.sanitizedModel(persistedModel, for: persistedProvider)
+        self.selectedProvider = persistedProvider
+        self.selectedModel = initialModel
+        self.availableModels = Self.normalizedModels(Self.builtInModels(for: persistedProvider), including: initialModel)
     }
 
-    func loadOpenAIKey() {
+    var requiresOpenAIKey: Bool {
+        selectedProvider == .openAIAPI
+    }
+
+    func loadPersistedState() {
         if let key = try? KeychainService.getString(account: Self.openAIKeyAccount) {
             openAIKey = key
         }
+        selectedModel = Self.sanitizedModel(selectedModel, for: selectedProvider)
+        UserDefaults.standard.set(selectedModel, forKey: Self.modelDefaultsKey)
+        availableModels = Self.normalizedModels(Self.builtInModels(for: selectedProvider), including: selectedModel)
     }
 
     func updateModel(_ value: String) {
         selectedModel = value
         UserDefaults.standard.set(value, forKey: Self.modelDefaultsKey)
+        availableModels = Self.normalizedModels(availableModels, including: value)
+    }
+
+    func updateProvider(_ value: TitleTranslationProvider) {
+        selectedProvider = value
+        UserDefaults.standard.set(value.rawValue, forKey: Self.providerDefaultsKey)
+        modelStatusText = nil
+        providerStatusText = nil
+        selectedModel = Self.sanitizedModel(selectedModel, for: value)
+        UserDefaults.standard.set(selectedModel, forKey: Self.modelDefaultsKey)
+        availableModels = Self.normalizedModels(Self.builtInModels(for: value), including: selectedModel)
+    }
+
+    func refreshModels() async {
+        guard selectedProvider == .openAIAPI else {
+            modelStatusText = "Model refresh is only available in OpenAI API mode."
+            return
+        }
+
+        let key = openAIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            availableModels = Self.normalizedModels(Self.builtInModels(for: .openAIAPI), including: selectedModel)
+            modelStatusText = "Enter an OpenAI API key to load account models. Showing the built-in catalog."
+            return
+        }
+
+        modelStatusText = "Loading models from OpenAI…"
+        do {
+            let models = try await translationService.availableModelIDs(apiKey: key)
+            availableModels = Self.normalizedModels(Self.builtInModels(for: .openAIAPI) + models, including: selectedModel)
+            modelStatusText = "Loaded \(availableModels.count) models from the built-in catalog and OpenAI."
+        } catch {
+            availableModels = Self.normalizedModels(Self.builtInModels(for: .openAIAPI), including: selectedModel)
+            modelStatusText = "Failed to load models from OpenAI. Showing the built-in catalog. \(ErrorPresenter.short(error))"
+        }
+    }
+
+    func checkCodex() async {
+        providerStatusText = "Checking Codex…"
+        do {
+            try await codexService.validateEnvironment()
+            providerStatusText = "Codex is installed and logged in."
+        } catch {
+            providerStatusText = ErrorPresenter.short(error)
+        }
     }
 
     func cancel() {
@@ -47,17 +121,23 @@ final class EnglishTitlesOnlyViewModel: ObservableObject {
     func startDryRun(profile: Profile) {
         guard !isBusy else { return }
 
-        let key = openAIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty else {
-            statusText = "OpenAI API key is required."
-            return
-        }
-
-        do {
-            try KeychainService.setString(key, account: Self.openAIKeyAccount)
-        } catch {
-            statusText = "Failed to save OpenAI key: \(ErrorPresenter.short(error))"
-            return
+        let translationConfig: TitleTranslationConfig
+        switch selectedProvider {
+        case .openAIAPI:
+            let key = openAIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty else {
+                statusText = "OpenAI API key is required."
+                return
+            }
+            do {
+                try KeychainService.setString(key, account: Self.openAIKeyAccount)
+            } catch {
+                statusText = "Failed to save OpenAI key: \(ErrorPresenter.short(error))"
+                return
+            }
+            translationConfig = .init(provider: .openAIAPI, model: selectedModel, openAIKey: key)
+        case .codexCLI:
+            translationConfig = .init(provider: .codexCLI, model: selectedModel, openAIKey: nil)
         }
 
         isBusy = true
@@ -65,7 +145,7 @@ final class EnglishTitlesOnlyViewModel: ObservableObject {
         plan = nil
         failures = []
         eventLog = []
-        appendLog("Dry run started with model \(selectedModel).")
+        appendLog("Dry run started with \(selectedProvider.displayName) using model \(selectedModel).")
         progress = .init(stage: .scanning, scanned: 0, candidates: 0, translated: 0, applied: 0, failed: 0, message: "Preparing…")
 
         activeTask = Task { [weak self] in
@@ -80,8 +160,7 @@ final class EnglishTitlesOnlyViewModel: ObservableObject {
             do {
                 let plan = try await self.runService.buildPlan(
                     profile: profile,
-                    openAIKey: key,
-                    model: self.selectedModel,
+                    translationConfig: translationConfig,
                     report: { update in
                         Task { @MainActor [weak self] in
                             self?.progress = update
@@ -194,6 +273,46 @@ final class EnglishTitlesOnlyViewModel: ObservableObject {
         f.dateFormat = "HH:mm:ss"
         return f
     }()
+
+    private static func builtInModels(for provider: TitleTranslationProvider) -> [String] {
+        switch provider {
+        case .openAIAPI:
+            openAIBuiltInModels
+        case .codexCLI:
+            codexBuiltInModels
+        }
+    }
+
+    private static func defaultModel(for provider: TitleTranslationProvider) -> String {
+        switch provider {
+        case .openAIAPI:
+            "gpt-5.4-nano"
+        case .codexCLI:
+            "gpt-5.4-mini"
+        }
+    }
+
+    private static func sanitizedModel(_ model: String, for provider: TitleTranslationProvider) -> String {
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return defaultModel(for: provider)
+        }
+        if provider == .codexCLI && trimmed == "gpt-5.4-nano" {
+            return defaultModel(for: provider)
+        }
+        return trimmed
+    }
+
+    private static func normalizedModels(_ models: [String], including selectedModel: String) -> [String] {
+        var seen = Set<String>()
+        return (models + [selectedModel])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .filter { seen.insert($0).inserted }
+            .sorted { lhs, rhs in
+                lhs.localizedStandardCompare(rhs) == .orderedAscending
+            }
+    }
 }
 
 struct EnglishTitlesOnlySecretView: View {
@@ -202,21 +321,36 @@ struct EnglishTitlesOnlySecretView: View {
     @State private var showApplyConfirm: Bool = false
     @State private var applyMode: EnglishTitlesOnlyViewModel.ApplyMode = .all
 
-    private let models: [String] = [
-        "gpt-4.1-mini",
-        "gpt-4.1",
-        "gpt-4o-mini",
-        "gpt-4o"
-    ]
-
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Translate non-English archive titles to English, preserve original titles as tags, and add missing language tags.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            SecureField("OpenAI API Key (stored in Keychain)", text: $vm.openAIKey)
-                .textFieldStyle(.roundedBorder)
+            HStack(spacing: 10) {
+                Text("Provider")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Picker("Provider", selection: Binding(get: {
+                    vm.selectedProvider
+                }, set: { newValue in
+                    vm.updateProvider(newValue)
+                })) {
+                    ForEach(TitleTranslationProvider.allCases) { provider in
+                        Text(provider.displayName).tag(provider)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(width: 180)
+
+                Spacer()
+            }
+
+            if vm.requiresOpenAIKey {
+                SecureField("OpenAI API Key (stored in Keychain)", text: $vm.openAIKey)
+                    .textFieldStyle(.roundedBorder)
+            }
 
             HStack(spacing: 10) {
                 Text("Model")
@@ -228,14 +362,57 @@ struct EnglishTitlesOnlySecretView: View {
                 }, set: { newValue in
                     vm.updateModel(newValue)
                 })) {
-                    ForEach(models, id: \.self) { model in
+                    ForEach(vm.availableModels, id: \.self) { model in
                         Text(model).tag(model)
                     }
                 }
                 .pickerStyle(.menu)
-                .frame(width: 180)
+                .frame(width: 260)
+
+                if vm.selectedProvider == .openAIAPI {
+                    Button("Refresh Models") {
+                        Task { await vm.refreshModels() }
+                    }
+                    .disabled(vm.isBusy)
+                } else {
+                    Button("Check Codex") {
+                        Task { await vm.checkCodex() }
+                    }
+                    .disabled(vm.isBusy)
+                }
 
                 Spacer()
+            }
+
+            TextField("Or enter a model ID directly", text: Binding(get: {
+                vm.selectedModel
+            }, set: { newValue in
+                vm.updateModel(newValue)
+            }))
+            .textFieldStyle(.roundedBorder)
+
+            if vm.selectedProvider == .openAIAPI {
+                if let modelStatus = vm.modelStatusText {
+                    Text(modelStatus)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+
+                Text("OpenAI API mode uses your stored API key and can refresh account-visible models from OpenAI.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            } else {
+                if let providerStatus = vm.providerStatusText {
+                    Text(providerStatus)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+
+                Text("Codex mode uses the local Codex CLI authenticated through your ChatGPT login. No API key is used in this mode.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
 
             HStack(spacing: 10) {
@@ -290,7 +467,10 @@ struct EnglishTitlesOnlySecretView: View {
             }
         }
         .onAppear {
-            vm.loadOpenAIKey()
+            vm.loadPersistedState()
+            if vm.selectedProvider == .openAIAPI {
+                Task { await vm.refreshModels() }
+            }
         }
         .alert("Apply title updates?", isPresented: $showApplyConfirm) {
             Button("Cancel", role: .cancel) {}

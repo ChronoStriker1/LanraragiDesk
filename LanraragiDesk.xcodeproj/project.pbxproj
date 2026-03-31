@@ -7,7 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0C08E467F7D7B634D7226213 /* ProcessRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A83932B085B518AD0C096ECD /* ProcessRunner.swift */; };
 		130862FF85B509435312CB5E /* ReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD459C22BE11F681F28C2F38 /* ReaderView.swift */; };
+		18480DB763E93B8B9BEFD8C6 /* CodexCLITranslationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100F835342ECA0C078C5C26 /* CodexCLITranslationService.swift */; };
 		2CC4FCA30B43919EBE99690B /* LibraryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1F2885B0666E3F9BE5689F9 /* LibraryViewModel.swift */; };
 		312DD4B589175DEA77C410C6 /* ActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A25853A38F0BC5127176B04 /* ActivityView.swift */; };
 		357E6825CEFEFA8EA5B45966 /* LanraragiDeskApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF5978E02C65E10E0EEF7643 /* LanraragiDeskApp.swift */; };
@@ -49,6 +51,7 @@
 		DD475A3240478B7C7950CDE2 /* ReaderDirection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9EC55E639FCDA50A382AA2A /* ReaderDirection.swift */; };
 		DDDB37F2CDB1F904FAFF1F3C /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3A8A1896B87FF041125DD84 /* KeychainService.swift */; };
 		DE9EFC3A45B2EDD7BBEEF9A0 /* ProfileEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53E76144EA3A608FC23C8A94 /* ProfileEditorView.swift */; };
+		E4ABB98A346D13693366A453 /* TitleTranslationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37CE4CEE7B46E6D3E700F0E9 /* TitleTranslationProvider.swift */; };
 		E53EB607E67003100933762A /* Profile.swift in Sources */ = {isa = PBXBuildFile; fileRef = B86D008FE0E3FC57FBA6B31A /* Profile.swift */; };
 		E5E8202DF4A40005368F7C48 /* ArchiveMetadataEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A28E2C8C9D122163053F6A1 /* ArchiveMetadataEditorView.swift */; };
 		ECF1462FD0BB7D27A7E48FE3 /* ErrorPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 301B8E3B58DBC2553F8AF7D8 /* ErrorPresenter.swift */; };
@@ -67,6 +70,7 @@
 		3108E7A7F83E6B951B322E7A /* TitleNormalizationRunService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TitleNormalizationRunService.swift; sourceTree = "<group>"; };
 		358F4E9A6F34DDEB4C2966B1 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		367FD6B12C893A96F63201E8 /* LanraragiDesk.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LanraragiDesk.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		37CE4CEE7B46E6D3E700F0E9 /* TitleTranslationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TitleTranslationProvider.swift; sourceTree = "<group>"; };
 		40493C363CC7F009DAFF416E /* BatchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchView.swift; sourceTree = "<group>"; };
 		459B7EE09D6D1F08753A893C /* ThumbnailLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailLoader.swift; sourceTree = "<group>"; };
 		4A28E2C8C9D122163053F6A1 /* ArchiveMetadataEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArchiveMetadataEditorView.swift; sourceTree = "<group>"; };
@@ -89,6 +93,7 @@
 		99C7CE21E9CCBADBAD7844A7 /* NotMatchesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotMatchesView.swift; sourceTree = "<group>"; };
 		99CBA245A79722298EB8ADD5 /* AppPaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPaths.swift; sourceTree = "<group>"; };
 		A1A3FE81790726B4DBC17319 /* MainPageCarouselKind.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainPageCarouselKind.swift; sourceTree = "<group>"; };
+		A83932B085B518AD0C096ECD /* ProcessRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessRunner.swift; sourceTree = "<group>"; };
 		A9EC55E639FCDA50A382AA2A /* ReaderDirection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderDirection.swift; sourceTree = "<group>"; };
 		AAD5500E07326DBDA5C32E76 /* MainPageCarouselsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainPageCarouselsView.swift; sourceTree = "<group>"; };
 		B86D008FE0E3FC57FBA6B31A /* Profile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Profile.swift; sourceTree = "<group>"; };
@@ -103,6 +108,7 @@
 		E21E702AD8E780D4140E265F /* StatisticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatisticsView.swift; sourceTree = "<group>"; };
 		EA0092A389E3EFF8BEBF77C7 /* DebugFrameNumber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugFrameNumber.swift; sourceTree = "<group>"; };
 		EE2BADC8CB7C849ECEB31B07 /* ActivityStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityStore.swift; sourceTree = "<group>"; };
+		F100F835342ECA0C078C5C26 /* CodexCLITranslationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexCLITranslationService.swift; sourceTree = "<group>"; };
 		F1F2885B0666E3F9BE5689F9 /* LibraryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryViewModel.swift; sourceTree = "<group>"; };
 		F4D929F9A0F9C6B65C283387 /* LanraragiKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = LanraragiKit; path = Packages/LanraragiKit; sourceTree = SOURCE_ROOT; };
 		F4FA9F33C90C60A22DF47E62 /* BatchQuery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchQuery.swift; sourceTree = "<group>"; };
@@ -229,15 +235,18 @@
 				99CBA245A79722298EB8ADD5 /* AppPaths.swift */,
 				2EB1A7A3D3F4CAEBC2BDFB69 /* AppSettings.swift */,
 				92B6686EDCF99DFFC6D32B78 /* ArchiveLoader.swift */,
+				F100F835342ECA0C078C5C26 /* CodexCLITranslationService.swift */,
 				301B8E3B58DBC2553F8AF7D8 /* ErrorPresenter.swift */,
 				6032C435F51A77975C1008D7 /* ImageDownsampler.swift */,
 				D3A8A1896B87FF041125DD84 /* KeychainService.swift */,
 				BAAC758F0873DA44E0C627AC /* OpenAITranslationService.swift */,
+				A83932B085B518AD0C096ECD /* ProcessRunner.swift */,
 				D0705B9BBB876D1BB705AA53 /* ProfileStore.swift */,
 				04D2944602309E71F5B99003 /* SavedQueryStore.swift */,
 				1FFDF919F3AE218E040DC8AA /* TagSuggestionStore.swift */,
 				459B7EE09D6D1F08753A893C /* ThumbnailLoader.swift */,
 				3108E7A7F83E6B951B322E7A /* TitleNormalizationRunService.swift */,
+				37CE4CEE7B46E6D3E700F0E9 /* TitleTranslationProvider.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -333,6 +342,7 @@
 				E5E8202DF4A40005368F7C48 /* ArchiveMetadataEditorView.swift in Sources */,
 				58129F2AAF3815D438A6D2DB /* BatchQuery.swift in Sources */,
 				969C5A238935EE3AC7799BA0 /* BatchView.swift in Sources */,
+				18480DB763E93B8B9BEFD8C6 /* CodexCLITranslationService.swift in Sources */,
 				96D5A2C599CC0A85C3973D9C /* ConnectionHeaderCard.swift in Sources */,
 				58B951D7DC8BBF39CCCFC850 /* CoverThumb.swift in Sources */,
 				56699C58563F360A17193162 /* DebugFrameNumber.swift in Sources */,
@@ -353,6 +363,7 @@
 				B276D2843F10809C7F019FCD /* PairReviewView.swift in Sources */,
 				90FB6505F5E662992751636C /* PluginsView.swift in Sources */,
 				3698660AF1E0714F3D6AD2D1 /* PluginsViewModel.swift in Sources */,
+				0C08E467F7D7B634D7226213 /* ProcessRunner.swift in Sources */,
 				E53EB607E67003100933762A /* Profile.swift in Sources */,
 				81121218A63AD524889E730E /* ProfileEditorMode.swift in Sources */,
 				DE9EFC3A45B2EDD7BBEEF9A0 /* ProfileEditorView.swift in Sources */,
@@ -369,6 +380,7 @@
 				4984C7D6A3203AFF6C091E10 /* TagSuggestionStore.swift in Sources */,
 				6B35F39BF0AD26CD55A13641 /* ThumbnailLoader.swift in Sources */,
 				8AF2D2ECDE384C052C773137 /* TitleNormalizationRunService.swift in Sources */,
+				E4ABB98A346D13693366A453 /* TitleTranslationProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

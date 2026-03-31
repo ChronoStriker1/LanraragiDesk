@@ -76,6 +76,8 @@ struct TitleNormalizationApplyResult: Sendable {
 actor TitleNormalizationRunService {
     private let translationChunkSize = 50
     private let maxConcurrentTranslationChunks = 4
+    private let codexTranslationChunkSize = 40
+    private let codexMaxConcurrentTranslationChunks = 1
 
     struct SnapshotEntry: Sendable {
         let arcid: String
@@ -93,11 +95,13 @@ actor TitleNormalizationRunService {
 
     func buildPlan(
         profile: Profile,
-        openAIKey: String,
-        model: String,
+        translationConfig: TitleTranslationConfig,
         report: @escaping @Sendable (TitleNormalizationProgress) -> Void
     ) async throws -> TitleNormalizationPlan {
         let client = try makeClient(profile: profile)
+        let translationClient = try await makeTranslationClient(config: translationConfig)
+        let chunkSize = translationConfig.provider == .codexCLI ? codexTranslationChunkSize : translationChunkSize
+        let maxConcurrentChunks = translationConfig.provider == .codexCLI ? codexMaxConcurrentTranslationChunks : maxConcurrentTranslationChunks
         report(.init(stage: .scanning, scanned: 0, candidates: 0, translated: 0, applied: 0, failed: 0, message: "Loading archive IDs…"))
         let arcids = try await loadAllArcids(client: client)
 
@@ -118,7 +122,7 @@ actor TitleNormalizationRunService {
         let writer = try PlanFileWriter(url: runFileURL)
         defer { try? writer.close() }
 
-        let chunks = chunkedCandidates(candidates, maxItems: translationChunkSize)
+        let chunks = chunkedCandidates(candidates, maxItems: chunkSize)
         report(.init(
             stage: .translating,
             scanned: snapshot.count,
@@ -126,10 +130,10 @@ actor TitleNormalizationRunService {
             translated: 0,
             applied: 0,
             failed: 0,
-            message: "Candidate scan complete: \(candidates.count) titles across \(chunks.count) translation chunks (up to \(min(maxConcurrentTranslationChunks, chunks.count)) in flight)."
+            message: "Candidate scan complete: \(candidates.count) titles across \(chunks.count) translation chunks (up to \(min(maxConcurrentChunks, chunks.count)) in flight)."
         ))
         var nextChunkIndex = 0
-        let initialInFlight = min(maxConcurrentTranslationChunks, chunks.count)
+        let initialInFlight = min(maxConcurrentChunks, chunks.count)
         var inFlightCount = 0
 
         try await withThrowingTaskGroup(of: ChunkTranslationOutcome.self) { group in
@@ -150,8 +154,8 @@ actor TitleNormalizationRunService {
                     let started = Date()
                     let batchItems = chunk.map { OpenAITranslationService.BatchItem(arcid: $0.arcid, title: $0.title) }
                     let results = try await Self.translateWithRetry(
-                        apiKey: openAIKey,
-                        model: model,
+                        client: translationClient,
+                        model: translationConfig.model,
                         items: batchItems,
                         report: report,
                         snapshotCount: snapshot.count,
@@ -383,7 +387,7 @@ actor TitleNormalizationRunService {
     }
 
     private static func translateWithRetry(
-        apiKey: String,
+        client: any TitleTranslationProviderClient,
         model: String,
         items: [OpenAITranslationService.BatchItem],
         report: @escaping @Sendable (TitleNormalizationProgress) -> Void,
@@ -391,7 +395,6 @@ actor TitleNormalizationRunService {
         candidateCount: Int,
         translatedCount: Int
     ) async throws -> [OpenAITranslationService.BatchResult] {
-        let translation = OpenAITranslationService()
         var attempt = 0
         while true {
             try Task.checkCancellation()
@@ -407,7 +410,7 @@ actor TitleNormalizationRunService {
                         message: "Retrying translation chunk (attempt \(attempt + 1), \(items.count) titles)…"
                     ))
                 }
-                return try await translation.translateBatch(apiKey: apiKey, model: model, items: items)
+                return try await client.translateBatch(model: model, items: items)
             } catch {
                 attempt += 1
                 if Self.isTimeoutLike(error), items.count > 20 {
@@ -424,7 +427,7 @@ actor TitleNormalizationRunService {
                     let head = Array(items.prefix(split))
                     let tail = Array(items.dropFirst(split))
                     let first = try await Self.translateWithRetry(
-                        apiKey: apiKey,
+                        client: client,
                         model: model,
                         items: head,
                         report: report,
@@ -433,7 +436,7 @@ actor TitleNormalizationRunService {
                         translatedCount: translatedCount
                     )
                     let second = try await Self.translateWithRetry(
-                        apiKey: apiKey,
+                        client: client,
                         model: model,
                         items: tail,
                         report: report,
@@ -462,6 +465,12 @@ actor TitleNormalizationRunService {
     }
 
     private static func isTimeoutLike(_ error: Error) -> Bool {
+        if let codexError = error as? CodexCLITranslationService.ServiceError, case .timedOut = codexError {
+            return true
+        }
+        if let runnerError = error as? ProcessRunner.RunnerError, case .timedOut = runnerError {
+            return true
+        }
         if let urlError = error as? URLError, urlError.code == .timedOut {
             return true
         }
@@ -472,11 +481,32 @@ actor TitleNormalizationRunService {
         return false
     }
 
+    private func makeTranslationClient(config: TitleTranslationConfig) async throws -> any TitleTranslationProviderClient {
+        switch config.provider {
+        case .openAIAPI:
+            let key = (config.openAIKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty else {
+                throw NSError(
+                    domain: "TitleNormalizationRunService",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "OpenAI API key is required."]
+                )
+            }
+            return OpenAITranslationProviderClient(apiKey: key)
+        case .codexCLI:
+            let service = CodexCLITranslationService()
+            try await service.validateEnvironment()
+            return service
+        }
+    }
+
     private func shouldConsiderForTranslation(title: String, tags: String) -> Bool {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             return false
         }
+
+        let isASCIIOnly = trimmed.unicodeScalars.allSatisfy(\.isASCII)
 
         let lowerTags = Self.splitTags(tags).map { $0.lowercased() }
         let hasEnglishTag = lowerTags.contains("language:english")
@@ -485,8 +515,12 @@ actor TitleNormalizationRunService {
             return false
         }
 
+        if hasTranslatedTag && isASCIIOnly {
+            return false
+        }
+
         // Non-ASCII titles are always candidates.
-        if trimmed.unicodeScalars.contains(where: { !$0.isASCII }) {
+        if !isASCIIOnly {
             return true
         }
 
@@ -515,18 +549,33 @@ actor TitleNormalizationRunService {
             return false
         }
 
-        let strongWordHints: Set<String> = [
-            "senpai", "sensei", "onee", "onii", "kanojo", "otoko", "onna",
-            "isekai", "maou", "yuusha", "futanari", "doujin", "ecchi",
-            "oppai", "seme", "uke"
+        let highConfidenceHints: Set<String> = [
+            "senpai", "sensei", "onee", "onii", "kanojo", "isekai", "maou", "yuusha"
         ]
-        if words.contains(where: { strongWordHints.contains($0) }) {
+        let weakHints: Set<String> = [
+            "futanari", "doujin", "ecchi", "oppai", "seme", "uke"
+        ]
+        if words.contains(where: { highConfidenceHints.contains($0) }) {
             return true
         }
 
-        let suffixHints = ["-chan", "-kun", "-sama", "-san"]
-        if suffixHints.contains(where: { lower.contains($0) }) {
+        let weakHintMatches = words.filter { weakHints.contains($0) }.count
+        if weakHintMatches >= 2 {
             return true
+        }
+
+        let honorificSuffixes = ["chan", "kun", "sama", "san"]
+        let hasHonorificSuffix = words.contains { word in
+            honorificSuffixes.contains { suffix in
+                word.count > suffix.count + 1 && word.hasSuffix(suffix)
+            }
+        }
+        if hasHonorificSuffix {
+            return true
+        }
+
+        if words.count < 2 {
+            return false
         }
 
         return false
