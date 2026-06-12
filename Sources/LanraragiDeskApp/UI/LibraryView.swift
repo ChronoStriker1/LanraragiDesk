@@ -1188,180 +1188,6 @@ private struct CoverBadge: View {
     }
 }
 
-private struct ArchiveHoverDetailsView: View {
-    let title: String
-    let summary: String
-    let tags: String
-    let pageCount: Int
-    let onSelectTag: (String) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 8) {
-                Text(title.isEmpty ? "Untitled" : title)
-                    .font(.subheadline.weight(.semibold))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if pageCount > 0 {
-                    Text("\(pageCount) pp")
-                        .font(.caption2.monospacedDigit().weight(.semibold))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(.quaternary)
-                        .clipShape(Capsule())
-                        .fixedSize()
-                }
-            }
-
-            let trimmedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmedSummary.isEmpty {
-                Divider()
-                Text(trimmedSummary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-            }
-
-            let trimmedTags = tags.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmedTags.isEmpty {
-                Divider()
-                HoverTagCloud(tags: trimmedTags, onSelectTag: onSelectTag)
-            }
-        }
-        .padding(14)
-        .frame(width: 300)
-    }
-}
-
-private struct HoverTagCloud: View {
-    let tags: String
-    let onSelectTag: (String) -> Void
-
-    private struct TagItem {
-        var display: String
-        var token: String
-    }
-
-    private static let humanDateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .medium
-        f.timeStyle = .none
-        return f
-    }()
-
-    private var groups: [(namespace: String, items: [TagItem])] {
-        let parsed: [TagItem] = tags
-            .split(separator: ",")
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .map { tok in
-                let (ns, v) = TagParser.splitNamespace(tok)
-                let display: String
-                if TagParser.isDateNamespace(ns), let d = TagParser.parseDateValue(v) {
-                    display = "\(ns):\(Self.humanDateFormatter.string(from: d))"
-                } else {
-                    display = tok
-                }
-                return TagItem(display: display, token: tok)
-            }
-
-        let bucket = Dictionary(grouping: parsed) { item -> String in
-            let (ns, _) = TagParser.splitNamespace(item.token)
-            return ns.isEmpty ? "tag" : ns.lowercased()
-        }
-        let keys = bucket.keys.sorted { a, b in
-            if a == "tag", b != "tag" { return true }
-            if a != "tag", b == "tag" { return false }
-            return a.localizedCaseInsensitiveCompare(b) == .orderedAscending
-        }
-        return keys.compactMap { k in
-            guard let items = bucket[k] else { return nil }
-            let sorted = items.sorted { $0.display.localizedCaseInsensitiveCompare($1.display) == .orderedAscending }
-            return (namespace: k, items: sorted)
-        }
-    }
-
-    var body: some View {
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(groups, id: \.namespace) { group in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(group.namespace == "tag" ? "Tags" : group.namespace)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        TagPillFlow(spacing: 4) {
-                            ForEach(group.items, id: \.token) { tag in
-                                Text(tag.display)
-                                    .font(.caption2)
-                                    .padding(.horizontal, 7)
-                                    .padding(.vertical, 3)
-                                    .background(.quaternary.opacity(0.6))
-                                    .clipShape(Capsule())
-                                    .contentShape(Capsule())
-                                    .onTapGesture { onSelectTag(tag.token) }
-                                    .help("Search: \(tag.display)")
-                            }
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 2)
-        }
-        .scrollIndicators(.visible)
-        .frame(maxHeight: 220)
-    }
-}
-
-/// A simple wrapping flow layout. Lays children left-to-right, wrapping to a
-/// new row when the next child would exceed the available width.
-private struct TagPillFlow: Layout {
-    var spacing: CGFloat = 6
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        layout(proposal: proposal, subviews: subviews).totalSize
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let result = layout(proposal: ProposedViewSize(bounds.size), subviews: subviews)
-        for (subview, origin) in zip(subviews, result.origins) {
-            subview.place(
-                at: CGPoint(x: bounds.minX + origin.x, y: bounds.minY + origin.y),
-                proposal: .unspecified
-            )
-        }
-    }
-
-    private struct LayoutResult {
-        var origins: [CGPoint]
-        var totalSize: CGSize
-    }
-
-    private func layout(proposal: ProposedViewSize, subviews: Subviews) -> LayoutResult {
-        let maxWidth = proposal.width ?? .infinity
-        var origins: [CGPoint] = []
-        var x: CGFloat = 0
-        var y: CGFloat = 0
-        var rowHeight: CGFloat = 0
-
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if x > 0, x + size.width > maxWidth {
-                y += rowHeight + spacing
-                x = 0
-                rowHeight = 0
-            }
-            origins.append(CGPoint(x: x, y: y))
-            x += size.width + spacing
-            rowHeight = max(rowHeight, size.height)
-        }
-
-        return LayoutResult(
-            origins: origins,
-            totalSize: CGSize(width: maxWidth, height: y + rowHeight)
-        )
-    }
-}
 
 private struct CategoryChip: View {
     let title: String
@@ -1403,93 +1229,28 @@ private struct CategoryChip: View {
     }
 }
 
-private enum TagParser {
-    private static let dateOnlyParsers: [DateFormatter] = {
-        func make(_ format: String) -> DateFormatter {
-            let f = DateFormatter()
-            f.locale = Locale(identifier: "en_US_POSIX")
-            f.timeZone = TimeZone(secondsFromGMT: 0)
-            f.dateFormat = format
-            return f
-        }
-        return [
-            make("yyyy-MM-dd"),
-            make("yyyy/MM/dd"),
-        ]
-    }()
-
-    static func splitNamespace(_ tok: String) -> (String, String) {
-        guard let idx = tok.firstIndex(of: ":") else { return ("", tok) }
-        let ns = String(tok[..<idx]).trimmingCharacters(in: .whitespacesAndNewlines)
-        let v = String(tok[tok.index(after: idx)...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        return (ns, v)
-    }
-
-    static func isDateNamespace(_ ns: String) -> Bool {
-        let n = ns.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return n == "date_added" || n == "dateadded" || n == "date"
-    }
-
-    static func parseDateValue(_ v: String) -> Date? {
-        let value = v.trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: .init(charactersIn: "\"'"))
-
-        if let rawNum = Int64(value) {
-            let seconds: TimeInterval
-            if rawNum > 1_000_000_000_000 {
-                seconds = TimeInterval(rawNum) / 1000.0
-            } else {
-                seconds = TimeInterval(rawNum)
-            }
-            return Date(timeIntervalSince1970: seconds)
-        }
-
-        for f in dateOnlyParsers {
-            if let d = f.date(from: value) {
-                return d
-            }
-        }
-
-        return nil
-    }
-}
-
 private enum ArchiveMetaHelpers {
-    private static let dateOnlyParsers: [DateFormatter] = {
-        func make(_ format: String) -> DateFormatter {
-            let f = DateFormatter()
-            f.locale = Locale(identifier: "en_US_POSIX")
-            f.timeZone = TimeZone(secondsFromGMT: 0)
-            f.dateFormat = format
-            return f
-        }
-        return [
-            make("yyyy-MM-dd"),
-            make("yyyy/MM/dd"),
-        ]
-    }()
-
     static func dateAdded(_ meta: ArchiveMetadata?) -> Date? {
         guard let meta else { return nil }
         if let d = meta.dateAdded { return d }
         guard let tags = meta.tags else { return nil }
-        return parseDateAddedTag(tags)
+        return TagParsing.parseDateAddedTag(tags)
     }
 
     static func artists(_ meta: ArchiveMetadata?) -> [String] {
         guard let tags = meta?.tags else { return [] }
-        return values(in: tags, namespace: "artist")
+        return TagParsing.values(in: tags, namespace: "artist")
     }
 
     static func groups(_ meta: ArchiveMetadata?) -> [String] {
         guard let tags = meta?.tags else { return [] }
-        return values(in: tags, namespace: "group")
+        return TagParsing.values(in: tags, namespace: "group")
     }
 
     static func artistGroupLine(_ meta: ArchiveMetadata?) -> String? {
         guard let tags = meta?.tags else { return nil }
-        let artists = values(in: tags, namespace: "artist")
-        let groups = values(in: tags, namespace: "group")
+        let artists = TagParsing.values(in: tags, namespace: "artist")
+        let groups = TagParsing.values(in: tags, namespace: "group")
 
         var parts: [String] = []
         if !artists.isEmpty {
@@ -1499,70 +1260,5 @@ private enum ArchiveMetaHelpers {
             parts.append("Group: " + groups.joined(separator: ", "))
         }
         return parts.joined(separator: "  •  ")
-    }
-
-    private static func values(in tags: String, namespace: String) -> [String] {
-        let ns = namespace.lowercased()
-        var out: [String] = []
-        out.reserveCapacity(2)
-
-        for raw in tags.split(separator: ",") {
-            let tok = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let idx = tok.firstIndex(of: ":") else { continue }
-            let lhs = tok[..<idx].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            guard lhs == ns else { continue }
-            let rhs = tok[tok.index(after: idx)...].trimmingCharacters(in: .whitespacesAndNewlines)
-            if !rhs.isEmpty {
-                out.append(rhs)
-            }
-        }
-
-        // Keep order stable but de-dupe.
-        var seen: Set<String> = []
-        var uniq: [String] = []
-        uniq.reserveCapacity(out.count)
-        for v in out {
-            if seen.insert(v.lowercased()).inserted {
-                uniq.append(v)
-            }
-        }
-        return uniq
-    }
-
-    private static func parseDateAddedTag(_ tags: String) -> Date? {
-        for raw in tags.split(separator: ",") {
-            let tok = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            let lower = tok.lowercased()
-
-            let prefix: String
-            if lower.hasPrefix("date_added:") {
-                prefix = "date_added:"
-            } else if lower.hasPrefix("dateadded:") {
-                prefix = "dateadded:"
-            } else {
-                continue
-            }
-
-            let value = tok.dropFirst(prefix.count).trimmingCharacters(in: .whitespacesAndNewlines)
-                .trimmingCharacters(in: .init(charactersIn: "\"'"))
-
-            if let rawNum = Int64(value) {
-                let seconds: TimeInterval
-                if rawNum > 1_000_000_000_000 {
-                    seconds = TimeInterval(rawNum) / 1000.0
-                } else {
-                    seconds = TimeInterval(rawNum)
-                }
-                return Date(timeIntervalSince1970: seconds)
-            }
-
-            for f in dateOnlyParsers {
-                if let d = f.date(from: value) {
-                    return d
-                }
-            }
-        }
-
-        return nil
     }
 }

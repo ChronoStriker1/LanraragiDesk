@@ -575,10 +575,6 @@ actor TitleNormalizationRunService {
             return true
         }
 
-        if words.count < 2 {
-            return false
-        }
-
         return false
     }
 
@@ -663,10 +659,7 @@ actor TitleNormalizationRunService {
     }
 
     private static func splitTags(_ tags: String) -> [String] {
-        tags
-            .split(separator: ",")
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        TagParsing.tokens(tags)
     }
 
     private static func normalizeTags(_ tags: String) -> String {

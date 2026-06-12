@@ -807,10 +807,7 @@ private enum TagGrouper {
     }
 
     static func grouped(tags: String?, perGroupLimit: Int = 14) -> [Group] {
-        let raw = (tags ?? "")
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        let raw = TagParsing.tokens(tags)
 
         if raw.isEmpty { return [] }
 
@@ -1001,10 +998,7 @@ private struct ArchiveSideDetails: View {
 
     private func addedString(from tags: String?) -> String? {
         // LANraragi exposes date_added as a tag like `date_added:1712345678`.
-        let raw = tags ?? ""
-        for part in raw.split(separator: ",") {
-            let t = part.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !t.isEmpty else { continue }
+        for t in TagParsing.tokens(tags) {
             if t.hasPrefix("date_added:") {
                 let v = t.dropFirst("date_added:".count)
                 if let ts = TimeInterval(v) {
@@ -1018,12 +1012,9 @@ private struct ArchiveSideDetails: View {
 
     private func sourceString(from tags: String?) -> String? {
         // Common conventions: `source:<url>` or `source_url:<url>`.
-        let raw = tags ?? ""
         var out: [String] = []
         out.reserveCapacity(2)
-        for part in raw.split(separator: ",") {
-            let t = part.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !t.isEmpty else { continue }
+        for t in TagParsing.tokens(tags) {
             if t.hasPrefix("source:") {
                 out.append(String(t.dropFirst("source:".count)))
             } else if t.hasPrefix("source_url:") {
@@ -1227,10 +1218,7 @@ private enum TagCompareGrouper {
     }
 
     private static func parse(_ raw: String?) -> [String: Set<String>] {
-        let parts = (raw ?? "")
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        let parts = TagParsing.tokens(raw)
         if parts.isEmpty { return [:] }
 
         var buckets: [String: Set<String>] = [:]
@@ -1465,16 +1453,25 @@ private struct ScrollOffsetObserver: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(onChange: onChange) }
 
     func makeNSView(context: Context) -> NSView {
-        let v = NSView(frame: .zero)
-        DispatchQueue.main.async {
-            context.coordinator.attach(to: v)
+        let v = HierarchyAwareView(frame: .zero)
+        v.onDidMoveToWindow = { [weak coordinator = context.coordinator] view in
+            coordinator?.attach(to: view)
         }
         return v
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async {
-            context.coordinator.attach(to: nsView)
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    /// SwiftUI may insert the representable before it has a superview, so we
+    /// attach once AppKit reports the view has actually joined a window.
+    final class HierarchyAwareView: NSView {
+        var onDidMoveToWindow: ((NSView) -> Void)?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window != nil {
+                onDidMoveToWindow?(self)
+            }
         }
     }
 
@@ -1483,27 +1480,15 @@ private struct ScrollOffsetObserver: NSViewRepresentable {
         private var onChange: (CGFloat) -> Void
         private weak var scrollView: NSScrollView?
         private weak var clipView: NSClipView?
-        private var attachRetries: Int = 0
 
         init(onChange: @escaping (CGFloat) -> Void) {
             self.onChange = onChange
         }
 
         func attach(to view: NSView) {
-            guard let sv = findScrollView(from: view) else {
-                // SwiftUI sometimes inserts the representable before it has a superview; retry briefly.
-                if attachRetries < 12 {
-                    attachRetries += 1
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self, weak view] in
-                        guard let self, let view else { return }
-                        self.attach(to: view)
-                    }
-                }
-                return
-            }
+            guard let sv = findScrollView(from: view) else { return }
             if scrollView === sv { return }
             scrollView = sv
-            attachRetries = 0
 
             if let old = clipView {
                 NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: old)
@@ -1519,8 +1504,11 @@ private struct ScrollOffsetObserver: NSViewRepresentable {
                 object: clip
             )
 
-            // Initial update.
-            updateFromClip(clip)
+            // Initial update, deferred so it can't mutate SwiftUI state mid-update.
+            DispatchQueue.main.async { [weak self, weak clip] in
+                guard let self, let clip else { return }
+                self.updateFromClip(clip)
+            }
         }
 
         private func findScrollView(from view: NSView) -> NSScrollView? {

@@ -3,28 +3,28 @@ import SwiftUI
 import LanraragiKit
 
 struct BatchView: View {
-    @EnvironmentObject private var appModel: AppModel
-    @StateObject private var pluginsVM = PluginsViewModel()
-    @StateObject private var runState = BatchRunState.shared
+    @EnvironmentObject var appModel: AppModel
+    @StateObject var pluginsVM = PluginsViewModel()
+    @StateObject var runState = BatchRunState.shared
 
-    @State private var addTagsText: String = ""
-    @State private var removeTagsText: String = ""
-    @State private var selectedPluginID: String?
-    @State private var pluginArgText: String = ""
-    @State private var pluginDelayText: String = "4"
-    @State private var pluginApplyMode: PluginApplyMode = .mergeWithExisting
-    @State private var showPluginSettings: Bool = false
-    @State private var selectedArchiveNames: [String: String] = [:]
-    @State private var selectedNamesTask: Task<Void, Never>?
-    @State private var previewRows: [BatchPreviewRow] = []
-    @State private var previewStatus: String?
-    @State private var previewRunning: Bool = false
-    @State private var previewTask: Task<Void, Never>?
-    @State private var previewBeforeQueue: Bool = true
-    @State private var resumableTagBatch: TagBatchCheckpoint?
-    @State private var resumablePluginBatch: PluginBatchCheckpoint?
-    @State private var restoredTagCheckpointUI: Bool = false
-    @State private var restoredPluginCheckpointUI: Bool = false
+    @State var addTagsText: String = ""
+    @State var removeTagsText: String = ""
+    @State var selectedPluginID: String?
+    @State var pluginArgText: String = ""
+    @State var pluginDelayText: String = "4"
+    @State var pluginApplyMode: PluginApplyMode = .mergeWithExisting
+    @State var showPluginSettings: Bool = false
+    @State var selectedArchiveNames: [String: String] = [:]
+    @State var selectedNamesTask: Task<Void, Never>?
+    @State var previewRows: [BatchPreviewRow] = []
+    @State var previewStatus: String?
+    @State var previewRunning: Bool = false
+    @State var previewTask: Task<Void, Never>?
+    @State var previewBeforeQueue: Bool = true
+    @State var resumableTagBatch: TagBatchCheckpoint?
+    @State var resumablePluginBatch: PluginBatchCheckpoint?
+    @State var restoredTagCheckpointUI: Bool = false
+    @State var restoredPluginCheckpointUI: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -402,917 +402,15 @@ struct BatchView: View {
             }
         }
     }
-
-    private func run() {
-        guard let profile = appModel.selectedProfile else { return }
-        let add = parseTags(addTagsText)
-        let remove = parseTags(removeTagsText)
-        let arcids = Array(appModel.selection.arcids).sorted()
-        if arcids.isEmpty { return }
-        if add.isEmpty && remove.isEmpty { return }
-
-        let checkpoint = TagBatchCheckpoint(
-            profileID: profile.id,
-            profileBaseURL: profile.baseURL.absoluteString,
-            arcids: arcids,
-            nextIndex: 0,
-            addTagsText: addTagsText,
-            removeTagsText: removeTagsText,
-            inProgress: true,
-            paused: false,
-            interrupted: false,
-            doneCount: 0,
-            errorCount: 0,
-            lastProgressText: "Starting…",
-            lastCurrentArchive: nil,
-            lastErrors: [],
-            lastLiveEvents: [],
-            lastUpdatedAt: Date()
-        )
-        saveTagBatchCheckpoint(checkpoint)
-        refreshResumableTagBatch()
-
-        startTagBatch(
-            profile: profile,
-            arcids: arcids,
-            add: add,
-            remove: remove,
-            startIndex: 0,
-            resumed: false
-        )
-    }
-
-    private func startTagBatch(
-        profile: Profile,
-        arcids: [String],
-        add: [String],
-        remove: [String],
-        startIndex: Int,
-        resumed: Bool
-    ) {
-        running = true
-        batchCancelRequested = false
-        batchPauseRequested = false
-        batchPaused = false
-        batchCurrentArchive = nil
-        errors = []
-        if !resumed {
-            batchLiveEvents = []
-        }
-        if resumed {
-            let startHuman = min(max(startIndex + 1, 1), max(arcids.count, 1))
-            progressText = "Resumed at archive \(startHuman)/\(arcids.count)…"
-            appendBatchLiveEvent("Resumed at \(startHuman)/\(arcids.count)")
-            appModel.activity.add(.init(kind: .action, title: "Tag batch resumed", detail: "\(startHuman)/\(arcids.count)"))
-        } else {
-            progressText = "Starting…"
-            appModel.activity.add(.init(kind: .action, title: "Batch started", detail: "\(arcids.count) archives"))
-            appendBatchLiveEvent("Started \(arcids.count) archives")
-        }
-        persistTagCheckpointUI(
-            inProgress: true,
-            paused: false,
-            interrupted: false,
-            doneCount: 0,
-            errorCount: 0,
-            progressText: progressText,
-            currentArchive: nil
-        )
-
-        task?.cancel()
-        task = Task {
-            var done = 0
-            for index in startIndex..<arcids.count {
-                let arcid = arcids[index]
-                if await MainActor.run(body: { batchCancelRequested || batchPauseRequested }) { break }
-                await MainActor.run {
-                    batchCurrentArchive = displayName(for: arcid)
-                }
-
-                persistTagCheckpointIndexAndUI(nextIndex: index, done: done, total: arcids.count)
-
-                do {
-                    let meta = try await appModel.archives.metadata(profile: profile, arcid: arcid)
-                    if await MainActor.run(body: { batchCancelRequested }) { break }
-                    let oldTags = meta.tags ?? ""
-                    let newTags = applyTagEdits(old: oldTags, add: add, remove: remove)
-                    if normalizeTags(oldTags) == normalizeTags(newTags) {
-                        await MainActor.run {
-                            appendBatchLiveEvent("No changes for \(displayName(for: arcid))")
-                        }
-                        done += 1
-                        await MainActor.run {
-                            progressText = "Processed \(done)/\(arcids.count)…"
-                        }
-                        persistTagCheckpointIndexAndUI(nextIndex: index, done: done, total: arcids.count)
-                        continue
-                    }
-
-                    _ = try await appModel.archives.updateMetadata(
-                        profile: profile,
-                        arcid: arcid,
-                        title: meta.title ?? "",
-                        tags: newTags,
-                        summary: meta.summary ?? ""
-                    )
-                    await MainActor.run {
-                        appendBatchLiveEvent(metadataChangeLiveMessage(
-                            prefix: "Saved",
-                            arcid: arcid,
-                            beforeTitle: meta.title ?? "",
-                            beforeTags: oldTags,
-                            beforeSummary: meta.summary ?? "",
-                            afterTitle: meta.title ?? "",
-                            afterTags: newTags,
-                            afterSummary: meta.summary ?? ""
-                        ))
-                    }
-                } catch {
-                    let msg = "\(arcid): \(ErrorPresenter.short(error))"
-                    await MainActor.run {
-                        errors.append(msg)
-                        appendBatchLiveEvent("Failed \(displayName(for: arcid)): \(ErrorPresenter.short(error))")
-                    }
-                }
-
-                done += 1
-                await MainActor.run {
-                    progressText = "Processed \(index + 1)/\(arcids.count)…"
-                }
-                persistTagCheckpointIndexAndUI(nextIndex: index, done: done, total: arcids.count)
-
-                if await MainActor.run(body: { batchPauseRequested }) {
-                    if let existing = loadTagBatchCheckpoint() {
-                        var updated = existing
-                        // Redo the last touched archive on resume.
-                        updated.nextIndex = max(0, index)
-                        updated.paused = true
-                        updated.inProgress = true
-                        updated.interrupted = false
-                        updated.lastProgressText = progressText
-                        updated.lastCurrentArchive = batchCurrentArchive
-                        updated.doneCount = done
-                        updated.errorCount = errors.count
-                        updated.lastErrors = Array(errors.prefix(50))
-                        updated.lastLiveEvents = trimmedCheckpointEvents(batchLiveEvents)
-                        updated.lastUpdatedAt = Date()
-                        saveTagBatchCheckpoint(updated)
-                    }
-                    break
-                }
-            }
-
-            let cancelledByRequest = await MainActor.run { batchCancelRequested }
-            let pausedByRequest = await MainActor.run { batchPauseRequested }
-            let wasCancelled = cancelledByRequest || Task.isCancelled
-
-            await MainActor.run {
-                running = false
-                batchCurrentArchive = nil
-                if pausedByRequest {
-                    progressText = "Paused. Processed \(done)/\(arcids.count) with \(errors.count) errors."
-                    batchPaused = true
-                } else if wasCancelled {
-                    progressText = "Cancelled."
-                } else if errors.isEmpty {
-                    progressText = "Done."
-                } else {
-                    progressText = "Done with \(errors.count) errors."
-                }
-                batchCancelRequested = false
-                batchPauseRequested = false
-                task = nil
-            }
-
-            if pausedByRequest {
-                appModel.activity.add(.init(kind: .warning, title: "Batch paused"))
-                persistTagCheckpointUI(
-                    inProgress: true,
-                    paused: true,
-                    interrupted: false,
-                    doneCount: done,
-                    errorCount: errors.count,
-                    progressText: progressText,
-                    currentArchive: nil
-                )
-                await MainActor.run {
-                    refreshResumableTagBatch()
-                }
-            } else if wasCancelled {
-                persistTagCheckpointUI(
-                    inProgress: false,
-                    paused: false,
-                    interrupted: false,
-                    doneCount: done,
-                    errorCount: errors.count,
-                    progressText: progressText,
-                    currentArchive: nil
-                )
-                clearTagBatchCheckpoint()
-                await MainActor.run {
-                    refreshResumableTagBatch()
-                }
-                appModel.activity.add(.init(kind: .warning, title: "Batch cancelled"))
-            } else if errors.isEmpty {
-                persistTagCheckpointUI(
-                    inProgress: false,
-                    paused: false,
-                    interrupted: false,
-                    doneCount: done,
-                    errorCount: 0,
-                    progressText: progressText,
-                    currentArchive: nil
-                )
-                clearTagBatchCheckpoint()
-                await MainActor.run {
-                    refreshResumableTagBatch()
-                }
-                appModel.activity.add(.init(kind: .action, title: "Batch completed", detail: "\(arcids.count) archives"))
-            } else {
-                persistTagCheckpointUI(
-                    inProgress: false,
-                    paused: false,
-                    interrupted: false,
-                    doneCount: done,
-                    errorCount: errors.count,
-                    progressText: progressText,
-                    currentArchive: nil
-                )
-                clearTagBatchCheckpoint()
-                await MainActor.run {
-                    refreshResumableTagBatch()
-                }
-                appModel.activity.add(.init(kind: .warning, title: "Batch completed with errors", detail: "\(errors.count) errors"))
-            }
-        }
-    }
-
-    private func requestBatchCancel() {
-        guard running, !batchCancelRequested else { return }
-        batchCancelRequested = true
-        progressText = "Stopping after current archive save finishes…"
-        persistTagCheckpointUI(
-            inProgress: true,
-            paused: false,
-            interrupted: false,
-            doneCount: nil,
-            errorCount: nil,
-            progressText: progressText,
-            currentArchive: batchCurrentArchive
-        )
-        appModel.activity.add(.init(kind: .warning, title: "Batch cancel requested"))
-    }
-
-    private func requestBatchPause() {
-        guard running, !batchPauseRequested else { return }
-        batchPauseRequested = true
-        progressText = "Pausing after current archive save finishes…"
-        persistTagCheckpointUI(
-            inProgress: true,
-            paused: false,
-            interrupted: false,
-            doneCount: nil,
-            errorCount: nil,
-            progressText: progressText,
-            currentArchive: batchCurrentArchive
-        )
-        appModel.activity.add(.init(kind: .warning, title: "Batch pause requested"))
-    }
-
-    private func resumeTagBatchFromCheckpoint() {
-        guard let profile = appModel.selectedProfile else { return }
-        guard let checkpoint = resumableTagBatch else { return }
-        guard !checkpoint.arcids.isEmpty else {
-            clearTagBatchCheckpoint()
-            refreshResumableTagBatch()
-            return
-        }
-
-        // Make the UI reflect the resumable batch context.
-        appModel.selection.clear()
-        appModel.selection.add(checkpoint.arcids)
-
-        addTagsText = checkpoint.addTagsText
-        removeTagsText = checkpoint.removeTagsText
-        restoreTagUIFromCheckpointIfNeeded(checkpoint)
-
-        let add = parseTags(checkpoint.addTagsText)
-        let remove = parseTags(checkpoint.removeTagsText)
-        if add.isEmpty && remove.isEmpty {
-            clearTagBatchCheckpoint()
-            refreshResumableTagBatch()
-            return
-        }
-
-        let startIndex = min(max(0, checkpoint.nextIndex), max(0, checkpoint.arcids.count - 1))
-        startTagBatch(
-            profile: profile,
-            arcids: checkpoint.arcids,
-            add: add,
-            remove: remove,
-            startIndex: startIndex,
-            resumed: true
-        )
-    }
-
-    private func refreshResumableTagBatch() {
-        guard let profile = appModel.selectedProfile else {
-            resumableTagBatch = nil
-            return
-        }
-        guard let checkpoint = loadTagBatchCheckpoint() else {
-            resumableTagBatch = nil
-            return
-        }
-        if checkpoint.profileID == profile.id || checkpoint.profileBaseURL == profile.baseURL.absoluteString {
-            resumableTagBatch = checkpoint
-            restoreTagUIFromCheckpointIfNeeded(checkpoint)
-        } else {
-            resumableTagBatch = nil
-        }
-    }
-
-    private func loadTagBatchCheckpoint() -> TagBatchCheckpoint? {
-        guard let data = UserDefaults.standard.data(forKey: tagBatchCheckpointKey) else { return nil }
-        return try? JSONDecoder().decode(TagBatchCheckpoint.self, from: data)
-    }
-
-    private func saveTagBatchCheckpoint(_ checkpoint: TagBatchCheckpoint) {
-        if let data = try? JSONEncoder().encode(checkpoint) {
-            UserDefaults.standard.set(data, forKey: tagBatchCheckpointKey)
-        }
-    }
-
-    private func clearTagBatchCheckpoint() {
-        UserDefaults.standard.removeObject(forKey: tagBatchCheckpointKey)
-    }
-
-    private func parseTags(_ s: String) -> [String] {
-        s.split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-    }
-
-    private func normalizeTags(_ s: String) -> String {
-        parseTags(s).map { $0.lowercased() }.sorted().joined(separator: ",")
-    }
-
-    private func applyTagEdits(old: String, add: [String], remove: [String]) -> String {
-        var items = parseTags(old)
-        var setLower = Set(items.map { $0.lowercased() })
-
-        let removeLower = Set(remove.map { $0.lowercased() })
-        if !removeLower.isEmpty {
-            items.removeAll { removeLower.contains($0.lowercased()) }
-            setLower = Set(items.map { $0.lowercased() })
-        }
-
-        for a in add {
-            let key = a.lowercased()
-            if setLower.insert(key).inserted {
-                items.append(a)
-            }
-        }
-
-        return items.joined(separator: ", ")
-    }
-
-    private func loadPlugins() async {
-        guard let profile = appModel.selectedProfile else { return }
-        await pluginsVM.load(profile: profile)
-        if let selectedPluginID, pluginsVM.plugins.contains(where: { $0.id == selectedPluginID }) {
-            applyDefaultPluginDelayFromSelection()
-            return
-        }
-        selectedPluginID = pluginsVM.plugins.first?.id
-        applyDefaultPluginDelayFromSelection()
-    }
-
-    private func runPluginBatch() {
-        guard let profile = appModel.selectedProfile else { return }
-        guard let pluginID = selectedPluginID else { return }
-        let arcids = selectedArcidsSorted
-        guard !arcids.isEmpty else { return }
-
-        if previewBeforeQueue {
-            pluginRunStatus = "Generating preview for \(arcids.count) archives…"
-            appendPluginLiveEvent("Preview started for \(pluginID) on \(arcids.count) archives")
-            generatePreview(executePlugin: true)
-            appModel.activity.add(.init(kind: .action, title: "Plugin batch preview generated", detail: "\(pluginID) on sample of \(arcids.count) selected"))
-            return
-        }
-
-        let checkpoint = PluginBatchCheckpoint(
-            profileID: profile.id,
-            profileBaseURL: profile.baseURL.absoluteString,
-            arcids: arcids,
-            nextIndex: 0,
-            selectedPluginID: pluginID,
-            pluginArgText: pluginArgText,
-            pluginDelayText: pluginDelayText,
-            pluginApplyModeRaw: pluginApplyMode.rawValue,
-            inProgress: true,
-            paused: false,
-            interrupted: false,
-            okCount: 0,
-            failCount: 0,
-            lastRunStatus: "Running plugin on \(arcids.count) archives…",
-            lastCurrentArchive: nil,
-            lastLiveEvents: [],
-            lastUpdatedAt: Date()
-        )
-        savePluginBatchCheckpoint(checkpoint)
-        refreshResumablePluginBatch()
-
-        startPluginBatch(
-            profile: profile,
-            pluginID: pluginID,
-            arcids: arcids,
-            startIndex: 0,
-            resumed: false
-        )
-    }
-
-    private func startPluginBatch(
-        profile: Profile,
-        pluginID: String,
-        arcids: [String],
-        startIndex: Int,
-        resumed: Bool
-    ) {
-        let delaySeconds = sanitizedDelaySeconds(from: pluginDelayText)
-
-        pluginRunning = true
-        pluginCancelRequested = false
-        pluginPauseRequested = false
-        pluginPaused = false
-        pluginCurrentArchive = nil
-        if !resumed {
-            pluginLiveEvents = []
-        }
-        if resumed {
-            let startHuman = min(max(startIndex + 1, 1), max(arcids.count, 1))
-            pluginRunStatus = "Resumed \(pluginID) at archive \(startHuman)/\(arcids.count)…"
-            appendPluginLiveEvent("Resumed \(pluginID) at \(startHuman)/\(arcids.count)")
-            appModel.activity.add(.init(kind: .action, title: "Plugin batch resumed", detail: "\(pluginID) at \(startHuman)/\(arcids.count)"))
-        } else {
-            pluginRunStatus = "Running plugin on \(arcids.count) archives…"
-            appModel.activity.add(.init(kind: .action, title: "Plugin batch queued", detail: "\(pluginID) on \(arcids.count) archives"))
-            appendPluginLiveEvent("Started \(pluginID) on \(arcids.count) archives")
-        }
-
-        pluginTask?.cancel()
-        pluginTask = Task {
-            var ok = 0
-            var fail = 0
-            for index in startIndex..<arcids.count {
-                let arcid = arcids[index]
-                if await MainActor.run(body: { pluginCancelRequested || pluginPauseRequested }) { break }
-                await MainActor.run {
-                    pluginCurrentArchive = displayName(for: arcid)
-                    appendPluginLiveEvent("Processing \(displayName(for: arcid))")
-                }
-
-                persistPluginCheckpointIndexAndUI(pluginID: pluginID, nextIndex: index, ok: ok, fail: fail, total: arcids.count)
-
-                do {
-                    let prePluginMeta = try? await appModel.archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
-                    let preSignature = prePluginMeta.map {
-                        metadataSignature(title: $0.title ?? "", tags: $0.tags ?? "", summary: $0.summary ?? "")
-                    }
-
-                    let job = try await pluginsVM.queue(profile: profile, pluginID: pluginID, arcid: arcid, arg: pluginArgText)
-                    pluginsVM.trackQueuedJob(profile: profile, pluginID: pluginID, arcid: arcid, jobID: job.job)
-                    let detail = job.job > 0
-                        ? "\(pluginID) • \(arcid) • job \(job.job)"
-                        : "\(pluginID) • \(arcid) • executed (no job id returned)"
-                    appModel.activity.add(.init(kind: .action, title: "Plugin job queued", detail: detail))
-                    await MainActor.run {
-                        if job.job > 0 {
-                            appendPluginLiveEvent("Queued job \(job.job) for \(displayName(for: arcid))")
-                        } else {
-                            appendPluginLiveEvent("Ran without job id for \(displayName(for: arcid))")
-                        }
-                    }
-
-                    if job.job > 0 {
-                        let state = await pluginsVM.waitForJobCompletion(profile: profile, jobID: job.job)
-                        if state == .failed {
-                            fail += 1
-                            appModel.activity.add(.init(kind: .warning, title: "Plugin job failed", detail: "\(pluginID) • \(arcid) • job \(job.job)"))
-                            await MainActor.run {
-                                appendPluginLiveEvent("Job \(job.job) failed for \(displayName(for: arcid))")
-                            }
-                        } else {
-                            let changed = await refreshMetadataAfterPluginBatch(profile: profile, arcid: arcid, previousSignature: preSignature)
-                            if !changed {
-                                _ = await applyMetadataFromPluginOutputBatch(
-                                    profile: profile,
-                                    pluginID: pluginID,
-                                    arcid: arcid,
-                                    previousSignature: preSignature,
-                                    applyMode: pluginApplyMode
-                                )
-                            }
-                            if let before = prePluginMeta {
-                                let latest = try? await appModel.archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
-                                if let latest {
-                                    await MainActor.run {
-                                        appendPluginLiveEvent(metadataChangeLiveMessage(
-                                            prefix: "Saved",
-                                            arcid: arcid,
-                                            beforeTitle: before.title ?? "",
-                                            beforeTags: before.tags ?? "",
-                                            beforeSummary: before.summary ?? "",
-                                            afterTitle: latest.title ?? "",
-                                            afterTags: latest.tags ?? "",
-                                            afterSummary: latest.summary ?? ""
-                                        ))
-                                    }
-                                }
-                            }
-                            ok += 1
-                            await MainActor.run {
-                                appendPluginLiveEvent("Finished \(displayName(for: arcid))")
-                            }
-                        }
-                    } else {
-                        let changed = await refreshMetadataAfterPluginBatch(profile: profile, arcid: arcid, previousSignature: preSignature)
-                        if !changed {
-                            _ = await applyMetadataFromPluginOutputBatch(
-                                profile: profile,
-                                pluginID: pluginID,
-                                arcid: arcid,
-                                previousSignature: preSignature,
-                                applyMode: pluginApplyMode
-                            )
-                        }
-                        if let before = prePluginMeta {
-                            let latest = try? await appModel.archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
-                            if let latest {
-                                await MainActor.run {
-                                    appendPluginLiveEvent(metadataChangeLiveMessage(
-                                        prefix: "Saved",
-                                        arcid: arcid,
-                                        beforeTitle: before.title ?? "",
-                                        beforeTags: before.tags ?? "",
-                                        beforeSummary: before.summary ?? "",
-                                        afterTitle: latest.title ?? "",
-                                        afterTags: latest.tags ?? "",
-                                        afterSummary: latest.summary ?? ""
-                                    ))
-                                }
-                            }
-                        }
-                        ok += 1
-                        await MainActor.run {
-                            appendPluginLiveEvent("Finished \(displayName(for: arcid))")
-                        }
-                    }
-                } catch {
-                    fail += 1
-                    appModel.activity.add(.init(kind: .error, title: "Plugin queue failed", detail: "\(pluginID) • \(arcid)\n\(error)"))
-                    await MainActor.run {
-                        appendPluginLiveEvent("Failed \(displayName(for: arcid)): \(ErrorPresenter.short(error))")
-                    }
-                }
-                await MainActor.run {
-                    pluginRunStatus = "Processed \(index + 1)/\(arcids.count) • Success \(ok) • Failed \(fail)…"
-                }
-                persistPluginCheckpointIndexAndUI(pluginID: pluginID, nextIndex: index, ok: ok, fail: fail, total: arcids.count)
-
-                if await MainActor.run(body: { pluginPauseRequested }) {
-                    if let existing = loadPluginBatchCheckpoint() {
-                        var updated = existing
-                        // Redo the last touched archive on resume.
-                        updated.nextIndex = max(0, index)
-                        updated.paused = true
-                        updated.inProgress = true
-                        updated.interrupted = false
-                        updated.okCount = ok
-                        updated.failCount = fail
-                        updated.lastRunStatus = pluginRunStatus
-                        updated.lastCurrentArchive = pluginCurrentArchive
-                        updated.lastLiveEvents = trimmedCheckpointEvents(pluginLiveEvents)
-                        updated.lastUpdatedAt = Date()
-                        savePluginBatchCheckpoint(updated)
-                    }
-                    break
-                }
-
-                if index + 1 < arcids.count && delaySeconds > 0 {
-                    if await pauseBetweenPluginRuns(seconds: delaySeconds, done: index + 1, total: arcids.count, ok: ok, fail: fail) {
-                        break
-                    }
-                }
-            }
-
-            let cancelledByRequest = await MainActor.run { pluginCancelRequested }
-            let pausedByRequest = await MainActor.run { pluginPauseRequested }
-
-            await MainActor.run {
-                pluginRunning = false
-                pluginCurrentArchive = nil
-                if pausedByRequest {
-                    pluginRunStatus = "Paused. Success \(ok), failed \(fail)."
-                    pluginPaused = true
-                } else if cancelledByRequest {
-                    pluginRunStatus = "Cancelled. Success \(ok), failed \(fail)."
-                } else {
-                    pluginRunStatus = "Done. Success \(ok), failed \(fail)."
-                }
-                pluginCancelRequested = false
-                pluginPauseRequested = false
-                pluginTask = nil
-            }
-
-            if pausedByRequest {
-                appModel.activity.add(.init(kind: .warning, title: "Plugin batch paused", detail: "\(pluginID)"))
-                persistPluginCheckpointUI(
-                    pluginID: pluginID,
-                    inProgress: true,
-                    paused: true,
-                    interrupted: false,
-                    ok: ok,
-                    fail: fail
-                )
-                await MainActor.run {
-                    refreshResumablePluginBatch()
-                }
-            } else if cancelledByRequest {
-                persistPluginCheckpointUI(
-                    pluginID: pluginID,
-                    inProgress: false,
-                    paused: false,
-                    interrupted: false,
-                    ok: ok,
-                    fail: fail
-                )
-                clearPluginBatchCheckpoint()
-                await MainActor.run {
-                    refreshResumablePluginBatch()
-                }
-                appModel.activity.add(.init(kind: .warning, title: "Plugin batch cancelled", detail: "\(pluginID)"))
-            } else {
-                persistPluginCheckpointUI(
-                    pluginID: pluginID,
-                    inProgress: false,
-                    paused: false,
-                    interrupted: false,
-                    ok: ok,
-                    fail: fail
-                )
-                clearPluginBatchCheckpoint()
-                await MainActor.run {
-                    refreshResumablePluginBatch()
-                }
-            }
-        }
-    }
-
-    private func requestPluginCancel() {
-        guard pluginRunning, !pluginCancelRequested else { return }
-        pluginCancelRequested = true
-        pluginRunStatus = "Stopping after current archive operation finishes…"
-        persistPluginCheckpointUI(
-            pluginID: selectedPluginID ?? "",
-            inProgress: true,
-            paused: false,
-            interrupted: false,
-            ok: nil,
-            fail: nil
-        )
-        appModel.activity.add(.init(kind: .warning, title: "Plugin batch cancel requested"))
-    }
-
-    private func requestPluginPause() {
-        guard pluginRunning, !pluginPauseRequested else { return }
-        pluginPauseRequested = true
-        pluginRunStatus = "Pausing after current archive finishes…"
-        persistPluginCheckpointUI(
-            pluginID: selectedPluginID ?? "",
-            inProgress: true,
-            paused: false,
-            interrupted: false,
-            ok: nil,
-            fail: nil
-        )
-        appModel.activity.add(.init(kind: .warning, title: "Plugin batch pause requested"))
-    }
-
-    private func resumePluginBatchFromCheckpoint() {
-        guard let profile = appModel.selectedProfile else { return }
-        guard let checkpoint = resumablePluginBatch else { return }
-        guard !checkpoint.arcids.isEmpty else {
-            clearPluginBatchCheckpoint()
-            refreshResumablePluginBatch()
-            return
-        }
-
-        // Make the UI reflect the resumable batch context.
-        appModel.selection.clear()
-        appModel.selection.add(checkpoint.arcids)
-
-        selectedPluginID = checkpoint.selectedPluginID
-        pluginArgText = checkpoint.pluginArgText
-        pluginDelayText = checkpoint.pluginDelayText
-        if let mode = PluginApplyMode(rawValue: checkpoint.pluginApplyModeRaw) {
-            pluginApplyMode = mode
-        }
-        restorePluginUIFromCheckpointIfNeeded(checkpoint)
-
-        let startIndex = min(max(0, checkpoint.nextIndex), max(0, checkpoint.arcids.count - 1))
-        startPluginBatch(
-            profile: profile,
-            pluginID: checkpoint.selectedPluginID,
-            arcids: checkpoint.arcids,
-            startIndex: startIndex,
-            resumed: true
-        )
-    }
-
-    private func refreshResumablePluginBatch() {
-        guard let profile = appModel.selectedProfile else {
-            resumablePluginBatch = nil
-            return
-        }
-        guard let checkpoint = loadPluginBatchCheckpoint() else {
-            resumablePluginBatch = nil
-            return
-        }
-        if checkpoint.profileID == profile.id || checkpoint.profileBaseURL == profile.baseURL.absoluteString {
-            resumablePluginBatch = checkpoint
-            restorePluginUIFromCheckpointIfNeeded(checkpoint)
-        } else {
-            resumablePluginBatch = nil
-        }
-    }
-
-    private func trimmedCheckpointEvents(_ events: [String]) -> [String] {
-        Array(events.prefix(200))
-    }
-
-    private func persistTagCheckpointIndexAndUI(nextIndex: Int, done: Int, total: Int) {
-        guard let existing = loadTagBatchCheckpoint() else { return }
-        var updated = existing
-        updated.nextIndex = nextIndex
-        updated.inProgress = true
-        updated.paused = false
-        updated.interrupted = false
-        updated.doneCount = done
-        updated.errorCount = errors.count
-        updated.lastProgressText = progressText
-        updated.lastCurrentArchive = batchCurrentArchive
-        updated.lastErrors = Array(errors.prefix(50))
-        updated.lastLiveEvents = trimmedCheckpointEvents(batchLiveEvents)
-        updated.lastUpdatedAt = Date()
-        saveTagBatchCheckpoint(updated)
-    }
-
-    private func persistTagCheckpointUI(
-        inProgress: Bool,
-        paused: Bool,
-        interrupted: Bool,
-        doneCount: Int?,
-        errorCount: Int?,
-        progressText: String?,
-        currentArchive: String?
-    ) {
-        guard let existing = loadTagBatchCheckpoint() else { return }
-        var updated = existing
-        updated.inProgress = inProgress
-        updated.paused = paused
-        updated.interrupted = interrupted
-        if let doneCount { updated.doneCount = doneCount }
-        if let errorCount { updated.errorCount = errorCount }
-        updated.lastProgressText = progressText
-        updated.lastCurrentArchive = currentArchive
-        updated.lastErrors = Array(errors.prefix(50))
-        updated.lastLiveEvents = trimmedCheckpointEvents(batchLiveEvents)
-        updated.lastUpdatedAt = Date()
-        saveTagBatchCheckpoint(updated)
-    }
-
-    private func persistPluginCheckpointIndexAndUI(pluginID: String, nextIndex: Int, ok: Int, fail: Int, total: Int) {
-        guard let existing = loadPluginBatchCheckpoint() else { return }
-        var updated = existing
-        updated.nextIndex = nextIndex
-        updated.inProgress = true
-        updated.paused = false
-        updated.interrupted = false
-        updated.okCount = ok
-        updated.failCount = fail
-        updated.lastRunStatus = pluginRunStatus
-        updated.lastCurrentArchive = pluginCurrentArchive
-        updated.lastLiveEvents = trimmedCheckpointEvents(pluginLiveEvents)
-        updated.lastUpdatedAt = Date()
-        savePluginBatchCheckpoint(updated)
-    }
-
-    private func persistPluginCheckpointUI(pluginID: String, inProgress: Bool, paused: Bool, interrupted: Bool, ok: Int?, fail: Int?) {
-        guard let existing = loadPluginBatchCheckpoint() else { return }
-        var updated = existing
-        updated.inProgress = inProgress
-        updated.paused = paused
-        updated.interrupted = interrupted
-        if let ok { updated.okCount = ok }
-        if let fail { updated.failCount = fail }
-        updated.lastRunStatus = pluginRunStatus
-        updated.lastCurrentArchive = pluginCurrentArchive
-        updated.lastLiveEvents = trimmedCheckpointEvents(pluginLiveEvents)
-        updated.lastUpdatedAt = Date()
-        savePluginBatchCheckpoint(updated)
-    }
-
-    private func restoreTagUIFromCheckpointIfNeeded(_ checkpoint: TagBatchCheckpoint) {
-        guard !running && !pluginRunning else { return }
-        guard !restoredTagCheckpointUI else { return }
-
-        // If the app was closed mid-run, treat as interrupted and surface context.
-        if (checkpoint.inProgress ?? false) && !(checkpoint.paused ?? false) {
-            if var updated = loadTagBatchCheckpoint() {
-                updated.interrupted = true
-                updated.lastProgressText = updated.lastProgressText ?? "Interrupted. Resume to continue."
-                updated.lastUpdatedAt = Date()
-                saveTagBatchCheckpoint(updated)
-                resumableTagBatch = updated
-            }
-        }
-
-        progressText = checkpoint.lastProgressText ?? progressText
-        batchCurrentArchive = checkpoint.lastCurrentArchive ?? batchCurrentArchive
-        errors = checkpoint.lastErrors ?? errors
-        batchLiveEvents = checkpoint.lastLiveEvents ?? batchLiveEvents
-        // Ensure combined log reflects restored events.
-        liveEvents = (checkpoint.lastLiveEvents ?? []).map { "[TAG] \($0)" } + liveEvents
-        restoredTagCheckpointUI = true
-    }
-
-    private func restorePluginUIFromCheckpointIfNeeded(_ checkpoint: PluginBatchCheckpoint) {
-        guard !running && !pluginRunning else { return }
-        guard !restoredPluginCheckpointUI else { return }
-
-        if (checkpoint.inProgress ?? false) && !(checkpoint.paused ?? false) {
-            if var updated = loadPluginBatchCheckpoint() {
-                updated.interrupted = true
-                updated.lastRunStatus = updated.lastRunStatus ?? "Interrupted. Resume to continue."
-                updated.lastUpdatedAt = Date()
-                savePluginBatchCheckpoint(updated)
-                resumablePluginBatch = updated
-            }
-        }
-
-        pluginRunStatus = checkpoint.lastRunStatus ?? pluginRunStatus
-        pluginCurrentArchive = checkpoint.lastCurrentArchive ?? pluginCurrentArchive
-        pluginLiveEvents = checkpoint.lastLiveEvents ?? pluginLiveEvents
-        liveEvents = (checkpoint.lastLiveEvents ?? []).map { "[PLUGIN] \($0)" } + liveEvents
-        restoredPluginCheckpointUI = true
-    }
-
-    private func tagCheckpointBannerText(_ checkpoint: TagBatchCheckpoint) -> String {
-        let state: String = {
-            if checkpoint.interrupted ?? false { return "Interrupted" }
-            if checkpoint.paused ?? false { return "Paused" }
-            if checkpoint.inProgress ?? false { return "In progress" }
-            return "Recoverable"
-        }()
-        return "\(state) tag batch found (\(checkpoint.arcids.count) archives)."
-    }
-
-    private func pluginCheckpointBannerText(_ checkpoint: PluginBatchCheckpoint) -> String {
-        let state: String = {
-            if checkpoint.interrupted ?? false { return "Interrupted" }
-            if checkpoint.paused ?? false { return "Paused" }
-            if checkpoint.inProgress ?? false { return "In progress" }
-            return "Recoverable"
-        }()
-        return "\(state) plugin batch found (\(checkpoint.arcids.count) archives)."
-    }
-
-    private func loadPluginBatchCheckpoint() -> PluginBatchCheckpoint? {
-        guard let data = UserDefaults.standard.data(forKey: pluginBatchCheckpointKey) else { return nil }
-        return try? JSONDecoder().decode(PluginBatchCheckpoint.self, from: data)
-    }
-
-    private func savePluginBatchCheckpoint(_ checkpoint: PluginBatchCheckpoint) {
-        if let data = try? JSONEncoder().encode(checkpoint) {
-            UserDefaults.standard.set(data, forKey: pluginBatchCheckpointKey)
-        }
-    }
-
-    private func clearPluginBatchCheckpoint() {
-        UserDefaults.standard.removeObject(forKey: pluginBatchCheckpointKey)
-    }
-
-    private var selectedArcidsSorted: [String] {
+    var selectedArcidsSorted: [String] {
         Array(appModel.selection.arcids).sorted()
     }
 
-    private func displayName(for arcid: String) -> String {
+    func displayName(for arcid: String) -> String {
         selectedArchiveNames[arcid] ?? arcid
     }
 
-    private func refreshSelectedArchiveNames() {
+    func refreshSelectedArchiveNames() {
         selectedNamesTask?.cancel()
         guard let profile = appModel.selectedProfile else {
             selectedArchiveNames = [:]
@@ -1344,7 +442,7 @@ struct BatchView: View {
         }
     }
 
-    private func archiveDisplayName(metadata: ArchiveMetadata, arcid: String) -> String {
+    func archiveDisplayName(metadata: ArchiveMetadata, arcid: String) -> String {
         let filename = (metadata.filename ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !filename.isEmpty { return filename }
         let title = (metadata.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1352,14 +450,14 @@ struct BatchView: View {
         return arcid
     }
 
-    private func invalidatePreview() {
+    func invalidatePreview() {
         previewTask?.cancel()
         previewTask = nil
         previewRows = []
         previewStatus = nil
     }
 
-    private func generatePreview(sampleSize: Int = 10, executePlugin: Bool = false) {
+    func generatePreview(sampleSize: Int = 10, executePlugin: Bool = false) {
         previewTask?.cancel()
         guard let profile = appModel.selectedProfile else { return }
         let arcids = Array(selectedArcidsSorted.prefix(sampleSize))
@@ -1496,204 +594,13 @@ struct BatchView: View {
             }
         }
     }
-
-    private func refreshMetadataAfterPluginBatch(
-        profile: Profile,
-        arcid: String,
-        previousSignature: String?
-    ) async -> Bool {
-        do {
-            for attempt in 0..<6 {
-                let latest = try await appModel.archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
-                let latestSignature = metadataSignature(title: latest.title ?? "", tags: latest.tags ?? "", summary: latest.summary ?? "")
-                if previousSignature == nil || previousSignature != latestSignature {
-                    return true
-                }
-                if attempt < 5 {
-                    try? await Task.sleep(for: .seconds(1))
-                }
-            }
-            return false
-        } catch {
-            return false
-        }
-    }
-
-    private func applyMetadataFromPluginOutputBatch(
-        profile: Profile,
-        pluginID: String,
-        arcid: String,
-        previousSignature: String?,
-        applyMode: PluginApplyMode
-    ) async -> Bool {
-        do {
-            let raw = try await pluginsVM.run(profile: profile, pluginID: pluginID, arcid: arcid, arg: pluginArgText)
-            guard let patch = parsePluginMetadataPatch(from: raw) else {
-                // Some plugins apply metadata directly during /use and return no structured patch payload.
-                let changed = await refreshMetadataAfterPluginBatch(
-                    profile: profile,
-                    arcid: arcid,
-                    previousSignature: previousSignature
-                )
-                if changed {
-                    appModel.activity.add(.init(kind: .action, title: "Plugin metadata refreshed", detail: "\(pluginID) • \(arcid)"))
-                }
-                return changed
-            }
-
-            let current = try await appModel.archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
-            let currentTitle = (current.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let currentSummary = (current.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let currentTagsRaw = current.tags ?? ""
-
-            let applied = applyPluginPatch(
-                patch,
-                currentTitle: currentTitle,
-                currentTags: currentTagsRaw,
-                currentSummary: currentSummary,
-                mode: applyMode
-            )
-            let titleToSave = applied.title
-            let summaryToSave = applied.summary
-            let tagsToSave = applied.tags
-
-            let beforeSignature = previousSignature ?? metadataSignature(title: currentTitle, tags: currentTagsRaw, summary: currentSummary)
-            let nextSignature = metadataSignature(title: titleToSave, tags: tagsToSave, summary: summaryToSave)
-            guard beforeSignature != nextSignature else { return false }
-
-            _ = try await appModel.archives.updateMetadata(
-                profile: profile,
-                arcid: arcid,
-                title: titleToSave,
-                tags: tagsToSave,
-                summary: summaryToSave
-            )
-            appModel.activity.add(.init(kind: .action, title: "Plugin output applied", detail: "\(pluginID) • \(arcid)"))
-            return true
-        } catch {
-            appModel.activity.add(.init(kind: .warning, title: "Plugin output apply failed", detail: "\(pluginID) • \(arcid)\n\(error)"))
-            return false
-        }
-    }
-
-    private func parsePluginMetadataPatch(from response: String) -> (title: String?, tags: String?, summary: String?)? {
-        guard
-            let data = response.data(using: .utf8),
-            let obj = try? JSONSerialization.jsonObject(with: data)
-        else {
-            return nil
-        }
-
-        func scalarString(_ value: Any?) -> String? {
-            guard let value else { return nil }
-            if let str = value as? String {
-                let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
-                return trimmed.isEmpty ? nil : trimmed
-            }
-            if let num = value as? NSNumber {
-                if CFGetTypeID(num) == CFBooleanGetTypeID() {
-                    return num.boolValue ? "true" : "false"
-                }
-                return num.stringValue
-            }
-            return nil
-        }
-
-        func csvString(_ value: Any?) -> String? {
-            if let scalar = scalarString(value) {
-                return scalar
-            }
-            if let arr = value as? [Any] {
-                let parts = arr.compactMap { scalarString($0) }
-                guard !parts.isEmpty else { return nil }
-                return parts.joined(separator: ", ")
-            }
-            return nil
-        }
-
-        func parseJSONDictionaryString(_ value: String) -> [String: Any]? {
-            guard let rawData = value.data(using: .utf8),
-                  let nested = try? JSONSerialization.jsonObject(with: rawData) as? [String: Any] else {
-                return nil
-            }
-            return nested
-        }
-
-        func extractPayload(_ value: Any) -> [String: Any]? {
-            if let dict = value as? [String: Any] {
-                if let nested = dict["data"] {
-                    if let payload = extractPayload(nested) {
-                        return payload
-                    }
-                }
-                for key in ["result", "metadata", "plugin_data", "plugin_result"] {
-                    if let nested = dict[key], let payload = extractPayload(nested) {
-                        return payload
-                    }
-                }
-                if dict["title"] != nil || dict["summary"] != nil || dict["new_tags"] != nil || dict["tags"] != nil {
-                    return dict
-                }
-            }
-            if let text = value as? String {
-                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                if let nested = parseJSONDictionaryString(trimmed) {
-                    return extractPayload(nested)
-                }
-            }
-            return nil
-        }
-
-        guard let payload = extractPayload(obj) else { return nil }
-
-        let title = scalarString(payload["title"])
-        let summary = scalarString(payload["summary"])
-        let newTags = csvString(payload["new_tags"])
-        let fullTags = csvString(payload["tags"])
-
-        let tags = [newTags, fullTags]
-            .compactMap { $0 }
-            .filter { !$0.isEmpty }
-            .joined(separator: ", ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let normalizedTitle = (title?.isEmpty == true) ? nil : title
-        let normalizedSummary = (summary?.isEmpty == true) ? nil : summary
-        let normalizedTags = tags.isEmpty ? nil : tags
-
-        guard normalizedTitle != nil || normalizedSummary != nil || normalizedTags != nil else {
-            return nil
-        }
-        return (normalizedTitle, normalizedTags, normalizedSummary)
-    }
-
-    private func metadataSignature(title: String, tags: String, summary: String) -> String {
-        [
-            title.trimmingCharacters(in: .whitespacesAndNewlines),
-            normalizeTags(tags),
-            summary.trimmingCharacters(in: .whitespacesAndNewlines),
-        ].joined(separator: "|||")
-    }
-
-    private func mergeTagCSV(base: String, additions: String) -> String {
-        var items = parseTags(base)
-        var seen = Set(items.map { $0.lowercased() })
-        for tag in parseTags(additions) {
-            let key = tag.lowercased()
-            if seen.insert(key).inserted {
-                items.append(tag)
-            }
-        }
-        return items.joined(separator: ", ")
-    }
-
-    private var selectedPlugin: PluginInfo? {
+    var selectedPlugin: PluginInfo? {
         guard let id = selectedPluginID else { return nil }
         return pluginsVM.plugins.first(where: { $0.id == id })
     }
 
     @ViewBuilder
-    private func pluginOptionRow(_ param: PluginInfo.Parameter) -> some View {
+    func pluginOptionRow(_ param: PluginInfo.Parameter) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             let title = pluginOptionName(param)
             let fallbackValue = pluginOptionValueText(param)
@@ -1726,26 +633,26 @@ struct BatchView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
-    private func pluginOptionName(_ param: PluginInfo.Parameter) -> String {
+    func pluginOptionName(_ param: PluginInfo.Parameter) -> String {
         let raw = param.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return raw.isEmpty ? "Option" : raw
     }
 
-    private func pluginOptionValueText(_ param: PluginInfo.Parameter) -> String {
+    func pluginOptionValueText(_ param: PluginInfo.Parameter) -> String {
         let value = param.value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !value.isEmpty { return value }
         let fallback = param.defaultValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return fallback
     }
 
-    private func pluginOptionIsBool(_ param: PluginInfo.Parameter) -> Bool {
+    func pluginOptionIsBool(_ param: PluginInfo.Parameter) -> Bool {
         let type = param.type?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
         if type == "bool" || type == "boolean" { return true }
         let v = pluginOptionValueText(param).lowercased()
         return v == "true" || v == "false" || v == "1" || v == "0" || v == "yes" || v == "no"
     }
 
-    private func pluginBoolValue(_ param: PluginInfo.Parameter) -> Bool? {
+    func pluginBoolValue(_ param: PluginInfo.Parameter) -> Bool? {
         let v = pluginOptionValueText(param).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         switch v {
         case "true", "1", "yes", "on":
@@ -1757,12 +664,12 @@ struct BatchView: View {
         }
     }
 
-    private func applyDefaultPluginDelayFromSelection() {
+    func applyDefaultPluginDelayFromSelection() {
         let seconds = defaultPluginDelaySeconds(for: selectedPlugin)
         pluginDelayText = delayDisplay(seconds)
     }
 
-    private func defaultPluginDelaySeconds(for plugin: PluginInfo?) -> Double {
+    func defaultPluginDelaySeconds(for plugin: PluginInfo?) -> Double {
         guard let plugin else { return 4 }
         let candidates = plugin.parameters.filter { param in
             let id = param.id.lowercased()
@@ -1781,78 +688,19 @@ struct BatchView: View {
         return 4
     }
 
-    private func sanitizedDelaySeconds(from raw: String) -> Double {
+    func sanitizedDelaySeconds(from raw: String) -> Double {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let parsed = Double(trimmed), parsed.isFinite else { return 0 }
         return max(0, parsed)
     }
 
-    private func delayDisplay(_ seconds: Double) -> String {
+    func delayDisplay(_ seconds: Double) -> String {
         if seconds.rounded() == seconds {
             return String(Int(seconds))
         }
         return String(format: "%.2f", seconds)
     }
-
-    private func pauseBetweenPluginRuns(
-        seconds: Double,
-        done: Int,
-        total: Int,
-        ok: Int,
-        fail: Int
-    ) async -> Bool {
-        guard seconds > 0 else { return false }
-        let sliceNanos: UInt64 = 200_000_000
-        let totalNanos = UInt64((seconds * 1_000_000_000).rounded())
-        var elapsedNanos: UInt64 = 0
-
-        while elapsedNanos < totalNanos {
-            let shouldStop = await MainActor.run { pluginCancelRequested }
-            if shouldStop || Task.isCancelled {
-                return true
-            }
-
-            let remaining = totalNanos - elapsedNanos
-            let step = min(sliceNanos, remaining)
-            try? await Task.sleep(nanoseconds: step)
-            elapsedNanos += step
-
-            let elapsedSeconds = Double(elapsedNanos) / 1_000_000_000
-            let remainingSeconds = max(0, seconds - elapsedSeconds)
-            await MainActor.run {
-                pluginRunStatus = "Processed \(done)/\(total) • Success \(ok) • Failed \(fail) • Waiting \(delayDisplay(remainingSeconds))s…"
-            }
-        }
-
-        return await MainActor.run { pluginCancelRequested }
-    }
-
-    private func applyPluginPatch(
-        _ patch: (title: String?, tags: String?, summary: String?),
-        currentTitle: String,
-        currentTags: String,
-        currentSummary: String,
-        mode: PluginApplyMode
-    ) -> (title: String, tags: String, summary: String) {
-        let title = patch.title ?? currentTitle
-        let summary = patch.summary ?? currentSummary
-
-        let tags: String
-        if let patchTags = patch.tags {
-            switch mode {
-            case .mergeWithExisting:
-                tags = uniqueTagCSV(mergeTagCSV(base: currentTags, additions: patchTags))
-            case .replaceWithPluginData:
-                tags = uniqueTagCSV(patchTags)
-            }
-        } else {
-            tags = uniqueTagCSV(currentTags)
-        }
-
-        return (title, tags, summary)
-    }
-
-    private func summarizeMetadataChanges(
+    func summarizeMetadataChanges(
         beforeTitle: String,
         beforeTags: String,
         beforeSummary: String,
@@ -1876,12 +724,12 @@ struct BatchView: View {
         return lines
     }
 
-    private func previewText(_ value: String) -> String {
+    func previewText(_ value: String) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "(empty)" : trimmed
     }
 
-    private func metadataChangeLiveMessage(
+    func metadataChangeLiveMessage(
         prefix: String,
         arcid: String,
         beforeTitle: String,
@@ -1906,7 +754,7 @@ struct BatchView: View {
         return "\(prefix) \(displayName(for: arcid)) • \(lines.joined(separator: " | "))"
     }
 
-    private func uniqueTagCSV(_ value: String) -> String {
+    func uniqueTagCSV(_ value: String) -> String {
         var out: [String] = []
         var seen: Set<String> = []
         for tag in parseTags(value) {
@@ -1918,627 +766,115 @@ struct BatchView: View {
         return out.joined(separator: ", ")
     }
 
-    private func appendBatchLiveEvent(_ message: String) {
+    func appendBatchLiveEvent(_ message: String) {
         let entry = "[\(timeStamp())] \(message)"
         batchLiveEvents.insert(entry, at: 0)
         liveEvents.insert("[\(timeStamp())] [TAG] \(message)", at: 0)
     }
 
-    private func appendPluginLiveEvent(_ message: String) {
+    func appendPluginLiveEvent(_ message: String) {
         let entry = "[\(timeStamp())] \(message)"
         pluginLiveEvents.insert(entry, at: 0)
         liveEvents.insert("[\(timeStamp())] [PLUGIN] \(message)", at: 0)
     }
 
-    private func timeStamp() -> String {
+    func timeStamp() -> String {
         Self.liveTimeFormatter.string(from: Date())
     }
 
-    private static let liveTimeFormatter: DateFormatter = {
+    static let liveTimeFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss"
         return f
     }()
 
-    private var running: Bool {
+    var running: Bool {
         get { runState.running }
         nonmutating set { runState.running = newValue }
     }
 
-    private var batchCancelRequested: Bool {
+    var batchCancelRequested: Bool {
         get { runState.batchCancelRequested }
         nonmutating set { runState.batchCancelRequested = newValue }
     }
 
-    private var batchPauseRequested: Bool {
+    var batchPauseRequested: Bool {
         get { runState.batchPauseRequested }
         nonmutating set { runState.batchPauseRequested = newValue }
     }
 
-    private var batchPaused: Bool {
+    var batchPaused: Bool {
         get { runState.batchPaused }
         nonmutating set { runState.batchPaused = newValue }
     }
 
-    private var progressText: String? {
+    var progressText: String? {
         get { runState.progressText }
         nonmutating set { runState.progressText = newValue }
     }
 
-    private var errors: [String] {
+    var errors: [String] {
         get { runState.errors }
         nonmutating set { runState.errors = newValue }
     }
 
-    private var task: Task<Void, Never>? {
+    var task: Task<Void, Never>? {
         get { runState.task }
         nonmutating set { runState.task = newValue }
     }
 
-    private var batchCurrentArchive: String? {
+    var batchCurrentArchive: String? {
         get { runState.batchCurrentArchive }
         nonmutating set { runState.batchCurrentArchive = newValue }
     }
 
-    private var batchLiveEvents: [String] {
+    var batchLiveEvents: [String] {
         get { runState.batchLiveEvents }
         nonmutating set { runState.batchLiveEvents = newValue }
     }
 
-    private var pluginRunning: Bool {
+    var pluginRunning: Bool {
         get { runState.pluginRunning }
         nonmutating set { runState.pluginRunning = newValue }
     }
 
-    private var pluginCancelRequested: Bool {
+    var pluginCancelRequested: Bool {
         get { runState.pluginCancelRequested }
         nonmutating set { runState.pluginCancelRequested = newValue }
     }
 
-    private var pluginPauseRequested: Bool {
+    var pluginPauseRequested: Bool {
         get { runState.pluginPauseRequested }
         nonmutating set { runState.pluginPauseRequested = newValue }
     }
 
-    private var pluginPaused: Bool {
+    var pluginPaused: Bool {
         get { runState.pluginPaused }
         nonmutating set { runState.pluginPaused = newValue }
     }
 
-    private var pluginRunStatus: String? {
+    var pluginRunStatus: String? {
         get { runState.pluginRunStatus }
         nonmutating set { runState.pluginRunStatus = newValue }
     }
 
-    private var pluginTask: Task<Void, Never>? {
+    var pluginTask: Task<Void, Never>? {
         get { runState.pluginTask }
         nonmutating set { runState.pluginTask = newValue }
     }
 
-    private var pluginCurrentArchive: String? {
+    var pluginCurrentArchive: String? {
         get { runState.pluginCurrentArchive }
         nonmutating set { runState.pluginCurrentArchive = newValue }
     }
 
-    private var pluginLiveEvents: [String] {
+    var pluginLiveEvents: [String] {
         get { runState.pluginLiveEvents }
         nonmutating set { runState.pluginLiveEvents = newValue }
     }
 
-    private var liveEvents: [String] {
+    var liveEvents: [String] {
         get { runState.liveEvents }
         nonmutating set { runState.liveEvents = newValue }
-    }
-}
-
-private let tagBatchCheckpointKey = "batch.tag.checkpoint.v1"
-private let pluginBatchCheckpointKey = "batch.plugin.checkpoint.v1"
-
-private struct TagBatchCheckpoint: Codable {
-    let profileID: UUID
-    let profileBaseURL: String
-    let arcids: [String]
-    var nextIndex: Int
-    let addTagsText: String
-    let removeTagsText: String
-    var inProgress: Bool?
-    var paused: Bool?
-    var interrupted: Bool?
-    var doneCount: Int?
-    var errorCount: Int?
-    var lastProgressText: String?
-    var lastCurrentArchive: String?
-    var lastErrors: [String]?
-    var lastLiveEvents: [String]?
-    var lastUpdatedAt: Date?
-}
-
-private struct PluginBatchCheckpoint: Codable {
-    let profileID: UUID
-    let profileBaseURL: String
-    let arcids: [String]
-    var nextIndex: Int
-    let selectedPluginID: String
-    let pluginArgText: String
-    let pluginDelayText: String
-    let pluginApplyModeRaw: String
-    var inProgress: Bool?
-    var paused: Bool?
-    var interrupted: Bool?
-    var okCount: Int?
-    var failCount: Int?
-    var lastRunStatus: String?
-    var lastCurrentArchive: String?
-    var lastLiveEvents: [String]?
-    var lastUpdatedAt: Date?
-}
-
-@MainActor
-private final class BatchRunState: ObservableObject {
-    static let shared = BatchRunState()
-
-    @Published var running: Bool = false
-    @Published var batchCancelRequested: Bool = false
-    @Published var batchPauseRequested: Bool = false
-    @Published var batchPaused: Bool = false
-    @Published var progressText: String?
-    @Published var errors: [String] = []
-    var task: Task<Void, Never>?
-    @Published var batchCurrentArchive: String?
-    @Published var batchLiveEvents: [String] = []
-
-    @Published var pluginRunning: Bool = false
-    @Published var pluginCancelRequested: Bool = false
-    @Published var pluginPauseRequested: Bool = false
-    @Published var pluginPaused: Bool = false
-    @Published var pluginRunStatus: String?
-    var pluginTask: Task<Void, Never>?
-    @Published var pluginCurrentArchive: String?
-    @Published var pluginLiveEvents: [String] = []
-    @Published var liveEvents: [String] = []
-}
-
-private struct BatchPreviewRow: Identifiable {
-    enum Kind {
-        case normal
-        case error
-    }
-
-    var id: String { arcid }
-    let arcid: String
-    let filename: String
-    let detail: String
-    let kind: Kind
-}
-
-private enum PluginApplyMode: String, CaseIterable {
-    case mergeWithExisting
-    case replaceWithPluginData
-
-    var label: String {
-        switch self {
-        case .mergeWithExisting:
-            return "Combine plugin data with existing"
-        case .replaceWithPluginData:
-            return "Replace current data"
-        }
-    }
-}
-
-// MARK: - Find Archives card
-
-private struct FindArchivesCard: View {
-    @EnvironmentObject private var appModel: AppModel
-    let profile: Profile
-
-    @AppStorage("batch.findArchives.expanded") private var expanded: Bool = false
-    @State private var conditions: [BatchQueryCondition] = []
-    @State private var categories: [LanraragiKit.Category] = []
-    @State private var searchStatus: SearchStatus = .idle
-    @State private var selectedResultIDs: Set<String> = []
-    @State private var showSaveSheet: Bool = false
-    @State private var saveNameDraft: String = ""
-    @State private var selectedSavedQueryID: UUID? = nil
-    @State private var searchTask: Task<Void, Never>? = nil
-
-    enum SearchStatus {
-        case idle
-        case loading
-        case results([String])
-        case failed(String)
-    }
-
-    var body: some View {
-        DisclosureGroup(isExpanded: $expanded) {
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach($conditions) { $condition in
-                    ConditionRowView(
-                        condition: $condition,
-                        categories: categories,
-                        onRemove: { conditions.removeAll { $0.id == condition.id } }
-                    )
-                }
-
-                HStack(spacing: 8) {
-                    Text("Main page searches")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
-                    mainPageSearchPresetButton(kind: .newArchives)
-                    mainPageSearchPresetButton(kind: .untaggedArchives)
-
-                    Spacer()
-                }
-
-                HStack {
-                    let hasCategoryCondition = conditions.contains { $0.type == .serverCategory }
-                    Menu {
-                        ForEach(BatchQueryCondition.ConditionType.allCases, id: \.self) { type in
-                            Button(type.label) {
-                                conditions.append(BatchQueryCondition(type: type))
-                            }
-                            .disabled(type == .serverCategory && hasCategoryCondition)
-                        }
-                    } label: {
-                        Label("Add Condition", systemImage: "plus")
-                    }
-                    .fixedSize()
-
-                    Spacer()
-
-                    Button("Search") {
-                        searchTask?.cancel()
-                        searchStatus = .loading
-                        searchTask = Task { await runSearch() }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(conditions.isEmpty)
-                }
-
-                Divider()
-
-                Text("Saved Queries")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                let profileQueries = appModel.savedQueryStore.queries(for: profile.id)
-                HStack(spacing: 8) {
-                    Picker("Saved query", selection: $selectedSavedQueryID) {
-                        Text("Select a query").tag(Optional<UUID>.none)
-                        ForEach(profileQueries) { q in
-                            Text(q.name).tag(Optional(q.id))
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-
-                    Button("Load") {
-                        if let id = selectedSavedQueryID,
-                           let q = profileQueries.first(where: { $0.id == id }) {
-                            conditions = q.conditions
-                        }
-                    }
-                    .disabled(selectedSavedQueryID == nil)
-
-                    Button("Save as…") {
-                        saveNameDraft = ""
-                        showSaveSheet = true
-                    }
-                    .disabled(conditions.isEmpty)
-
-                    Button("Delete", role: .destructive) {
-                        if let id = selectedSavedQueryID {
-                            appModel.savedQueryStore.delete(id: id)
-                            selectedSavedQueryID = nil
-                        }
-                    }
-                    .disabled(selectedSavedQueryID == nil)
-                }
-
-                switch searchStatus {
-                case .idle:
-                    EmptyView()
-                case .loading:
-                    HStack(spacing: 6) {
-                        ProgressView().scaleEffect(0.7)
-                        Text("Searching…")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                case .failed(let msg):
-                    Text("Search failed: \(msg)")
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                case .results(let arcids):
-                    Divider()
-                    HStack {
-                        Text("Results: \(arcids.count) archives")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Add \(selectedResultIDs.count) to Selection") {
-                            appModel.selection.add(selectedResultIDs)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(selectedResultIDs.isEmpty)
-                    }
-                    HStack(spacing: 12) {
-                        Button("Select all") { selectedResultIDs = Set(arcids) }
-                            .buttonStyle(.bordered)
-                            .font(.caption)
-                        Button("Select none") { selectedResultIDs.removeAll() }
-                            .buttonStyle(.bordered)
-                            .font(.caption)
-                        Spacer()
-                    }
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 4) {
-                            ForEach(arcids, id: \.self) { arcid in
-                                QueryResultRowView(
-                                    profile: profile,
-                                    arcid: arcid,
-                                    isSelected: Binding(
-                                        get: { selectedResultIDs.contains(arcid) },
-                                        set: { checked in
-                                            if checked {
-                                                selectedResultIDs.insert(arcid)
-                                            } else {
-                                                selectedResultIDs.remove(arcid)
-                                            }
-                                        }
-                                    )
-                                )
-                            }
-                        }
-                    }
-                    .frame(maxHeight: 260)
-                }
-            }
-            .padding(.top, 8)
-        } label: {
-            Button {
-                expanded.toggle()
-            } label: {
-                HStack(spacing: 6) {
-                    Text("Find Archives")
-                        .font(.headline)
-                    Spacer(minLength: 0)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(18)
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .task(id: profile.id) {
-            await loadCategories()
-        }
-        .sheet(isPresented: $showSaveSheet) {
-            VStack(spacing: 14) {
-                Text("Save Query")
-                    .font(.headline)
-                TextField("Query name", text: $saveNameDraft)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(minWidth: 260)
-                HStack {
-                    Button("Cancel") { showSaveSheet = false }
-                    Spacer()
-                    Button("Save") {
-                        let q = SavedBatchQuery(
-                            name: saveNameDraft.trimmingCharacters(in: .whitespacesAndNewlines),
-                            profileID: profile.id,
-                            conditions: conditions
-                        )
-                        appModel.savedQueryStore.save(q)
-                        selectedSavedQueryID = q.id
-                        showSaveSheet = false
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(saveNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            }
-            .padding(20)
-        }
-        .onDisappear {
-            searchTask?.cancel()
-        }
-    }
-
-    private func applyMainPageSearch(_ kind: MainPageCarouselKind) {
-        let target = kind.batchConditionType
-        let hasTarget = conditions.contains { $0.type == target }
-        conditions.removeAll { $0.type == .newOnly || $0.type == .untaggedOnly }
-        if !hasTarget {
-            conditions.append(BatchQueryCondition(type: target))
-        }
-    }
-
-    @ViewBuilder
-    private func mainPageSearchPresetButton(kind: MainPageCarouselKind) -> some View {
-        let isActive = conditions.contains { $0.type == kind.batchConditionType }
-        Button {
-            applyMainPageSearch(kind)
-        } label: {
-            Text(kind.title)
-                .font(.caption)
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(isActive ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.06))
-                .clipShape(Capsule())
-                .overlay {
-                    Capsule()
-                        .strokeBorder(
-                            isActive ? Color.accentColor.opacity(0.45) : Color(nsColor: .separatorColor).opacity(0.45),
-                            lineWidth: 1
-                        )
-                }
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func loadCategories() async {
-        let account = "apiKey.\(profile.id.uuidString)"
-        let apiKeyString = (try? KeychainService.getString(account: account)) ?? nil
-        let apiKey = apiKeyString.map { LANraragiAPIKey($0) }
-
-        let client = LANraragiClient(configuration: .init(
-            baseURL: profile.baseURL,
-            apiKey: apiKey,
-            acceptLanguage: profile.language,
-            maxConnectionsPerHost: AppSettings.maxConnectionsPerHost(defaultValue: 8)
-        ))
-
-        do {
-            let resp = try await client.listCategories()
-            if Task.isCancelled { return }
-            let cleaned = resp
-                .map { LanraragiKit.Category(id: $0.id.trimmingCharacters(in: .whitespacesAndNewlines),
-                                              name: $0.name.trimmingCharacters(in: .whitespacesAndNewlines),
-                                              pinned: $0.pinned) }
-                .filter { !$0.id.isEmpty && !$0.name.isEmpty }
-            categories = cleaned.sorted { a, b in
-                if a.pinned != b.pinned { return a.pinned && !b.pinned }
-                return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
-            }
-        } catch {
-            if Task.isCancelled { return }
-            categories = []
-        }
-    }
-
-    private func runSearch() async {
-        let compiled = BatchQueryCompiler.compile(conditions)
-
-        let account = "apiKey.\(profile.id.uuidString)"
-        let apiKeyString = (try? KeychainService.getString(account: account)) ?? nil
-        let apiKey = apiKeyString.map { LANraragiAPIKey($0) }
-
-        let client = LANraragiClient(configuration: .init(
-            baseURL: profile.baseURL,
-            apiKey: apiKey,
-            acceptLanguage: profile.language,
-            maxConnectionsPerHost: AppSettings.maxConnectionsPerHost(defaultValue: 8)
-        ))
-
-        var allIDs: [String] = []
-        var start = 0
-
-        do {
-            while true {
-                if Task.isCancelled { return }
-                let resp = try await client.search(
-                    start: start,
-                    filter: compiled.filter,
-                    category: compiled.categoryID,
-                    newOnly: compiled.newOnly,
-                    untaggedOnly: compiled.untaggedOnly,
-                    sortBy: "title",
-                    order: "asc"
-                )
-                let ids = resp.data.map(\.arcid)
-                allIDs.append(contentsOf: ids)
-                start += ids.count
-                if allIDs.count >= resp.recordsFiltered || ids.isEmpty { break }
-            }
-            if Task.isCancelled { return }
-            searchStatus = .results(allIDs)
-            selectedResultIDs = Set(allIDs)
-        } catch {
-            if Task.isCancelled { return }
-            searchStatus = .failed(ErrorPresenter.short(error))
-        }
-    }
-}
-
-private struct ConditionRowView: View {
-    @Binding var condition: BatchQueryCondition
-    let categories: [LanraragiKit.Category]
-    let onRemove: () -> Void
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Picker("Type", selection: $condition.type) {
-                ForEach(BatchQueryCondition.ConditionType.allCases, id: \.self) { type in
-                    Text(type.label).tag(type)
-                }
-            }
-            .pickerStyle(.menu)
-            .labelsHidden()
-            .fixedSize()
-
-            if condition.type.needsNamespace {
-                TextField("namespace", text: $condition.namespace)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 100)
-            }
-
-            if condition.type.needsValue {
-                Text("=")
-                    .foregroundStyle(.secondary)
-                TextField("value", text: $condition.value)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 120)
-            }
-
-            if condition.type.needsCategory {
-                Picker("Category", selection: $condition.categoryID) {
-                    Text("Select category").tag("")
-                    ForEach(categories, id: \.id) { cat in
-                        Text(cat.name).tag(cat.id)
-                    }
-                }
-                .pickerStyle(.menu)
-                .labelsHidden()
-                .onChange(of: condition.categoryID) { _, newID in
-                    if let cat = categories.first(where: { $0.id == newID }) {
-                        condition.categoryName = cat.name
-                    }
-                }
-            }
-
-            Spacer()
-
-            Button(role: .destructive) {
-                onRemove()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.caption.weight(.semibold))
-            }
-            .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
-        }
-    }
-}
-
-private struct QueryResultRowView: View {
-    @EnvironmentObject private var appModel: AppModel
-    let profile: Profile
-    let arcid: String
-    @Binding var isSelected: Bool
-    @State private var title: String = ""
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Toggle("", isOn: $isSelected).labelsHidden()
-            CoverThumb(
-                profile: profile,
-                arcid: arcid,
-                thumbnails: appModel.thumbnails,
-                size: .init(width: 36, height: 46),
-                contentInset: 0,
-                showsBorder: false
-            )
-            Text(title.isEmpty ? arcid : title)
-                .font(.callout)
-                .lineLimit(1)
-            Spacer()
-        }
-        .task(id: arcid) {
-            if let meta = try? await appModel.archives.metadata(profile: profile, arcid: arcid) {
-                title = meta.title ?? arcid
-            }
-        }
     }
 }

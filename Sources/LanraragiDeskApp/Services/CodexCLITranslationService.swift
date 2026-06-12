@@ -30,10 +30,6 @@ struct CodexCLITranslationService: TitleTranslationProviderClient {
         }
     }
 
-    private struct OutputEnvelope: Decodable {
-        let items: [OpenAITranslationService.BatchResult]
-    }
-
     private let runnerTimeout: TimeInterval
     private let workingDirectoryURL: URL
 
@@ -81,15 +77,11 @@ struct CodexCLITranslationService: TitleTranslationProviderClient {
         model: String,
         items: [OpenAITranslationService.BatchItem]
     ) async throws -> [OpenAITranslationService.BatchResult] {
-        let payloadJSON = try String(
-            data: JSONSerialization.data(withJSONObject: items.map { ["arcid": $0.arcid, "title": $0.title] }, options: [.sortedKeys]),
-            encoding: .utf8
-        ) ?? "[]"
+        let payloadJSON = try TitleTranslationFormat.payloadJSON(items: items)
         let prompt = """
         Detect title language and translate non-English titles to concise natural English.
         Return strict JSON only matching the provided schema.
-        Language enum must be one of: english, japanese, korean, chinese, spanish, romanji, other.
-        Treat romaji/romanji text as romanji.
+        \(TitleTranslationFormat.languageInstruction)
         For each item, return arcid, detected_language, english_title, should_translate.
         Keep english_title the same as the input title when should_translate is false.
         Input items: \(payloadJSON)
@@ -134,13 +126,8 @@ struct CodexCLITranslationService: TitleTranslationProviderClient {
             throw ServiceError.missingContent
         }
 
-        guard let data = content.data(using: .utf8) else {
-            throw ServiceError.invalidJSON
-        }
-
         do {
-            let envelope = try JSONDecoder().decode(OutputEnvelope.self, from: data)
-            return envelope.items
+            return try TitleTranslationFormat.decodeEnvelope(content)
         } catch {
             throw ServiceError.invalidJSON
         }
@@ -205,34 +192,8 @@ struct CodexCLITranslationService: TitleTranslationProviderClient {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("codex-title-translation-schema-\(UUID().uuidString)")
             .appendingPathExtension("json")
-        let schema = """
-        {
-          "type": "object",
-          "properties": {
-            "items": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "arcid": { "type": "string" },
-                  "detected_language": {
-                    "type": "string",
-                    "enum": ["english", "japanese", "korean", "chinese", "spanish", "romanji", "other"]
-                  },
-                  "english_title": { "type": "string" },
-                  "should_translate": { "type": "boolean" }
-                },
-                "required": ["arcid", "detected_language", "english_title", "should_translate"],
-                "additionalProperties": false
-              }
-            }
-          },
-          "required": ["items"],
-          "additionalProperties": false
-        }
-        """
         do {
-            try schema.write(to: url, atomically: true, encoding: .utf8)
+            try TitleTranslationFormat.schemaJSON.write(to: url, atomically: true, encoding: .utf8)
             return url
         } catch {
             throw ServiceError.schemaWriteFailed(error.localizedDescription)

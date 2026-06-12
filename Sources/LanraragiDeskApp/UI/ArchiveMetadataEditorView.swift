@@ -985,10 +985,7 @@ private enum MetadataTagFormatter {
     }
 
     private static func sortedItems(from tags: String) -> [Item] {
-        let raw = tags
-            .split(separator: ",")
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        let raw = TagParsing.tokens(tags)
 
         var seen: Set<String> = []
         var out: [Item] = []
