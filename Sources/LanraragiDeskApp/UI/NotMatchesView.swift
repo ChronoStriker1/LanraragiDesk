@@ -7,6 +7,7 @@ struct NotMatchesView: View {
     let embedded: Bool
 
     @EnvironmentObject private var appModel: AppModel
+    @Environment(\.dismiss) private var dismiss
 
     @State private var query: String = ""
     @State private var confirmRemove: IndexStore.NotDuplicatePair?
@@ -23,6 +24,8 @@ struct NotMatchesView: View {
             } else {
                 embeddedHeader
             }
+
+            refreshStatus
 
             if filteredPairs.isEmpty {
                 Group {
@@ -83,6 +86,9 @@ struct NotMatchesView: View {
         } message: {
             Text("This pair can appear in future scans again.")
         }
+        .task(id: profile.id) {
+            await appModel.duplicates.loadAndPruneNotDuplicatePairs(profile: profile)
+        }
     }
 
     private var filteredPairs: [IndexStore.NotDuplicatePair] {
@@ -122,12 +128,18 @@ struct NotMatchesView: View {
             .disabled(!appModel.duplicates.hasUndoableNotMatchChange)
 
             Button("Refresh") {
-                Task { await appModel.duplicates.loadNotDuplicatePairs(profile: profile) }
+                Task { await appModel.duplicates.loadAndPruneNotDuplicatePairs(profile: profile) }
             }
+            .disabled(appModel.duplicates.isRefreshingNotMatches)
 
             Button("Clear All", role: .destructive) {
                 appModel.duplicates.clearNotDuplicateDecisions(profile: profile)
             }
+
+            Button("Close") {
+                dismiss()
+            }
+            .keyboardShortcut(.cancelAction)
         }
         .padding(14)
         .background(.thinMaterial)
@@ -152,8 +164,29 @@ struct NotMatchesView: View {
             .disabled(!appModel.duplicates.hasUndoableNotMatchChange)
 
             Button("Refresh") {
-                Task { await appModel.duplicates.loadNotDuplicatePairs(profile: profile) }
+                Task { await appModel.duplicates.loadAndPruneNotDuplicatePairs(profile: profile) }
             }
+            .disabled(appModel.duplicates.isRefreshingNotMatches)
+        }
+    }
+
+    @ViewBuilder
+    private var refreshStatus: some View {
+        if let message = appModel.duplicates.notMatchRefreshMessage {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, embedded ? 4 : 14)
+        } else if let error = appModel.duplicates.notMatchRefreshError {
+            Text(error)
+                .font(.caption)
+                .foregroundStyle(.red)
+                .textSelection(.enabled)
+                .padding(.horizontal, embedded ? 4 : 14)
         }
     }
 }

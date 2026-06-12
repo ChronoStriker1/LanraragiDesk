@@ -69,7 +69,7 @@ enum ErrorPresenter {
             let candidates = ["error", "message", "reason", "detail"]
             for k in candidates {
                 if let s = dict[k] as? String, !s.isEmpty {
-                    return truncate(s)
+                    return truncate(decodeHTMLEntities(s))
                 }
             }
         }
@@ -79,12 +79,43 @@ enum ErrorPresenter {
             .replacingOccurrences(of: "\r", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !s.isEmpty else { return nil }
-        return truncate(s)
+        return truncate(decodeHTMLEntities(s))
     }
 
     private static func truncate(_ s: String, max: Int = 120) -> String {
         if s.count <= max { return s }
         let idx = s.index(s.startIndex, offsetBy: max)
         return String(s[..<idx]) + "…"
+    }
+
+    private static func decodeHTMLEntities(_ input: String) -> String {
+        var output = input
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&apos;", with: "'")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&amp;", with: "&")
+
+        output = replaceNumericHTMLEntities(in: output, pattern: #"&#(\d+);"#, radix: 10)
+        output = replaceNumericHTMLEntities(in: output, pattern: #"&#x([0-9a-fA-F]+);"#, radix: 16)
+        return output
+    }
+
+    private static func replaceNumericHTMLEntities(in input: String, pattern: String, radix: Int) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return input }
+        var output = input
+        let matches = regex.matches(in: input, range: NSRange(input.startIndex..., in: input)).reversed()
+        for match in matches {
+            guard
+                match.numberOfRanges == 2,
+                let entityRange = Range(match.range(at: 0), in: output),
+                let valueRange = Range(match.range(at: 1), in: output),
+                let scalarValue = UInt32(output[valueRange], radix: radix),
+                let scalar = UnicodeScalar(scalarValue)
+            else { continue }
+            output.replaceSubrange(entityRange, with: String(Character(scalar)))
+        }
+        return output
     }
 }

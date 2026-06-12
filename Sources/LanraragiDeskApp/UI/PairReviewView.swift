@@ -20,8 +20,6 @@ struct PairReviewView: View {
     let markNotDuplicate: (DuplicateScanResult.Pair) -> Void
     let deleteArchive: (String) async throws -> Void
 
-    @AppStorage("review.hoverPagePreview") private var hoverPagePreview: Bool = true
-
     @State private var selection: DuplicateScanResult.Pair?
     @State private var query: String = ""
     @State private var matchFilter: MatchFilter = .both
@@ -116,13 +114,6 @@ struct PairReviewView: View {
                 TextField("Search ID…", text: $query)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 240)
-
-                Menu {
-                    Toggle("Hover page preview", isOn: $hoverPagePreview)
-                } label: {
-                    Image(systemName: "gearshape")
-                }
-                .menuStyle(.borderlessButton)
 
                 Button {
                     showMatchLegend.toggle()
@@ -1677,8 +1668,6 @@ private struct PageThumbTile: View {
     let isSettingCover: Bool
     let onSetCoverFromPage: (String, Int) async -> Void
 
-    @AppStorage("review.hoverPagePreview") private var hoverPreviewEnabled: Bool = true
-
     @State private var image: NSImage?
     @State private var fullImage: NSImage?
     @State private var errorText: String?
@@ -1745,7 +1734,6 @@ private struct PageThumbTile: View {
                 .strokeBorder(.white.opacity(0.12), lineWidth: 1)
         }
         .onHover { inside in
-            guard hoverPreviewEnabled else { return }
             hovering = inside && (url != nil) && (image != nil)
         }
         .contextMenu {
