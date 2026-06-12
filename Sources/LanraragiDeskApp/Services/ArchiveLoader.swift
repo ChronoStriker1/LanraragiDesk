@@ -53,6 +53,21 @@ actor ArchiveLoader {
         return m
     }
 
+    func archiveExists(profile: Profile, arcid: String) async throws -> Bool {
+        do {
+            _ = try await metadata(profile: profile, arcid: arcid, forceRefresh: true)
+            return true
+        } catch let LANraragiError.httpStatus(code, _) where code == 404 || code == 410 {
+            // Only a definitive "gone" answer means the archive doesn't exist.
+            // Transient server errors (5xx, etc.) must propagate so callers don't
+            // prune user data based on a hiccup.
+            metaCache[arcid] = nil
+            metaRawCache[arcid] = nil
+            pagesCache[arcid] = nil
+            return false
+        }
+    }
+
     func updateMetadata(
         profile: Profile,
         arcid: String,
@@ -215,6 +230,17 @@ actor ArchiveLoader {
         return data
     }
 
+    /// Drops the cached client, API key, and all derived caches for a profile.
+    /// Call after the profile's base URL or API key changes.
+    func invalidateClient(profileID: UUID) {
+        apiKeyByProfileID[profileID] = nil
+        clientByProfileID[profileID] = nil
+        metaCache.removeAll()
+        metaRawCache.removeAll()
+        pagesCache.removeAll()
+        bytesCache.removeAllObjects()
+    }
+
     private func makeClient(profile: Profile) throws -> LANraragiClient {
         if let cached = clientByProfileID[profile.id] {
             return cached
@@ -241,41 +267,5 @@ actor ArchiveLoader {
         clientByProfileID[profile.id] = client
         return client
     }
-}
 
-private actor AsyncLimiter {
-    private let limit: Int
-    private var available: Int
-    private var waiters: [CheckedContinuation<Void, Never>] = []
-
-    init(limit: Int) {
-        self.limit = max(1, limit)
-        self.available = self.limit
-    }
-
-    func withPermit<T: Sendable>(_ op: @Sendable () async throws -> T) async throws -> T {
-        await acquire()
-        defer { release() }
-        return try await op()
-    }
-
-    private func acquire() async {
-        if available > 0 {
-            available -= 1
-            return
-        }
-
-        await withCheckedContinuation { cont in
-            waiters.append(cont)
-        }
-        // Permit is transferred directly from `release()` via resuming this continuation.
-    }
-
-    private func release() {
-        if !waiters.isEmpty {
-            waiters.removeFirst().resume()
-            return
-        }
-        available = min(limit, available + 1)
-    }
 }

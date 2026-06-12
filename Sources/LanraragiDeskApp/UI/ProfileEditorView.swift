@@ -10,6 +10,7 @@ struct ProfileEditorView: View {
     @State private var baseURLString: String = ""
     @State private var language: String = "en-US"
     @State private var apiKey: String = ""
+    @State private var saveError: String?
 
     init(mode: ProfileEditorMode) {
         self.mode = mode
@@ -27,12 +28,20 @@ struct ProfileEditorView: View {
                 SecureField("API Key (stored in Keychain)", text: $apiKey)
             }
 
+            if let saveError {
+                Text(saveError)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            }
+
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }
                 Button("Save") {
-                    save()
-                    dismiss()
+                    if save() {
+                        dismiss()
+                    }
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(!canSave)
@@ -69,8 +78,8 @@ struct ProfileEditorView: View {
         }
     }
 
-    private func save() {
-        guard let url = normalizedBaseURL else { return }
+    private func save() -> Bool {
+        guard let url = normalizedBaseURL else { return false }
 
         let profile: Profile
         switch mode {
@@ -80,12 +89,21 @@ struct ProfileEditorView: View {
             profile = Profile(id: existing.id, name: name, baseURL: url, language: language)
         }
 
+        if !apiKey.isEmpty {
+            do {
+                try KeychainService.setString(apiKey, account: "apiKey.\(profile.id.uuidString)")
+            } catch {
+                saveError = "Could not save the API key to the Keychain (\(error)). Profile not saved."
+                return false
+            }
+        }
+
         appModel.profileStore.upsert(profile)
         appModel.selectedProfileID = profile.id
 
-        if !apiKey.isEmpty {
-            try? KeychainService.setString(apiKey, account: "apiKey.\(profile.id.uuidString)")
-        }
+        // Cached clients hold the old base URL/API key; drop them.
+        appModel.invalidateClients(profileID: profile.id)
+        return true
     }
 
     private var normalizedBaseURL: URL? {

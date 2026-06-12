@@ -20,6 +20,9 @@ final class DuplicateScanViewModel: ObservableObject {
     @Published private(set) var result: DuplicateScanResult?
     @Published private(set) var resultRevision: Int = 0
     @Published private(set) var notMatches: [IndexStore.NotDuplicatePair] = []
+    @Published private(set) var notMatchRefreshMessage: String?
+    @Published private(set) var notMatchRefreshError: String?
+    @Published private(set) var isRefreshingNotMatches: Bool = false
     @Published private(set) var hasUndoableNotMatchChange: Bool = false
 
     // Tuning knobs
@@ -49,7 +52,7 @@ final class DuplicateScanViewModel: ObservableObject {
         activitySink?(.init(kind: kind, title: title, detail: detail))
     }
 
-    func start(profile: Profile) {
+    func start(profile: Profile, rebuildIndex: Bool = false) {
         guard task == nil else {
             log(.warning, "Duplicate scan already running")
             return
@@ -69,10 +72,10 @@ final class DuplicateScanViewModel: ObservableObject {
         log(
             .action,
             "Duplicate scan started",
-            detail: "Mode: \(strictnessLabel) • Exact: \(includeExactChecksum ? "on" : "off") • Approx: \(includeApproximate ? "on" : "off")"
+            detail: "Mode: \(strictnessLabel) • Exact: \(includeExactChecksum ? "on" : "off") • Approx: \(includeApproximate ? "on" : "off")\(rebuildIndex ? " • Full index rebuild" : "")"
         )
 
-        status = .running("Resetting local index…")
+        status = .running("Preparing…")
         result = nil
 
         task = Task {
@@ -88,10 +91,15 @@ final class DuplicateScanViewModel: ObservableObject {
             do {
                 let store = try IndexStore(configuration: .init(url: AppPaths.indexDBURL()))
 
-                // Each scan starts from a clean fingerprint index, but keeps user-made exclusions.
-                try store.resetFingerprintIndex(keepNotDuplicates: true)
+                // The index is incremental: existing fingerprints are reused, new archives
+                // are indexed, and fingerprints of deleted archives are pruned after a full
+                // enumeration. A rebuild re-downloads every cover (e.g. after covers changed
+                // server-side) while keeping user-made exclusions.
+                if rebuildIndex {
+                    status = .running("Resetting local index…")
+                    try store.resetFingerprintIndex(profileID: profile.id, keepNotDuplicates: true)
+                }
 
-                // Always run the indexer first. If the index is already complete, this should be quick.
                 status = .running("Indexing covers…")
 
                 let account = "apiKey.\(profile.id.uuidString)"
@@ -112,7 +120,7 @@ final class DuplicateScanViewModel: ObservableObject {
                     store: store,
                     baseURL: profile.baseURL,
                     language: profile.language,
-                    config: IndexerConfig(concurrency: 4, resumeFromLastStart: true, skipExisting: true, noFallbackThumbnails: false),
+                    config: IndexerConfig(concurrency: 4, resumeFromLastStart: false, skipExisting: true, noFallbackThumbnails: false),
                     progress: { [weak self] p in
                         Task { @MainActor in
                             guard let self, self.runID == rid else { return }
@@ -165,9 +173,9 @@ final class DuplicateScanViewModel: ObservableObject {
                     detail: "Groups: \(res.groups.count) • Pairs: \(res.pairs.count) • Archives: \(res.stats.archives) • \(String(format: "%.1fs", res.stats.durationSeconds))"
                 )
             } catch {
-                if Task.isCancelled { return }
+                if Task.isCancelled || ErrorPresenter.isCancellationLike(error) { return }
                 if runID == rid {
-                    status = .failed(String(describing: error))
+                    status = .failed(ErrorPresenter.short(error))
                     log(.error, "Duplicate scan failed", detail: String(describing: error))
                 }
             }
@@ -176,9 +184,10 @@ final class DuplicateScanViewModel: ObservableObject {
 
     func markNotDuplicate(profile: Profile, pair: DuplicateScanResult.Pair) {
         // Persist immediately so future scans won't show this again.
+        let markedAt = Int64(Date().timeIntervalSince1970 * 1000)
         do {
             let store = try IndexStore(configuration: .init(url: AppPaths.indexDBURL()))
-            try store.addNotDuplicatePair(profileID: profile.id, arcidA: pair.arcidA, arcidB: pair.arcidB)
+            try store.addNotDuplicatePair(profileID: profile.id, arcidA: pair.arcidA, arcidB: pair.arcidB, createdAt: markedAt)
         } catch {
             status = .failed("Failed to save exclusion: \(error)")
             log(.error, "Failed to save Not a match pair", detail: "\(pair.arcidA) • \(pair.arcidB)\n\(error)")
@@ -186,8 +195,7 @@ final class DuplicateScanViewModel: ObservableObject {
         }
 
         // Keep the Manage tab list fresh; newest decision should appear first.
-        let now = Int64(Date().timeIntervalSince1970)
-        let notPair = IndexStore.NotDuplicatePair(arcidA: pair.arcidA, arcidB: pair.arcidB, createdAt: now)
+        let notPair = IndexStore.NotDuplicatePair(arcidA: pair.arcidA, arcidB: pair.arcidB, createdAt: markedAt)
         notMatches.removeAll { $0 == notPair }
         notMatches.insert(notPair, at: 0)
 
@@ -214,7 +222,7 @@ final class DuplicateScanViewModel: ObservableObject {
             let store = try IndexStore(configuration: .init(url: AppPaths.indexDBURL()))
             try store.clearNotDuplicatePairs(profileID: profile.id)
         } catch {
-            status = .failed("Failed to clear exclusions: \(error)")
+            notMatchRefreshError = "Failed to clear exclusions: \(ErrorPresenter.short(error))"
             log(.error, "Failed to clear Not a match pairs", detail: String(describing: error))
             return
         }
@@ -232,8 +240,83 @@ final class DuplicateScanViewModel: ObservableObject {
                 return a.arcidB < b.arcidB
             }
         } catch {
-            status = .failed("Failed to load exclusions: \(error)")
+            notMatchRefreshError = "Failed to load exclusions: \(ErrorPresenter.short(error))"
             log(.error, "Failed to load Not a match pairs", detail: String(describing: error))
+        }
+    }
+
+    func loadAndPruneNotDuplicatePairs(profile: Profile) async {
+        if isRefreshingNotMatches { return }
+        isRefreshingNotMatches = true
+        notMatchRefreshError = nil
+        notMatchRefreshMessage = "Loading Not a match list..."
+        defer {
+            isRefreshingNotMatches = false
+            notMatchRefreshMessage = nil
+        }
+
+        do {
+            let store = try IndexStore(configuration: .init(url: AppPaths.indexDBURL()))
+            let set = try store.loadNotDuplicatePairs(profileID: profile.id)
+            var pairs = Self.sortNotMatchesForDisplay(Array(set))
+
+            notMatches = pairs
+            if pairs.isEmpty { return }
+
+            var existsByArcid: [String: Bool] = [:]
+            var removedPairs = Set<IndexStore.NotDuplicatePair>()
+
+            func prunePairs(containing arcid: String) throws -> Int {
+                let matchingPairs = pairs.filter { $0.arcidA == arcid || $0.arcidB == arcid }
+                if matchingPairs.isEmpty { return 0 }
+
+                notMatchRefreshMessage = "Removing stale Not a match pairs for \(arcid)..."
+                for pair in matchingPairs where !removedPairs.contains(pair) {
+                    try store.removeNotDuplicatePair(profileID: profile.id, arcidA: pair.arcidA, arcidB: pair.arcidB)
+                    removedPairs.insert(pair)
+                }
+
+                pairs.removeAll { $0.arcidA == arcid || $0.arcidB == arcid }
+                notMatches = Self.sortNotMatchesForDisplay(pairs)
+                return matchingPairs.count
+            }
+
+            func checkArchive(_ arcid: String) async throws -> Bool {
+                if let cached = existsByArcid[arcid] {
+                    return cached
+                }
+
+                let exists = try await archives.archiveExists(profile: profile, arcid: arcid)
+                existsByArcid[arcid] = exists
+                return exists
+            }
+
+            let leftSidePairs = Self.sortNotMatchesOldestFirst(pairs)
+            for (index, pair) in leftSidePairs.enumerated() {
+                guard pairs.contains(pair) else { continue }
+                notMatchRefreshMessage = "Checking left-side archives \(index + 1)/\(leftSidePairs.count)..."
+
+                if try await checkArchive(pair.arcidA) == false {
+                    _ = try prunePairs(containing: pair.arcidA)
+                }
+            }
+
+            let rightSidePairs = Self.sortNotMatchesOldestFirst(pairs)
+            for (index, pair) in rightSidePairs.enumerated() {
+                guard pairs.contains(pair) else { continue }
+                notMatchRefreshMessage = "Checking right-side archives \(index + 1)/\(rightSidePairs.count)..."
+
+                if try await checkArchive(pair.arcidB) == false {
+                    _ = try prunePairs(containing: pair.arcidB)
+                }
+            }
+
+            if !removedPairs.isEmpty {
+                log(.action, "Cleaned Not a match list", detail: "Removed \(removedPairs.count) pairs with deleted archives")
+            }
+        } catch {
+            notMatchRefreshError = "Failed to refresh Not a match list: \(ErrorPresenter.short(error))"
+            log(.error, "Failed to refresh Not a match pairs", detail: String(describing: error))
         }
     }
 
@@ -242,7 +325,7 @@ final class DuplicateScanViewModel: ObservableObject {
             let store = try IndexStore(configuration: .init(url: AppPaths.indexDBURL()))
             try store.removeNotDuplicatePair(profileID: profile.id, arcidA: pair.arcidA, arcidB: pair.arcidB)
         } catch {
-            status = .failed("Failed to remove exclusion: \(error)")
+            notMatchRefreshError = "Failed to remove exclusion: \(ErrorPresenter.short(error))"
             log(.error, "Failed to remove Not a match pair", detail: "\(pair.arcidA) • \(pair.arcidB)\n\(error)")
             return
         }
@@ -260,20 +343,18 @@ final class DuplicateScanViewModel: ObservableObject {
             let store = try IndexStore(configuration: .init(url: AppPaths.indexDBURL()))
             switch action {
             case .removed(let pair):
-                try store.addNotDuplicatePair(profileID: profile.id, arcidA: pair.arcidA, arcidB: pair.arcidB)
-                if !notMatches.contains(pair) {
-                    notMatches.insert(pair, at: 0)
-                }
+                try store.addNotDuplicatePair(profileID: profile.id, arcidA: pair.arcidA, arcidB: pair.arcidB, createdAt: pair.createdAt)
+                mergeRestoredNotMatches([pair])
                 log(.action, "Undo removed Not a match pair", detail: "\(pair.arcidA) • \(pair.arcidB)")
             case .cleared(let pairs):
                 for pair in pairs {
-                    try store.addNotDuplicatePair(profileID: profile.id, arcidA: pair.arcidA, arcidB: pair.arcidB)
+                    try store.addNotDuplicatePair(profileID: profile.id, arcidA: pair.arcidA, arcidB: pair.arcidB, createdAt: pair.createdAt)
                 }
                 mergeRestoredNotMatches(pairs)
                 log(.action, "Undo cleared Not a match pairs", detail: "\(pairs.count) pairs")
             }
         } catch {
-            status = .failed("Failed to undo Not a match change: \(error)")
+            notMatchRefreshError = "Failed to undo Not a match change: \(ErrorPresenter.short(error))"
             log(.error, "Failed to undo Not a match change", detail: String(describing: error))
         }
     }
@@ -399,8 +480,20 @@ final class DuplicateScanViewModel: ObservableObject {
         for pair in pairs where !notMatches.contains(pair) {
             notMatches.append(pair)
         }
-        notMatches.sort { a, b in
+        notMatches = Self.sortNotMatchesForDisplay(notMatches)
+    }
+
+    private static func sortNotMatchesForDisplay(_ pairs: [IndexStore.NotDuplicatePair]) -> [IndexStore.NotDuplicatePair] {
+        pairs.sorted { a, b in
             if a.createdAt != b.createdAt { return a.createdAt > b.createdAt }
+            if a.arcidA != b.arcidA { return a.arcidA < b.arcidA }
+            return a.arcidB < b.arcidB
+        }
+    }
+
+    private static func sortNotMatchesOldestFirst(_ pairs: [IndexStore.NotDuplicatePair]) -> [IndexStore.NotDuplicatePair] {
+        pairs.sorted { a, b in
+            if a.createdAt != b.createdAt { return a.createdAt < b.createdAt }
             if a.arcidA != b.arcidA { return a.arcidA < b.arcidA }
             return a.arcidB < b.arcidB
         }

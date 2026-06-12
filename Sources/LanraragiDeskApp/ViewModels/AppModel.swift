@@ -109,7 +109,16 @@ final class AppModel: ObservableObject {
         } catch LANraragiError.unauthorized {
             connectionStatus = .unauthorized
         } catch {
-            connectionStatus = .failed(String(describing: error))
+            connectionStatus = .failed(ErrorPresenter.short(error))
+        }
+    }
+
+    /// Call after a profile's base URL or API key changes so cached clients
+    /// don't keep using stale credentials until app restart.
+    func invalidateClients(profileID: Profile.ID) {
+        Task {
+            await archives.invalidateClient(profileID: profileID)
+            await thumbnails.invalidateClient(profileID: profileID)
         }
     }
 

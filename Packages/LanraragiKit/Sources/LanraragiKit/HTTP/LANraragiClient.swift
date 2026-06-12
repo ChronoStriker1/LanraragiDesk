@@ -1,6 +1,6 @@
 import Foundation
 
-public final class LANraragiClient: @unchecked Sendable {
+public final class LANraragiClient: Sendable {
     public struct Configuration: Sendable {
         public var baseURL: URL
         public var apiKey: LANraragiAPIKey?

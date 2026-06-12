@@ -9,6 +9,7 @@ settings:
     CLANG_WARN_DOCUMENTATION_COMMENTS: 'YES'
     GCC_TREAT_WARNINGS_AS_ERRORS: 'YES'
     SWIFT_TREAT_WARNINGS_AS_ERRORS: 'YES'
+    ENABLE_HARDENED_RUNTIME: 'YES'
 packages:
   LanraragiKit:
     path: Packages/LanraragiKit
@@ -22,6 +23,13 @@ targets:
       - path: Sources/LanraragiDeskApp
     info:
       path: Sources/LanraragiDeskApp/Resources/Info.plist
+      properties:
+        CFBundleShortVersionString: '1.1'
+        CFBundleVersion: '2'
+        # LANraragi servers commonly run plain HTTP on the local network.
+        # ATS already exempts IP-literal hosts; this also allows local hostnames.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
     dependencies:
       - package: LanraragiKit
     settings:

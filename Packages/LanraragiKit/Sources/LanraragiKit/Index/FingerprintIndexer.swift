@@ -92,6 +92,9 @@ public struct FingerprintIndexer {
         let total = page.recordsTotal
         progress(await counters.snapshot(phase: .enumerating(total: total), total: total, currentArcid: nil))
 
+        var seenArcids = Set<String>()
+        seenArcids.reserveCapacity(total)
+
         while true {
             try Task.checkCancellation()
             if page.data.isEmpty {
@@ -104,6 +107,7 @@ public struct FingerprintIndexer {
                 for item in page.data {
                     try Task.checkCancellation()
                     let arcid = item.arcid
+                    seenArcids.insert(arcid)
 
                     await counters.didSee()
 
@@ -118,7 +122,7 @@ public struct FingerprintIndexer {
                     await counters.didQueue()
 
                     group.addTask {
-                        await limiter.withPermit {
+                        try await limiter.withPermit {
                             do {
                                 let thumb = try await client.fetchCoverThumbnailBytes(
                                     arcid: arcid,
@@ -172,6 +176,13 @@ public struct FingerprintIndexer {
             }
 
             page = try await client.search(start: start)
+        }
+
+        // After a full enumeration we know every arcid on the server, so drop
+        // fingerprints of archives deleted server-side. A resumed run only saw a
+        // suffix of the library and must not prune.
+        if startOffset == 0 {
+            try store.pruneFingerprints(profileID: profileID, keeping: seenArcids)
         }
 
         progress(await counters.snapshot(phase: .completed(total: total), total: total, currentArcid: nil))
@@ -249,40 +260,3 @@ private actor ProgressTicker {
     }
 }
 
-private actor AsyncLimiter {
-    private let limit: Int
-    private var available: Int
-    private var waiters: [CheckedContinuation<Void, Never>] = []
-
-    init(limit: Int) {
-        self.limit = max(1, limit)
-        self.available = max(1, limit)
-    }
-
-    func withPermit<T: Sendable>(
-        _ operation: @Sendable () async throws -> T
-    ) async rethrows -> T {
-        await acquire()
-        defer { release() }
-        return try await operation()
-    }
-
-    private func acquire() async {
-        if available > 0 {
-            available -= 1
-            return
-        }
-
-        await withCheckedContinuation { cont in
-            waiters.append(cont)
-        }
-    }
-
-    private func release() {
-        if !waiters.isEmpty {
-            waiters.removeFirst().resume()
-            return
-        }
-        available = min(limit, available + 1)
-    }
-}

@@ -19,6 +19,14 @@ final class ProfileStore: ObservableObject {
         do {
             let data = try Data(contentsOf: fileURL)
             profiles = try JSONDecoder().decode([Profile].self, from: data)
+        } catch let error as DecodingError {
+            // Keep the broken file around instead of silently wiping the profile;
+            // its keychain entry would otherwise be stranded under an unknown UUID.
+            let backupURL = fileURL.deletingPathExtension().appendingPathExtension("corrupt.json")
+            try? FileManager.default.removeItem(at: backupURL)
+            try? FileManager.default.copyItem(at: fileURL, to: backupURL)
+            NSLog("ProfileStore: failed to decode profiles.json (%@); backed up to %@", String(describing: error), backupURL.path)
+            profiles = []
         } catch {
             profiles = []
         }
@@ -45,6 +53,8 @@ final class ProfileStore: ObservableObject {
     func delete(_ profile: Profile) {
         profiles.removeAll { $0.id == profile.id }
         save()
+        // Remove the orphaned API key; it is useless without the profile.
+        try? KeychainService.delete(account: "apiKey.\(profile.id.uuidString)")
     }
 
     private func save() {
@@ -52,7 +62,7 @@ final class ProfileStore: ObservableObject {
             let data = try JSONEncoder().encode(profiles)
             try data.write(to: fileURL, options: [.atomic])
         } catch {
-            // Best-effort; surface later in UI when we add a diagnostics panel.
+            NSLog("ProfileStore: failed to save profiles.json: %@", String(describing: error))
         }
     }
 }

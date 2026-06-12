@@ -324,6 +324,12 @@ struct RootView: View {
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .debugFrameNumber(1)
+        .sheet(isPresented: $showNotMatchesPanel) {
+            NotMatchesView(profile: profile)
+                .environmentObject(appModel)
+                .frame(minWidth: 760, minHeight: 520)
+                .padding(18)
+        }
     }
 
     @ViewBuilder
@@ -398,19 +404,10 @@ struct RootView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            Button(showNotMatchesPanel ? "Hide “Not a match” list" : "Show “Not a match” list") {
-                showNotMatchesPanel.toggle()
-                if showNotMatchesPanel {
-                    Task { await appModel.duplicates.loadNotDuplicatePairs(profile: profile) }
-                }
+            Button("Show “Not a match” list") {
+                showNotMatchesPanel = true
             }
             .font(.callout)
-
-            if showNotMatchesPanel {
-                NotMatchesView(profile: profile, embedded: true)
-                    .environmentObject(appModel)
-                    .frame(maxWidth: .infinity)
-            }
 
             Button("Clear “Not a match” decisions", role: .destructive) {
                 appModel.duplicates.clearNotDuplicateDecisions(profile: profile)
@@ -419,6 +416,19 @@ struct RootView: View {
 
             Button("Show index database in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([AppPaths.indexDBURL()])
+            }
+            .font(.callout)
+
+            Divider()
+
+            Text("Scans reuse the local cover index and only fetch new archives. Rebuild if covers changed on the server; it re-downloads every cover.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Button("Rebuild index and scan") {
+                section = .duplicates
+                collapseRunCard = false
+                appModel.duplicates.start(profile: profile, rebuildIndex: true)
             }
             .font(.callout)
         }

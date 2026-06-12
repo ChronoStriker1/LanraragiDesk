@@ -312,7 +312,8 @@ actor TitleNormalizationRunService {
 
         let failures = await failureCollector.values()
         let operationalFailures = failures.filter { $0.arcid != "plan" }
-        let successCount = max(0, selectedCount - operationalFailures.count)
+        // Count actual successes; items skipped by cancellation are neither.
+        let successCount = await counter.appliedCount()
         report(.init(
             stage: .finished,
             scanned: plan.snapshotCount,
@@ -898,6 +899,10 @@ private actor ProgressCounter {
 
     init(total: Int) {
         self.total = total
+    }
+
+    func appliedCount() -> Int {
+        applied
     }
 
     func markApplied() -> TitleNormalizationProgress {

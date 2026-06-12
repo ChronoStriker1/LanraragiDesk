@@ -132,7 +132,7 @@ public final class IndexStore: @unchecked Sendable {
             SELECT arcid_a, arcid_b, created_at
             FROM not_duplicates
             WHERE profile_id = ?
-            ORDER BY created_at DESC;
+            ORDER BY created_at DESC, arcid_a ASC, arcid_b ASC;
             """)
 
             stmtInsertNotDuplicate = try Self.prepare(opened, sql: """
@@ -385,19 +385,21 @@ public final class IndexStore: @unchecked Sendable {
         }
     }
 
-    public func addNotDuplicatePair(profileID: UUID, arcidA: String, arcidB: String) throws {
+    /// `createdAt` is milliseconds since the Unix epoch (unlike `profiles`/`index_state`,
+    /// which store seconds). Callers passing an explicit value must use milliseconds.
+    public func addNotDuplicatePair(profileID: UUID, arcidA: String, arcidB: String, createdAt: Int64? = nil) throws {
         try queue.sync {
             guard let db, let stmtInsertNotDuplicate else { throw IndexStoreError.notOpen }
             sqlite3_reset(stmtInsertNotDuplicate)
             sqlite3_clear_bindings(stmtInsertNotDuplicate)
 
             let pair = NotDuplicatePair(arcidA: arcidA, arcidB: arcidB)
-            let now = Int64(Date().timeIntervalSince1970)
+            let timestamp = createdAt ?? Int64(Date().timeIntervalSince1970 * 1000)
 
             try bindText(stmtInsertNotDuplicate, index: 1, value: profileID.uuidString)
             try bindText(stmtInsertNotDuplicate, index: 2, value: pair.arcidA)
             try bindText(stmtInsertNotDuplicate, index: 3, value: pair.arcidB)
-            sqlite3_bind_int64(stmtInsertNotDuplicate, 4, now)
+            sqlite3_bind_int64(stmtInsertNotDuplicate, 4, timestamp)
 
             try stepDone(stmtInsertNotDuplicate, db: db)
         }
@@ -430,18 +432,82 @@ public final class IndexStore: @unchecked Sendable {
     }
 
     /// Clears the fingerprint index state so the next scan re-indexes covers.
+    /// Pass a `profileID` to scope the reset to one profile; `nil` clears all profiles.
     /// By default, this keeps `not_duplicates` decisions.
-    public func resetFingerprintIndex(keepNotDuplicates: Bool = true) throws {
+    public func resetFingerprintIndex(profileID: UUID? = nil, keepNotDuplicates: Bool = true) throws {
         try queue.sync {
             guard let db else { throw IndexStoreError.notOpen }
-            try Self.exec(db, "DELETE FROM fingerprints;")
-            try Self.exec(db, "DELETE FROM index_state;")
-            if !keepNotDuplicates {
-                try Self.exec(db, "DELETE FROM not_duplicates;")
+            if let profileID {
+                try execForProfile(db, sql: "DELETE FROM fingerprints WHERE profile_id = ?;", profileID: profileID)
+                try execForProfile(db, sql: "DELETE FROM index_state WHERE profile_id = ?;", profileID: profileID)
+                if !keepNotDuplicates {
+                    try execForProfile(db, sql: "DELETE FROM not_duplicates WHERE profile_id = ?;", profileID: profileID)
+                }
+            } else {
+                try Self.exec(db, "DELETE FROM fingerprints;")
+                try Self.exec(db, "DELETE FROM index_state;")
+                if !keepNotDuplicates {
+                    try Self.exec(db, "DELETE FROM not_duplicates;")
+                }
             }
             // Best-effort: shrink WAL after large deletes.
             try? Self.exec(db, "PRAGMA wal_checkpoint(TRUNCATE);")
         }
+    }
+
+    /// Removes fingerprints for archives that no longer exist on the server.
+    /// Returns the number of arcids pruned.
+    @discardableResult
+    public func pruneFingerprints(profileID: UUID, keeping arcids: Set<String>) throws -> Int {
+        try queue.sync {
+            guard let db else { throw IndexStoreError.notOpen }
+
+            let selectStmt = try Self.prepare(db, sql: "SELECT DISTINCT arcid FROM fingerprints WHERE profile_id = ?;")
+            defer { sqlite3_finalize(selectStmt) }
+            try bindText(selectStmt, index: 1, value: profileID.uuidString)
+
+            var stale: [String] = []
+            while true {
+                let rc = sqlite3_step(selectStmt)
+                if rc == SQLITE_DONE { break }
+                if rc != SQLITE_ROW {
+                    throw IndexStoreError.sqlite(rc: rc, message: Self.errorMessage(db))
+                }
+                guard let c = sqlite3_column_text(selectStmt, 0) else { continue }
+                let arcid = String(cString: c)
+                if !arcids.contains(arcid) {
+                    stale.append(arcid)
+                }
+            }
+
+            if stale.isEmpty { return 0 }
+
+            let deleteStmt = try Self.prepare(db, sql: "DELETE FROM fingerprints WHERE profile_id = ? AND arcid = ?;")
+            defer { sqlite3_finalize(deleteStmt) }
+
+            try Self.exec(db, "BEGIN IMMEDIATE TRANSACTION;")
+            do {
+                for arcid in stale {
+                    sqlite3_reset(deleteStmt)
+                    sqlite3_clear_bindings(deleteStmt)
+                    try bindText(deleteStmt, index: 1, value: profileID.uuidString)
+                    try bindText(deleteStmt, index: 2, value: arcid)
+                    try stepDone(deleteStmt, db: db)
+                }
+                try Self.exec(db, "COMMIT;")
+            } catch {
+                try? Self.exec(db, "ROLLBACK;")
+                throw error
+            }
+            return stale.count
+        }
+    }
+
+    private func execForProfile(_ db: OpaquePointer, sql: String, profileID: UUID) throws {
+        let stmt = try Self.prepare(db, sql: sql)
+        defer { sqlite3_finalize(stmt) }
+        try bindText(stmt, index: 1, value: profileID.uuidString)
+        try stepDone(stmt, db: db)
     }
 
     private static func open(url: URL, db: inout OpaquePointer?) throws {
