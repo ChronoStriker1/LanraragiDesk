@@ -14,5 +14,11 @@ Package.resolved
 # App data (never commit)
 *.sqlite
 
+# Runtime/build output (never commit)
+.derived/
+dist/
+output/
+tmp/
+
 # Local/internal tracking
 CODEX_TODO.md
