@@ -263,14 +263,12 @@ final class DuplicateScanViewModel: ObservableObject {
             notMatches = pairs
             if pairs.isEmpty { return }
 
-            var existsByArcid: [String: Bool] = [:]
             var removedPairs = Set<IndexStore.NotDuplicatePair>()
 
             func prunePairs(containing arcid: String) throws -> Int {
                 let matchingPairs = pairs.filter { $0.arcidA == arcid || $0.arcidB == arcid }
                 if matchingPairs.isEmpty { return 0 }
 
-                notMatchRefreshMessage = "Removing stale Not a match pairs for \(arcid)..."
                 for pair in matchingPairs where !removedPairs.contains(pair) {
                     try store.removeNotDuplicatePair(profileID: profile.id, arcidA: pair.arcidA, arcidB: pair.arcidB)
                     removedPairs.insert(pair)
@@ -281,34 +279,41 @@ final class DuplicateScanViewModel: ObservableObject {
                 return matchingPairs.count
             }
 
-            func checkArchive(_ arcid: String) async throws -> Bool {
-                if let cached = existsByArcid[arcid] {
-                    return cached
-                }
-
-                let exists = try await archives.archiveExists(profile: profile, arcid: arcid)
-                existsByArcid[arcid] = exists
-                return exists
+            // Each pair references two arcids; dedupe so a shared arcid across many
+            // pairs is only checked once, and run the checks concurrently (ArchiveLoader
+            // internally caps in-flight requests, so this is safe to fan out).
+            var uniqueArcids: [String] = []
+            var seenArcids = Set<String>()
+            for pair in pairs {
+                if seenArcids.insert(pair.arcidA).inserted { uniqueArcids.append(pair.arcidA) }
+                if seenArcids.insert(pair.arcidB).inserted { uniqueArcids.append(pair.arcidB) }
             }
 
-            let leftSidePairs = Self.sortNotMatchesOldestFirst(pairs)
-            for (index, pair) in leftSidePairs.enumerated() {
-                guard pairs.contains(pair) else { continue }
-                notMatchRefreshMessage = "Checking left-side archives \(index + 1)/\(leftSidePairs.count)..."
-
-                if try await checkArchive(pair.arcidA) == false {
-                    _ = try prunePairs(containing: pair.arcidA)
+            let progress = NotMatchCheckProgress()
+            let archives = self.archives
+            let existsByArcid: [String: Bool] = try await withThrowingTaskGroup(
+                of: (String, Bool).self,
+                returning: [String: Bool].self
+            ) { group in
+                for arcid in uniqueArcids {
+                    group.addTask {
+                        let exists = try await archives.archiveExists(profile: profile, arcid: arcid)
+                        return (arcid, exists)
+                    }
                 }
+                var out: [String: Bool] = [:]
+                out.reserveCapacity(uniqueArcids.count)
+                for try await (arcid, exists) in group {
+                    out[arcid] = exists
+                    let checked = await progress.increment()
+                    notMatchRefreshMessage = "Checking archives \(checked)/\(uniqueArcids.count)..."
+                }
+                return out
             }
 
-            let rightSidePairs = Self.sortNotMatchesOldestFirst(pairs)
-            for (index, pair) in rightSidePairs.enumerated() {
-                guard pairs.contains(pair) else { continue }
-                notMatchRefreshMessage = "Checking right-side archives \(index + 1)/\(rightSidePairs.count)..."
-
-                if try await checkArchive(pair.arcidB) == false {
-                    _ = try prunePairs(containing: pair.arcidB)
-                }
+            for arcid in uniqueArcids where existsByArcid[arcid] == false {
+                notMatchRefreshMessage = "Removing stale Not a match pairs for \(arcid)..."
+                _ = try prunePairs(containing: arcid)
             }
 
             if !removedPairs.isEmpty {
@@ -491,11 +496,15 @@ final class DuplicateScanViewModel: ObservableObject {
         }
     }
 
-    private static func sortNotMatchesOldestFirst(_ pairs: [IndexStore.NotDuplicatePair]) -> [IndexStore.NotDuplicatePair] {
-        pairs.sorted { a, b in
-            if a.createdAt != b.createdAt { return a.createdAt < b.createdAt }
-            if a.arcidA != b.arcidA { return a.arcidA < b.arcidA }
-            return a.arcidB < b.arcidB
-        }
+}
+
+/// Tracks how many concurrent archive-existence checks have completed, so progress
+/// text can be reported while requests are in flight rather than only at the end.
+private actor NotMatchCheckProgress {
+    private var checked = 0
+
+    func increment() -> Int {
+        checked += 1
+        return checked
     }
 }

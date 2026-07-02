@@ -95,6 +95,11 @@ public struct FingerprintIndexer {
         var seenArcids = Set<String>()
         seenArcids.reserveCapacity(total)
 
+        // Preload once instead of issuing one "does this arcid exist?" query per archive.
+        let indexedArcids: Set<String> = config.skipExisting
+            ? (try store.loadIndexedArcids(profileID: profileID))
+            : []
+
         while true {
             try Task.checkCancellation()
             if page.data.isEmpty {
@@ -111,12 +116,9 @@ public struct FingerprintIndexer {
 
                     await counters.didSee()
 
-                    if config.skipExisting {
-                        let has = try store.hasAnyFingerprint(profileID: profileID, arcid: arcid)
-                        if has {
-                            await counters.didSkip()
-                            continue
-                        }
+                    if config.skipExisting, indexedArcids.contains(arcid) {
+                        await counters.didSkip()
+                        continue
                     }
 
                     await counters.didQueue()
@@ -132,10 +134,10 @@ public struct FingerprintIndexer {
                                 let fp = try Fingerprinter.compute(from: thumb)
                                 let now = Int64(Date().timeIntervalSince1970)
 
-                                for (kind, crop, hash) in fp.records {
+                                let records = fp.records.map { kind, crop, hash in
                                     // Store checksum once per archive to keep the DB smaller.
                                     let checksum = (kind == .dHash && crop == .full) ? fp.checksumSHA256 : Data()
-                                    try store.upsertFingerprint(.init(
+                                    return FingerprintRecord(
                                         profileID: profileID,
                                         arcid: arcid,
                                         kind: kind,
@@ -144,8 +146,9 @@ public struct FingerprintIndexer {
                                         aspectRatio: fp.aspectRatio,
                                         thumbChecksum: checksum,
                                         updatedAt: now
-                                    ))
+                                    )
                                 }
+                                try store.upsertFingerprints(records)
 
                                 await counters.didIndex()
                             } catch {

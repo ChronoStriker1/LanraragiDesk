@@ -57,7 +57,6 @@ public final class IndexStore: @unchecked Sendable {
     private var db: OpaquePointer?
 
     private var stmtUpsertProfile: OpaquePointer?
-    private var stmtGetHasAnyFingerprint: OpaquePointer?
     private var stmtUpsertFingerprint: OpaquePointer?
     private var stmtGetLastStart: OpaquePointer?
     private var stmtSetLastStart: OpaquePointer?
@@ -89,10 +88,6 @@ public final class IndexStore: @unchecked Sendable {
               base_url = excluded.base_url,
               lang = excluded.lang,
               updated_at = excluded.updated_at;
-            """)
-
-            stmtGetHasAnyFingerprint = try Self.prepare(opened, sql: """
-            SELECT 1 FROM fingerprints WHERE profile_id = ? AND arcid = ? LIMIT 1;
             """)
 
             stmtUpsertFingerprint = try Self.prepare(opened, sql: """
@@ -158,7 +153,6 @@ public final class IndexStore: @unchecked Sendable {
         queue.sync {
             [
                 stmtUpsertProfile,
-                stmtGetHasAnyFingerprint,
                 stmtUpsertFingerprint,
                 stmtGetLastStart,
                 stmtSetLastStart,
@@ -179,7 +173,6 @@ public final class IndexStore: @unchecked Sendable {
 
             db = nil
             stmtUpsertProfile = nil
-            stmtGetHasAnyFingerprint = nil
             stmtUpsertFingerprint = nil
             stmtGetLastStart = nil
             stmtSetLastStart = nil
@@ -208,43 +201,59 @@ public final class IndexStore: @unchecked Sendable {
         }
     }
 
-    public func hasAnyFingerprint(profileID: UUID, arcid: String) throws -> Bool {
+    /// Loads every arcid that already has at least one fingerprint row, so callers can
+    /// skip-check against an in-memory `Set` instead of issuing one query per archive.
+    public func loadIndexedArcids(profileID: UUID) throws -> Set<String> {
         try queue.sync {
-            guard let db, let stmtGetHasAnyFingerprint else { throw IndexStoreError.notOpen }
-            sqlite3_reset(stmtGetHasAnyFingerprint)
-            sqlite3_clear_bindings(stmtGetHasAnyFingerprint)
-            defer { sqlite3_reset(stmtGetHasAnyFingerprint) } // End the read transaction promptly (WAL checkpoint friendliness).
+            guard let db else { throw IndexStoreError.notOpen }
 
-            try bindText(stmtGetHasAnyFingerprint, index: 1, value: profileID.uuidString)
-            try bindText(stmtGetHasAnyFingerprint, index: 2, value: arcid)
+            let stmt = try Self.prepare(db, sql: "SELECT DISTINCT arcid FROM fingerprints WHERE profile_id = ?;")
+            defer { sqlite3_finalize(stmt) }
+            try bindText(stmt, index: 1, value: profileID.uuidString)
 
-            let rc = sqlite3_step(stmtGetHasAnyFingerprint)
-            if rc == SQLITE_ROW {
-                return true
+            var out = Set<String>()
+            while true {
+                let rc = sqlite3_step(stmt)
+                if rc == SQLITE_DONE { break }
+                if rc != SQLITE_ROW {
+                    throw IndexStoreError.sqlite(rc: rc, message: Self.errorMessage(db))
+                }
+                guard let c = sqlite3_column_text(stmt, 0) else { continue }
+                out.insert(String(cString: c))
             }
-            if rc == SQLITE_DONE {
-                return false
-            }
-            throw IndexStoreError.sqlite(rc: rc, message: Self.errorMessage(db))
+            return out
         }
     }
 
-    public func upsertFingerprint(_ fp: FingerprintRecord) throws {
+    /// Upserts all fingerprint records for one archive inside a single transaction,
+    /// instead of committing (and fsyncing) once per record.
+    public func upsertFingerprints(_ fps: [FingerprintRecord]) throws {
+        guard !fps.isEmpty else { return }
         try queue.sync {
             guard let db, let stmtUpsertFingerprint else { throw IndexStoreError.notOpen }
-            sqlite3_reset(stmtUpsertFingerprint)
-            sqlite3_clear_bindings(stmtUpsertFingerprint)
 
-            try bindText(stmtUpsertFingerprint, index: 1, value: fp.profileID.uuidString)
-            try bindText(stmtUpsertFingerprint, index: 2, value: fp.arcid)
-            sqlite3_bind_int(stmtUpsertFingerprint, 3, Int32(fp.kind.rawValue))
-            sqlite3_bind_int(stmtUpsertFingerprint, 4, Int32(fp.crop.rawValue))
-            sqlite3_bind_int64(stmtUpsertFingerprint, 5, Int64(bitPattern: fp.hash64))
-            sqlite3_bind_double(stmtUpsertFingerprint, 6, fp.aspectRatio)
-            try bindBlob(stmtUpsertFingerprint, index: 7, value: fp.thumbChecksum)
-            sqlite3_bind_int64(stmtUpsertFingerprint, 8, fp.updatedAt)
+            try Self.exec(db, "BEGIN IMMEDIATE TRANSACTION;")
+            do {
+                for fp in fps {
+                    sqlite3_reset(stmtUpsertFingerprint)
+                    sqlite3_clear_bindings(stmtUpsertFingerprint)
 
-            try stepDone(stmtUpsertFingerprint, db: db)
+                    try bindText(stmtUpsertFingerprint, index: 1, value: fp.profileID.uuidString)
+                    try bindText(stmtUpsertFingerprint, index: 2, value: fp.arcid)
+                    sqlite3_bind_int(stmtUpsertFingerprint, 3, Int32(fp.kind.rawValue))
+                    sqlite3_bind_int(stmtUpsertFingerprint, 4, Int32(fp.crop.rawValue))
+                    sqlite3_bind_int64(stmtUpsertFingerprint, 5, Int64(bitPattern: fp.hash64))
+                    sqlite3_bind_double(stmtUpsertFingerprint, 6, fp.aspectRatio)
+                    try bindBlob(stmtUpsertFingerprint, index: 7, value: fp.thumbChecksum)
+                    sqlite3_bind_int64(stmtUpsertFingerprint, 8, fp.updatedAt)
+
+                    try stepDone(stmtUpsertFingerprint, db: db)
+                }
+                try Self.exec(db, "COMMIT;")
+            } catch {
+                try? Self.exec(db, "ROLLBACK;")
+                throw error
+            }
         }
     }
 

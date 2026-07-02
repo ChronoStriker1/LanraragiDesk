@@ -267,47 +267,55 @@ actor TitleNormalizationRunService {
             return .init(successCount: 0, failures: [.init(arcid: "plan", reason: "Plan file missing.")])
         }
 
-        let selectedCount: Int
+        let items: [TitleNormalizationPlan.Item]
         do {
-            selectedCount = try countSelectedItems(in: planFileURL, onlyArcids: onlyArcids)
+            items = try loadSelectedPlanItems(in: planFileURL, onlyArcids: onlyArcids)
         } catch {
             report(.init(stage: .finished, scanned: plan.snapshotCount, candidates: plan.candidateCount, translated: plan.candidateCount, applied: 0, failed: 1, message: "Failed to read plan file."))
             return .init(successCount: 0, failures: [.init(arcid: "plan", reason: ErrorPresenter.short(error))])
         }
 
-        if selectedCount == 0 {
+        if items.isEmpty {
             report(.init(stage: .finished, scanned: plan.snapshotCount, candidates: plan.candidateCount, translated: plan.candidateCount, applied: 0, failed: 0, message: "Nothing to apply."))
             return .init(successCount: 0, failures: [])
         }
 
-        let counter = ProgressCounter(total: selectedCount)
+        let counter = ProgressCounter(total: items.count)
         let failureCollector = FailureCollector()
-        do {
-            try await forEachPlanItem(in: planFileURL, onlyArcids: onlyArcids) { item in
-                if Task.isCancelled {
-                    return
-                }
-                do {
-                    let latest = try await archives.metadata(profile: profile, arcid: item.arcid, forceRefresh: true)
-                    let summary = latest.summary ?? ""
-                    _ = try await archives.updateMetadata(
-                        profile: profile,
-                        arcid: item.arcid,
-                        title: item.englishTitle,
-                        tags: item.afterTags,
-                        summary: summary
-                    )
-                    let progress = await counter.markApplied()
-                    report(progress)
-                } catch {
-                    let reason = ErrorPresenter.short(error)
-                    let progress = await counter.markFailed(reason: reason)
-                    report(progress)
-                    await failureCollector.append(.init(arcid: item.arcid, reason: reason))
+        let queue = WorkQueue(items: items)
+        let workers = 4
+
+        await withTaskGroup(of: Void.self) { group in
+            for _ in 0..<workers {
+                group.addTask {
+                    while let item = await queue.next() {
+                        if Task.isCancelled {
+                            return
+                        }
+                        do {
+                            // Cached summary is fine here: `updateMetadata` re-fetches fresh
+                            // data from the server after the PUT, so a stale summary only
+                            // risks being overwritten with itself, not corrupting anything.
+                            let latest = try await archives.metadata(profile: profile, arcid: item.arcid)
+                            let summary = latest.summary ?? ""
+                            _ = try await archives.updateMetadata(
+                                profile: profile,
+                                arcid: item.arcid,
+                                title: item.englishTitle,
+                                tags: item.afterTags,
+                                summary: summary
+                            )
+                            let progress = await counter.markApplied()
+                            report(progress)
+                        } catch {
+                            let reason = ErrorPresenter.short(error)
+                            let progress = await counter.markFailed(reason: reason)
+                            report(progress)
+                            await failureCollector.append(.init(arcid: item.arcid, reason: reason))
+                        }
+                    }
                 }
             }
-        } catch {
-            await failureCollector.append(.init(arcid: "plan", reason: ErrorPresenter.short(error)))
         }
 
         let failures = await failureCollector.values()
@@ -719,34 +727,17 @@ actor TitleNormalizationRunService {
         return root.appendingPathComponent("run-\(UUID().uuidString).jsonl")
     }
 
-    private func countSelectedItems(in url: URL, onlyArcids: Set<String>?) throws -> Int {
-        var count = 0
+    private func loadSelectedPlanItems(in url: URL, onlyArcids: Set<String>?) throws -> [TitleNormalizationPlan.Item] {
+        var out: [TitleNormalizationPlan.Item] = []
         try withPlanFileReader(url: url) { reader in
             while let item = try reader.nextItem() {
                 if let onlyArcids, !onlyArcids.contains(item.arcid) {
                     continue
                 }
-                count += 1
+                out.append(item)
             }
         }
-        return count
-    }
-
-    private func forEachPlanItem(
-        in url: URL,
-        onlyArcids: Set<String>?,
-        operation: @escaping @Sendable (TitleNormalizationPlan.Item) async throws -> Void
-    ) async throws {
-        let reader = try PlanFileReader(url: url)
-        defer { try? reader.close() }
-
-        while let item = try reader.nextItem() {
-            try Task.checkCancellation()
-            if let onlyArcids, !onlyArcids.contains(item.arcid) {
-                continue
-            }
-            try await operation(item)
-        }
+        return out
     }
 
     private func withPlanFileReader<T>(url: URL, _ body: (PlanFileReader) throws -> T) throws -> T {

@@ -12,8 +12,8 @@ private enum CoverThumbCache {
         return c
     }()
 
-    nonisolated static func key(arcid: String, size: CGSize, contentInset: CGFloat, reloadToken: Int) -> NSString {
-        "\(arcid)|\(Int(size.width))x\(Int(size.height))|inset=\(Int(contentInset))|rev=\(reloadToken)" as NSString
+    nonisolated static func key(arcid: String, size: CGSize, contentInset: CGFloat, reloadToken: Int) -> String {
+        "\(arcid)|\(Int(size.width))x\(Int(size.height))|inset=\(Int(contentInset))|rev=\(reloadToken)"
     }
 }
 
@@ -93,7 +93,7 @@ struct CoverThumb: View {
         .task(id: "\(arcid)|\(reloadToken)") {
             // When switching between pairs, the view may be reused; reload for the new arcid.
             let cacheKey = CoverThumbCache.key(arcid: arcid, size: size, contentInset: contentInset, reloadToken: reloadToken)
-            if let cached = await MainActor.run(body: { CoverThumbCache.images.object(forKey: cacheKey) }) {
+            if let cached = await MainActor.run(body: { CoverThumbCache.images.object(forKey: cacheKey as NSString) }) {
                 image = cached
                 errorText = nil
                 return
@@ -102,14 +102,20 @@ struct CoverThumb: View {
             image = nil
             errorText = nil
             task?.cancel()
-            task = Task {
+            let maxPixelSize = Int(max(size.width, size.height) * 2.5)
+            task = Task.detached(priority: .userInitiated) { [profile, arcid, thumbnails, cacheKey] in
                 do {
-                    let img = try await fetch()
+                    let bytesCount: Int
+                    let img: NSImage?
+                    do {
+                        let bytes = try await thumbnails.thumbnailBytes(profile: profile, arcid: arcid)
+                        bytesCount = bytes.count
+                        img = ImageDownsampler.thumbnail(from: bytes, maxPixelSize: maxPixelSize)
+                    }
                     await MainActor.run {
                         image = img
                         if let img {
-                            let cost = img.tiffRepresentation?.count ?? 1
-                            CoverThumbCache.images.setObject(img, forKey: cacheKey, cost: cost)
+                            CoverThumbCache.images.setObject(img, forKey: cacheKey as NSString, cost: bytesCount)
                         }
                     }
                 } catch {
@@ -126,11 +132,6 @@ struct CoverThumb: View {
             task?.cancel()
             task = nil
         }
-    }
-
-    private func fetch() async throws -> NSImage? {
-        let bytes = try await thumbnails.thumbnailBytes(profile: profile, arcid: arcid)
-        return NSImage(data: bytes)
     }
 }
 
