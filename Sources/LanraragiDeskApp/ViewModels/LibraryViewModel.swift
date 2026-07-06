@@ -30,6 +30,8 @@ final class LibraryViewModel: ObservableObject {
     @Published var newOnly: Bool = false
     @Published var untaggedOnly: Bool = false
     @Published var categoryID: String = ""
+    /// When enabled (server default), Tankoubons appear in results in place of their member archives.
+    @Published var groupTanks: Bool = true
 
     @Published private(set) var categories: [LanraragiKit.Category] = []
     @Published private(set) var categoriesStatusText: String?
@@ -202,7 +204,8 @@ final class LibraryViewModel: ObservableObject {
             newOnly: newOnly,
             untaggedOnly: untaggedOnly,
             sortBy: sortBy,
-            order: order
+            order: order,
+            groupByTanks: groupTanks
         )
     }
 

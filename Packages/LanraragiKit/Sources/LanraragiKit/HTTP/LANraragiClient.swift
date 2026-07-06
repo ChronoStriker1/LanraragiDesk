@@ -183,17 +183,36 @@ public final class LANraragiClient: Sendable {
         newOnly: Bool = false,
         untaggedOnly: Bool = false,
         sortBy: String = "title",
-        order: String = "asc"
+        order: String = "asc",
+        groupByTanks: Bool = true,
+        hideCompleted: Bool = false
     ) async throws -> ArchiveSearch {
-        let queryItems: [URLQueryItem] = [
+        var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "start", value: String(start)),
-            URLQueryItem(name: "filter", value: filter),
-            URLQueryItem(name: "category", value: category),
-            URLQueryItem(name: "newonly", value: newOnly ? "true" : "false"),
-            URLQueryItem(name: "untaggedonly", value: untaggedOnly ? "true" : "false"),
             URLQueryItem(name: "sortby", value: sortBy),
             URLQueryItem(name: "order", value: order),
         ]
+        // Servers with strict OpenAPI validation reject empty values (e.g. category
+        // has a minimum length), so only send params that carry a real value.
+        if !filter.isEmpty {
+            queryItems.append(URLQueryItem(name: "filter", value: filter))
+        }
+        if !category.isEmpty {
+            queryItems.append(URLQueryItem(name: "category", value: category))
+        }
+        if newOnly {
+            queryItems.append(URLQueryItem(name: "newonly", value: "true"))
+        }
+        if untaggedOnly {
+            queryItems.append(URLQueryItem(name: "untaggedonly", value: "true"))
+        }
+        // Only send non-default values so older servers never see unknown params.
+        if !groupByTanks {
+            queryItems.append(URLQueryItem(name: "groupby_tanks", value: "false"))
+        }
+        if hideCompleted {
+            queryItems.append(URLQueryItem(name: "hidecompleted", value: "true"))
+        }
         return try await getJSON(path: "/api/search", queryItems: queryItems)
     }
 
@@ -205,14 +224,25 @@ public final class LANraragiClient: Sendable {
         untaggedOnly: Bool = false,
         groupByTanks: Bool = true
     ) async throws -> RandomArchiveSearch {
-        let queryItems: [URLQueryItem] = [
-            URLQueryItem(name: "filter", value: filter),
-            URLQueryItem(name: "category", value: category),
+        var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "count", value: String(max(1, count))),
-            URLQueryItem(name: "newonly", value: newOnly ? "true" : "false"),
-            URLQueryItem(name: "untaggedonly", value: untaggedOnly ? "true" : "false"),
-            URLQueryItem(name: "groupby_tanks", value: groupByTanks ? "true" : "false"),
         ]
+        // Same as search(): omit empty/default params to satisfy strict validators.
+        if !filter.isEmpty {
+            queryItems.append(URLQueryItem(name: "filter", value: filter))
+        }
+        if !category.isEmpty {
+            queryItems.append(URLQueryItem(name: "category", value: category))
+        }
+        if newOnly {
+            queryItems.append(URLQueryItem(name: "newonly", value: "true"))
+        }
+        if untaggedOnly {
+            queryItems.append(URLQueryItem(name: "untaggedonly", value: "true"))
+        }
+        if !groupByTanks {
+            queryItems.append(URLQueryItem(name: "groupby_tanks", value: "false"))
+        }
         return try await getJSON(path: "/api/search/random", queryItems: queryItems)
     }
 
@@ -369,17 +399,240 @@ public final class LANraragiClient: Sendable {
         try await getJSON(path: "/api/minion/\(job)")
     }
 
+    // MARK: - Tankoubons
+
+    public func listTankoubons(page: Int? = nil) async throws -> TankoubonList {
+        var items: [URLQueryItem] = []
+        if let page {
+            items.append(URLQueryItem(name: "page", value: String(page)))
+        }
+        return try await getJSON(path: "/api/tankoubons", queryItems: items)
+    }
+
+    /// Creates a Tankoubon, or renames an existing one when `tankID` is provided.
+    /// Returns the created/updated Tankoubon ID.
+    @discardableResult
+    public func createTankoubon(name: String, tankID: String? = nil) async throws -> String {
+        var items = [URLQueryItem(name: "name", value: name)]
+        if let tankID, !tankID.isEmpty {
+            items.append(URLQueryItem(name: "tankid", value: tankID))
+        }
+
+        let url = try makeURL(path: "/api/tankoubons")
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        applyDefaultHeaders(to: &req)
+        req.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        req.httpBody = makeFormBody(items)
+
+        let data = try await performData(req)
+        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard let id = obj?["tankoubon_id"] as? String, !id.isEmpty else {
+            let err = NSError(
+                domain: "LANraragiClient",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Unable to parse tankoubon_id from response."]
+            )
+            throw LANraragiError.decoding(err)
+        }
+        return id
+    }
+
+    public func getTankoubon(id: String) async throws -> Tankoubon {
+        try await getJSON(path: "/api/tankoubons/\(id)")
+    }
+
+    /// `page` of -1 returns all archives with full metadata.
+    public func getTankoubonFull(id: String, page: Int = -1) async throws -> TankoubonFullResponse {
+        let items = [URLQueryItem(name: "page", value: String(page))]
+        return try await getJSON(path: "/api/tankoubons/\(id)/full", queryItems: items)
+    }
+
+    /// Updates a Tankoubon's contents and/or metadata.
+    /// Pass only the pieces you want changed: `archives` replaces the ordered contents,
+    /// metadata fields replace their current values (tags append when `appendTags` is true).
+    public func updateTankoubon(
+        id: String,
+        archives: [String]? = nil,
+        name: String? = nil,
+        summary: String? = nil,
+        tags: String? = nil,
+        appendTags: Bool = false
+    ) async throws {
+        var body: [String: Any] = [:]
+        if let archives {
+            body["archives"] = archives
+        }
+        var metadata: [String: Any] = [:]
+        if let name { metadata["name"] = name }
+        if let summary { metadata["summary"] = summary }
+        if let tags {
+            metadata["tags"] = tags
+            if appendTags { metadata["append"] = true }
+        }
+        if !metadata.isEmpty {
+            body["metadata"] = metadata
+        }
+
+        let url = try makeURL(path: "/api/tankoubons/\(id)")
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        applyDefaultHeaders(to: &req)
+        req.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        try await performNoContent(req)
+    }
+
+    public func deleteTankoubon(id: String) async throws {
+        let url = try makeURL(path: "/api/tankoubons/\(id)")
+        var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+        applyDefaultHeaders(to: &req)
+        try await performNoContent(req)
+    }
+
+    /// Appends an archive at the final position of a Tankoubon.
+    public func addArchiveToTankoubon(tankID: String, arcid: String) async throws {
+        let url = try makeURL(path: "/api/tankoubons/\(tankID)/\(arcid)")
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        applyDefaultHeaders(to: &req)
+        try await performNoContent(req)
+    }
+
+    public func removeArchiveFromTankoubon(tankID: String, arcid: String) async throws {
+        let url = try makeURL(path: "/api/tankoubons/\(tankID)/\(arcid)")
+        var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+        applyDefaultHeaders(to: &req)
+        try await performNoContent(req)
+    }
+
+    /// Sets the tank cover from a global 1-indexed page number spanning all archives in order.
+    public func updateTankoubonThumbnail(tankID: String, page: Int) async throws {
+        let items = [URLQueryItem(name: "page", value: String(max(1, page)))]
+        let url = try makeURL(path: "/api/tankoubons/\(tankID)/thumbnail", queryItems: items)
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        applyDefaultHeaders(to: &req)
+        try await performNoContent(req)
+    }
+
+    /// Updates server-side reading progress. `page` is global across all archives in the tank.
+    public func updateTankoubonProgress(tankID: String, page: Int) async throws {
+        let url = try makeURL(path: "/api/tankoubons/\(tankID)/progress/\(max(1, page))")
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        applyDefaultHeaders(to: &req)
+        try await performNoContent(req)
+    }
+
+    /// Returns the IDs of all Tankoubons containing the given archive.
+    public func getArchiveTankoubons(arcid: String) async throws -> [String] {
+        let data = try await getData(path: "/api/archives/\(arcid)/tankoubons")
+        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        return (obj?["tankoubons"] as? [String]) ?? []
+    }
+
+    // MARK: - Stamps
+
+    /// Returns the 1-indexed page numbers that have at least one stamp.
+    public func getStampedPages(arcid: String) async throws -> [Int] {
+        let data = try await getData(path: "/api/archives/\(arcid)/stamps")
+        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard let arr = obj?["result"] as? [Any] else { return [] }
+        return arr.compactMap { item in
+            if let i = item as? Int { return i }
+            if let n = item as? NSNumber { return n.intValue }
+            if let s = item as? String { return Int(s) }
+            return nil
+        }.sorted()
+    }
+
+    public func getStamps(arcid: String, page: Int) async throws -> [Stamp] {
+        struct Wrapper: Decodable {
+            var result: [Stamp]?
+        }
+        let data = try await getData(path: "/api/archives/\(arcid)/stamps/\(page)")
+        do {
+            let wrapper = try JSONDecoder().decode(Wrapper.self, from: data)
+            return wrapper.result ?? []
+        } catch {
+            throw LANraragiError.decoding(error)
+        }
+    }
+
+    /// Adds a stamp to a page. `position` is `"x,y"` normalized 0–100. Returns the new stamp ID.
+    @discardableResult
+    public func addStamp(arcid: String, page: Int, content: String, position: String) async throws -> String {
+        let items = [
+            URLQueryItem(name: "content", value: content),
+            URLQueryItem(name: "position", value: position),
+        ]
+        let url = try makeURL(path: "/api/archives/\(arcid)/stamps/\(page)", queryItems: items)
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        applyDefaultHeaders(to: &req)
+
+        let data = try await performData(req)
+        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        return (obj?["stamp_id"] as? String) ?? ""
+    }
+
+    public func getStamp(id: String) async throws -> Stamp {
+        struct Wrapper: Decodable {
+            var result: Stamp
+        }
+        let data = try await getData(path: "/api/stamps/\(id)")
+        do {
+            return try JSONDecoder().decode(Wrapper.self, from: data).result
+        } catch {
+            throw LANraragiError.decoding(error)
+        }
+    }
+
+    public func updateStamp(id: String, content: String? = nil, position: String? = nil) async throws {
+        var items: [URLQueryItem] = []
+        if let content {
+            items.append(URLQueryItem(name: "content", value: content))
+        }
+        if let position {
+            items.append(URLQueryItem(name: "position", value: position))
+        }
+        let url = try makeURL(path: "/api/stamps/\(id)", queryItems: items)
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        applyDefaultHeaders(to: &req)
+        try await performNoContent(req)
+    }
+
+    public func deleteStamp(id: String) async throws {
+        let url = try makeURL(path: "/api/stamps/\(id)")
+        var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+        applyDefaultHeaders(to: &req)
+        try await performNoContent(req)
+    }
+
     public func getArchiveThumbnail(
         arcid: String,
         noFallback: Bool = true,
         page: Int? = nil
     ) async throws -> ThumbnailResponse {
         var queryItems = [URLQueryItem(name: "no_fallback", value: noFallback ? "true" : "false")]
-        if let page {
-            queryItems.append(URLQueryItem(name: "page", value: String(page)))
+        // Tankoubon thumbnails live under a different route and take no page param.
+        let path: String
+        if LANraragiID.isTankoubon(arcid) {
+            path = "/api/tankoubons/\(arcid)/thumbnail"
+        } else {
+            path = "/api/archives/\(arcid)/thumbnail"
+            if let page {
+                queryItems.append(URLQueryItem(name: "page", value: String(page)))
+            }
         }
 
-        let url = try makeURL(path: "/api/archives/\(arcid)/thumbnail", queryItems: queryItems)
+        let url = try makeURL(path: path, queryItems: queryItems)
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
         applyDefaultHeaders(to: &req)
@@ -556,6 +809,29 @@ public final class LANraragiClient: Sendable {
         } catch {
             throw LANraragiError.decoding(error)
         }
+    }
+
+    private func performData(_ req: URLRequest) async throws -> Data {
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await session.data(for: req)
+        } catch {
+            throw LANraragiError.transport(error)
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw LANraragiError.invalidResponse
+        }
+
+        if http.statusCode == 401 {
+            throw LANraragiError.unauthorized
+        }
+
+        guard (200...299).contains(http.statusCode) else {
+            throw LANraragiError.httpStatus(http.statusCode, body: data)
+        }
+
+        return data
     }
 
     private func performNoContent(_ req: URLRequest) async throws {

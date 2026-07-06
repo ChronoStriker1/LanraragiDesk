@@ -10,6 +10,7 @@ final class AppModel: ObservableObject {
         let query: String
     }
 
+
     let profileStore: ProfileStore
     let savedQueryStore: SavedQueryStore
     @Published var selectedProfileID: Profile.ID?

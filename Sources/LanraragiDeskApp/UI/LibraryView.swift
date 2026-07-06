@@ -19,6 +19,8 @@ struct LibraryView: View {
     @State private var tagSuggestionsLoading: Bool = false
     @State private var suggestionTask: Task<Void, Never>?
     @State private var editingMeta: EditorRoute?
+    @State private var tankPicker: TankPickerRoute?
+    @State private var tankEditor: TankEditorRoute?
     @State private var hoveringArchiveResultsArea: Bool = false
     @FocusState private var searchFocused: Bool
 
@@ -32,6 +34,16 @@ struct LibraryView: View {
     struct EditorRoute: Identifiable, Hashable {
         let arcid: String
         var id: String { arcid }
+    }
+
+    struct TankPickerRoute: Identifiable, Hashable {
+        let arcids: [String]
+        var id: String { arcids.joined(separator: ",") }
+    }
+
+    struct TankEditorRoute: Identifiable, Hashable {
+        let tankID: String
+        var id: String { tankID }
     }
 
     var body: some View {
@@ -88,6 +100,26 @@ struct LibraryView: View {
             )
             .environmentObject(appModel)
         }
+        .sheet(item: $tankPicker) { route in
+            TankoubonPickerView(
+                profile: profile,
+                arcids: route.arcids,
+                onAdded: { tankID in
+                    // Open the editor right away so the new/updated tank can be reviewed.
+                    tankEditor = TankEditorRoute(tankID: tankID)
+                    refreshLibrary()
+                }
+            )
+            .environmentObject(appModel)
+        }
+        .sheet(item: $tankEditor) { route in
+            TankoubonEditorSheet(
+                profile: profile,
+                tankID: route.tankID,
+                onChanged: { refreshLibrary() }
+            )
+            .environmentObject(appModel)
+        }
         .onAppear {
             if queryDraft.isEmpty {
                 queryDraft = vm.query
@@ -108,6 +140,9 @@ struct LibraryView: View {
             refreshLibrary()
         }
         .onChange(of: vm.categoryID) { _, _ in
+            refreshLibrary()
+        }
+        .onChange(of: vm.groupTanks) { _, _ in
             refreshLibrary()
         }
         .onReceive(appModel.$librarySearchRequest) { request in
@@ -161,6 +196,14 @@ struct LibraryView: View {
                     Task { await selectAllResults() }
                 }
                 .disabled(vm.isLoading || vm.isLoadingAll || vm.arcids.isEmpty)
+
+                Button("Add to Tankoubon…") {
+                    let ids = appModel.selection.arcids.filter { !LANraragiID.isTankoubon($0) }.sorted()
+                    guard !ids.isEmpty else { return }
+                    tankPicker = TankPickerRoute(arcids: ids)
+                }
+                .disabled(appModel.selection.count == 0)
+                .help("Add the selected archives to a Tankoubon")
 
                 Button("Clear Selection") {
                     appModel.selection.clear()
@@ -225,6 +268,8 @@ struct LibraryView: View {
                         HStack(spacing: 16) {
                             Toggle("New only", isOn: $vm.newOnly)
                             Toggle("Untagged only", isOn: $vm.untaggedOnly)
+                            Toggle("Group Tankoubons", isOn: $vm.groupTanks)
+                                .help("Show Tankoubons in results instead of their member archives (requires a server with Tankoubon support)")
                             Spacer()
                         }
 
@@ -395,6 +440,11 @@ struct LibraryView: View {
     }
 
     private func openReader(_ arcid: String) {
+        // Tankoubons aren't directly readable; open their editor instead.
+        if LANraragiID.isTankoubon(arcid) {
+            tankEditor = TankEditorRoute(tankID: arcid)
+            return
+        }
         appModel.setActiveReader(profileID: profile.id, arcid: arcid)
         openWindow(id: "reader")
     }
@@ -448,19 +498,36 @@ struct LibraryView: View {
                         )
                             .environmentObject(appModel)
                             .contextMenu {
-                                Button("Open Reader") {
-                                    openReader(arcid)
-                                }
-                                Button("Open in Browser") {
-                                    openArchiveInBrowser(arcid)
-                                }
-                                Button("Edit Metadata…") {
-                                    editingMeta = EditorRoute(arcid: arcid)
-                                }
-                                Divider()
-                                Button("Copy Archive ID") {
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(arcid, forType: .string)
+                                if LANraragiID.isTankoubon(arcid) {
+                                    Button("Edit Tankoubon…") {
+                                        tankEditor = TankEditorRoute(tankID: arcid)
+                                    }
+                                    Button("Open in Browser") {
+                                        openArchiveInBrowser(arcid)
+                                    }
+                                    Divider()
+                                    Button("Copy Tankoubon ID") {
+                                        NSPasteboard.general.clearContents()
+                                        NSPasteboard.general.setString(arcid, forType: .string)
+                                    }
+                                } else {
+                                    Button("Open Reader") {
+                                        openReader(arcid)
+                                    }
+                                    Button("Open in Browser") {
+                                        openArchiveInBrowser(arcid)
+                                    }
+                                    Button("Edit Metadata…") {
+                                        editingMeta = EditorRoute(arcid: arcid)
+                                    }
+                                    Button("Add to Tankoubon…") {
+                                        tankPicker = TankPickerRoute(arcids: [arcid])
+                                    }
+                                    Divider()
+                                    Button("Copy Archive ID") {
+                                        NSPasteboard.general.clearContents()
+                                        NSPasteboard.general.setString(arcid, forType: .string)
+                                    }
                                 }
                             }
                             .onAppear {
@@ -517,14 +584,20 @@ struct LibraryView: View {
     private var libraryTable: some View {
         Table(sortedListRows, sortOrder: $listSortOrder) {
             TableColumn("Select") { row in
-                Button {
-                    appModel.selection.toggle(row.arcid)
-                } label: {
-                    Image(systemName: appModel.selection.contains(row.arcid) ? "checkmark.square.fill" : "square")
-                        .foregroundStyle(appModel.selection.contains(row.arcid) ? .green : .secondary)
+                if LANraragiID.isTankoubon(row.arcid) {
+                    Image(systemName: "rectangle.stack")
+                        .foregroundStyle(.secondary)
+                        .help("Tankoubon")
+                } else {
+                    Button {
+                        appModel.selection.toggle(row.arcid)
+                    } label: {
+                        Image(systemName: appModel.selection.contains(row.arcid) ? "checkmark.square.fill" : "square")
+                            .foregroundStyle(appModel.selection.contains(row.arcid) ? .green : .secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Select for batch operations")
                 }
-                .buttonStyle(.plain)
-                .help("Select for batch operations")
             }
             .width(min: 54, ideal: 54, max: 54)
 
@@ -556,19 +629,36 @@ struct LibraryView: View {
                     }
                 }
                 .contextMenu {
-                    Button("Open Reader") {
-                        openReader(row.arcid)
-                    }
-                    Button("Open in Browser") {
-                        openArchiveInBrowser(row.arcid)
-                    }
-                    Button("Edit Metadata…") {
-                        editingMeta = EditorRoute(arcid: row.arcid)
-                    }
-                    Divider()
-                    Button("Copy Archive ID") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(row.arcid, forType: .string)
+                    if LANraragiID.isTankoubon(row.arcid) {
+                        Button("Edit Tankoubon…") {
+                            tankEditor = TankEditorRoute(tankID: row.arcid)
+                        }
+                        Button("Open in Browser") {
+                            openArchiveInBrowser(row.arcid)
+                        }
+                        Divider()
+                        Button("Copy Tankoubon ID") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(row.arcid, forType: .string)
+                        }
+                    } else {
+                        Button("Open Reader") {
+                            openReader(row.arcid)
+                        }
+                        Button("Open in Browser") {
+                            openArchiveInBrowser(row.arcid)
+                        }
+                        Button("Edit Metadata…") {
+                            editingMeta = EditorRoute(arcid: row.arcid)
+                        }
+                        Button("Add to Tankoubon…") {
+                            tankPicker = TankPickerRoute(arcids: [row.arcid])
+                        }
+                        Divider()
+                        Button("Copy Archive ID") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(row.arcid, forType: .string)
+                        }
                     }
                 }
             }
@@ -845,7 +935,10 @@ private struct LibraryCard: View {
         ZStack(alignment: .bottom) {
             CoverThumb(profile: profile, arcid: arcid, thumbnails: appModel.thumbnails, size: Self.coverSize, showsBorder: false)
                 .overlay(alignment: .topLeading) {
-                    if meta?.isnew == true {
+                    if LANraragiID.isTankoubon(arcid) {
+                        CoverBadge(text: "TANK", background: .blue.opacity(0.6))
+                            .padding(8)
+                    } else if meta?.isnew == true {
                         CoverBadge(text: "NEW", background: .green.opacity(0.55))
                             .padding(8)
                     }
@@ -910,7 +1003,9 @@ private struct LibraryCard: View {
                 .strokeBorder(.white.opacity(0.10), lineWidth: 1)
         }
         .overlay(alignment: .topLeading) {
-            if hoveringCover || hoveringSelectionControl || appModel.selection.contains(arcid) {
+            // Tanks aren't valid batch-operation targets, so they can't be selected.
+            if !LANraragiID.isTankoubon(arcid),
+               hoveringCover || hoveringSelectionControl || appModel.selection.contains(arcid) {
                 // Keep selection as a separate button so the cover's single-click open stays reliable.
                 Button {
                     appModel.selection.toggle(arcid)

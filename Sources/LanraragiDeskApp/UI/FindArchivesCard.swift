@@ -312,7 +312,8 @@ struct FindArchivesCard: View {
                     newOnly: compiled.newOnly,
                     untaggedOnly: compiled.untaggedOnly,
                     sortBy: "title",
-                    order: "asc"
+                    order: "asc",
+                    groupByTanks: false
                 )
                 let ids = resp.data.map(\.arcid)
                 allIDs.append(contentsOf: ids)

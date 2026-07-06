@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import LanraragiKit
 
 struct ReaderView: View {
     @EnvironmentObject private var appModel: AppModel
@@ -28,6 +29,26 @@ struct ReaderView: View {
     @State private var timerTask: Task<Void, Never>?
     @State private var loadTask: Task<Void, Never>?
     @State private var prefetchTask: Task<Void, Never>?
+
+    @AppStorage("reader.showStamps") private var showStamps: Bool = true
+    @State private var currentStamps: [Stamp] = []
+    @State private var stampedPages: Set<Int> = []
+    @State private var stampsSupported: Bool = true
+    @State private var addStampMode: Bool = false
+    @State private var stampEditor: StampEditorRoute?
+    @State private var stampsTask: Task<Void, Never>?
+
+    enum StampEditorRoute: Identifiable {
+        case new(x: Double, y: Double)
+        case edit(Stamp)
+
+        var id: String {
+            switch self {
+            case .new(let x, let y): return "new-\(x)-\(y)"
+            case .edit(let stamp): return "edit-\(stamp.id)"
+            }
+        }
+    }
     // Reserved for future in-reader UI toggles.
     // (Toolbar items should remain stable; avoid hiding controls unexpectedly.)
 
@@ -53,6 +74,7 @@ struct ReaderView: View {
                         arcid: route.arcid,
                         pages: pages,
                         currentIndex: pageIndex,
+                        stampedPages: showStamps ? stampedPages : [],
                         onJump: { idx in
                             pageIndex = idx
                             restartAutoAdvance(reason: .userInteraction)
@@ -89,6 +111,8 @@ struct ReaderView: View {
 
             ToolbarItemGroup(placement: .primaryAction) {
                 autoAdvanceToolbarControl
+
+                stampsToolbarMenu
 
                 Menu {
                     Toggle("Two-page spread", isOn: $twoPageSpread)
@@ -161,7 +185,19 @@ struct ReaderView: View {
         }
         .onChange(of: pageIndex) { _, _ in
             loadCurrentPage()
+            reloadStamps()
             restartAutoAdvance(reason: .pageChanged)
+        }
+        .sheet(item: $stampEditor) { route in
+            StampEditorSheet(
+                route: route,
+                onSave: { text in commitStampEdit(route: route, content: text) },
+                onDelete: {
+                    if case .edit(let stamp) = route {
+                        removeStamp(stamp)
+                    }
+                }
+            )
         }
         .onChange(of: twoPageSpread) { _, _ in
             loadCurrentPage()
@@ -191,7 +227,37 @@ struct ReaderView: View {
             timerTask?.cancel()
             loadTask?.cancel()
             prefetchTask?.cancel()
+            stampsTask?.cancel()
         }
+    }
+
+    private var stampsToolbarMenu: some View {
+        Menu {
+            Toggle("Show stamps", isOn: $showStamps)
+
+            Toggle("Add stamp on click", isOn: $addStampMode)
+                .disabled(twoPageSpread || !stampsSupported)
+
+            if twoPageSpread {
+                Text("Stamps are hidden in two-page spread")
+            }
+
+            if !currentStamps.isEmpty {
+                Divider()
+                ForEach(currentStamps) { stamp in
+                    Menu(stamp.content.isEmpty ? "(no text)" : stamp.content) {
+                        Button("Edit…") { stampEditor = .edit(stamp) }
+                        Button("Delete", role: .destructive) { removeStamp(stamp) }
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: currentStamps.isEmpty ? "seal" : "seal.fill")
+                .imageScale(.medium)
+                .foregroundStyle(addStampMode ? Color.accentColor : Color.primary)
+        }
+        .help(stampsSupported ? "Stamps on this page (\(currentStamps.count))" : "Stamps require a newer LANraragi server")
+        .disabled(pages.isEmpty || !stampsSupported)
     }
 
     private var readingDirection: ReaderDirection {
@@ -306,7 +372,15 @@ struct ReaderView: View {
                     pixelSizeB: twoPageSpread ? imageBPixelSize : nil,
                     fitMode: fitMode,
                     zoomPercent: zoomPercent,
-                    rtl: readingDirection == .rtl
+                    rtl: readingDirection == .rtl,
+                    stamps: (showStamps && !twoPageSpread) ? currentStamps : [],
+                    addStampMode: addStampMode && !twoPageSpread,
+                    onAddStamp: { x, y in
+                        stampEditor = .new(x: x, y: y)
+                    },
+                    onSelectStamp: { stamp in
+                        stampEditor = .edit(stamp)
+                    }
                 )
                 .padding(10)
             } else {
@@ -342,7 +416,8 @@ struct ReaderView: View {
                     }
                 }
         }
-        .allowsHitTesting(!pages.isEmpty)
+        // In add-stamp mode clicks must reach the page image, not turn pages.
+        .allowsHitTesting(!pages.isEmpty && !addStampMode)
         .help("Click to change pages")
     }
 
@@ -435,6 +510,11 @@ struct ReaderView: View {
         timerTask?.cancel()
         loadTask?.cancel()
         prefetchTask?.cancel()
+        stampsTask?.cancel()
+        currentStamps = []
+        stampedPages = []
+        stampsSupported = true
+        addStampMode = false
 
         guard let profile = currentProfile else {
             errorText = "Profile not found"
@@ -446,10 +526,78 @@ struct ReaderView: View {
             pages = urls
             pageIndex = 0
             loadCurrentPage()
+            reloadStamps()
             restartAutoAdvance(reason: .pageChanged)
         } catch {
             if Task.isCancelled { return }
             errorText = ErrorPresenter.short(error)
+        }
+    }
+
+    /// Fetches the stamped-pages summary and the stamps for the current page.
+    private func reloadStamps() {
+        stampsTask?.cancel()
+        currentStamps = []
+
+        guard stampsSupported, let profile = currentProfile, !pages.isEmpty else { return }
+        let page = pageIndex + 1
+
+        stampsTask = Task {
+            do {
+                let stamps = try await appModel.archives.stamps(profile: profile, arcid: route.arcid, page: page)
+                if Task.isCancelled { return }
+                currentStamps = stamps
+
+                let stamped = try await appModel.archives.stampedPages(profile: profile, arcid: route.arcid)
+                if Task.isCancelled { return }
+                stampedPages = Set(stamped)
+            } catch let LANraragiError.httpStatus(code, _) where code == 404 {
+                // Older server without the Stamp API; stop asking.
+                stampsSupported = false
+            } catch {
+                // Stamps are non-critical; don't surface transient failures over the page.
+            }
+        }
+    }
+
+    private func commitStampEdit(route editorRoute: StampEditorRoute, content: String) {
+        guard let profile = currentProfile else { return }
+        let page = pageIndex + 1
+
+        Task {
+            do {
+                switch editorRoute {
+                case .new(let x, let y):
+                    let position = Stamp.positionString(x: x, y: y)
+                    try await appModel.archives.addStamp(
+                        profile: profile,
+                        arcid: route.arcid,
+                        page: page,
+                        content: content,
+                        position: position
+                    )
+                    appModel.activity.add(.init(kind: .action, title: "Added stamp", detail: "Page \(page)", component: "Reader"))
+                case .edit(let stamp):
+                    try await appModel.archives.updateStamp(profile: profile, stampID: stamp.id, content: content)
+                    appModel.activity.add(.init(kind: .action, title: "Updated stamp", detail: stamp.id, component: "Reader"))
+                }
+                reloadStamps()
+            } catch {
+                appModel.activity.add(.init(kind: .error, title: "Stamp save failed", detail: String(describing: error), component: "Reader"))
+            }
+        }
+    }
+
+    private func removeStamp(_ stamp: Stamp) {
+        guard let profile = currentProfile else { return }
+        Task {
+            do {
+                try await appModel.archives.deleteStamp(profile: profile, stampID: stamp.id)
+                appModel.activity.add(.init(kind: .action, title: "Deleted stamp", detail: stamp.id, component: "Reader"))
+                reloadStamps()
+            } catch {
+                appModel.activity.add(.init(kind: .error, title: "Stamp delete failed", detail: String(describing: error), component: "Reader"))
+            }
         }
     }
 
@@ -697,6 +845,10 @@ private struct ReaderCanvas: View {
     let fitMode: ReaderFitMode
     let zoomPercent: Double
     let rtl: Bool
+    var stamps: [Stamp] = []
+    var addStampMode: Bool = false
+    var onAddStamp: ((Double, Double) -> Void)? = nil
+    var onSelectStamp: ((Stamp) -> Void)? = nil
 
     var body: some View {
         GeometryReader { geo in
@@ -708,9 +860,9 @@ private struct ReaderCanvas: View {
                 HStack(alignment: .top, spacing: 16) {
                     if rtl, let b = imageB {
                         pageImage(b, px: pixelSizeB, scale: finalScale)
-                        pageImage(image, px: pixelSize, scale: finalScale)
+                        primaryPageImage(scale: finalScale)
                     } else {
-                        pageImage(image, px: pixelSize, scale: finalScale)
+                        primaryPageImage(scale: finalScale)
                         if let b = imageB {
                             pageImage(b, px: pixelSizeB, scale: finalScale)
                         }
@@ -721,6 +873,22 @@ private struct ReaderCanvas: View {
             }
             .scrollIndicators(.hidden)
         }
+    }
+
+    /// The current page, with the stamp overlay attached.
+    @ViewBuilder
+    private func primaryPageImage(scale: CGFloat) -> some View {
+        pageImage(image, px: pixelSize, scale: scale)
+            .overlay {
+                if !stamps.isEmpty || addStampMode {
+                    StampOverlay(
+                        stamps: stamps,
+                        interactive: addStampMode,
+                        onTapEmpty: { nx, ny in onAddStamp?(nx, ny) },
+                        onTapStamp: { stamp in onSelectStamp?(stamp) }
+                    )
+                }
+            }
     }
 
     @ViewBuilder
@@ -762,6 +930,127 @@ private struct ReaderCanvas: View {
     }
 }
 
+/// Positions stamp markers over the page in normalized (0–100) coordinates.
+/// When `interactive`, taps on empty space report a new stamp position and
+/// markers become clickable for editing.
+private struct StampOverlay: View {
+    let stamps: [Stamp]
+    let interactive: Bool
+    let onTapEmpty: (Double, Double) -> Void
+    let onTapStamp: (Stamp) -> Void
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .topLeading) {
+                if interactive {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture(coordinateSpace: .local) { point in
+                            guard geo.size.width > 0, geo.size.height > 0 else { return }
+                            let nx = Double(point.x / geo.size.width) * 100
+                            let ny = Double(point.y / geo.size.height) * 100
+                            onTapEmpty(nx, ny)
+                        }
+                }
+
+                ForEach(stamps) { stamp in
+                    if let pos = stamp.normalizedPoint {
+                        marker(for: stamp)
+                            .position(
+                                x: geo.size.width * CGFloat(pos.x) / 100,
+                                y: geo.size.height * CGFloat(pos.y) / 100
+                            )
+                    }
+                }
+            }
+        }
+        .allowsHitTesting(interactive)
+    }
+
+    private func marker(for stamp: Stamp) -> some View {
+        Button {
+            onTapStamp(stamp)
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "seal.fill")
+                    .imageScale(.small)
+                    .foregroundStyle(.yellow)
+                if !stamp.content.isEmpty {
+                    Text(stamp.content)
+                        .font(.caption2)
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .frame(maxWidth: 160)
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .background(.black.opacity(0.65))
+            .clipShape(Capsule())
+            .shadow(color: .black.opacity(0.4), radius: 2, x: 0, y: 1)
+        }
+        .buttonStyle(.plain)
+        .help(stamp.content.isEmpty ? "Stamp" : stamp.content)
+    }
+}
+
+/// Sheet for entering/editing stamp text.
+private struct StampEditorSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let route: ReaderView.StampEditorRoute
+    let onSave: (String) -> Void
+    let onDelete: () -> Void
+
+    @State private var text: String = ""
+
+    private var isEditing: Bool {
+        if case .edit = route { return true }
+        return false
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(isEditing ? "Edit Stamp" : "New Stamp")
+                .font(.title3.weight(.semibold))
+
+            TextField("Stamp text…", text: $text, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(1...4)
+                .frame(minWidth: 320)
+                .onSubmit { save() }
+
+            HStack {
+                if isEditing {
+                    Button("Delete", role: .destructive) {
+                        onDelete()
+                        dismiss()
+                    }
+                }
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") { save() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(18)
+        .onAppear {
+            if case .edit(let stamp) = route {
+                text = stamp.content
+            }
+        }
+    }
+
+    private func save() {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        onSave(trimmed)
+        dismiss()
+    }
+}
+
 private struct ReaderPageSidebar: View {
     @EnvironmentObject private var appModel: AppModel
 
@@ -769,6 +1058,7 @@ private struct ReaderPageSidebar: View {
     let arcid: String
     let pages: [URL]
     let currentIndex: Int
+    let stampedPages: Set<Int>  // 1-indexed page numbers
     let onJump: (Int) -> Void
     let onSetCover: (Int) -> Void  // 1-indexed page number
 
@@ -797,6 +1087,7 @@ private struct ReaderPageSidebar: View {
                                 url: url,
                                 pageNumber: idx + 1,
                                 isCurrent: idx == currentIndex,
+                                hasStamp: stampedPages.contains(idx + 1),
                                 onTap: { onJump(idx) },
                                 onSetCover: { onSetCover(idx + 1) }
                             )
@@ -825,6 +1116,7 @@ private struct PageThumbnailCell: View {
     let url: URL
     let pageNumber: Int
     let isCurrent: Bool
+    let hasStamp: Bool
     let onTap: () -> Void
     let onSetCover: () -> Void
 
@@ -866,6 +1158,18 @@ private struct PageThumbnailCell: View {
         }
         .frame(width: 110)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(alignment: .topTrailing) {
+            if hasStamp {
+                Image(systemName: "seal.fill")
+                    .imageScale(.small)
+                    .foregroundStyle(.yellow)
+                    .padding(3)
+                    .background(.black.opacity(0.55))
+                    .clipShape(Circle())
+                    .padding(4)
+                    .help("This page has stamps")
+            }
+        }
         .overlay {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .strokeBorder(isCurrent ? Color.accentColor : Color.clear, lineWidth: 2)

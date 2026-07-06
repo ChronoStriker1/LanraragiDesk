@@ -41,6 +41,18 @@ actor ArchiveLoader {
         let client = try makeClient(profile: profile)
         let task = Task<ArchiveMetadata, Error> {
             try await limiter.withPermit {
+                // Tankoubons have no /api/archives metadata; synthesize it from the tank object.
+                if LANraragiID.isTankoubon(arcid) {
+                    let tank = try await client.getTankoubon(id: arcid)
+                    return ArchiveMetadata(
+                        arcid: tank.id,
+                        title: tank.name,
+                        tags: tank.tags,
+                        summary: tank.summary,
+                        pagecount: nil,
+                        progress: tank.progress
+                    )
+                }
                 return try await client.getArchiveMetadata(arcid: arcid)
             }
         }
@@ -228,6 +240,123 @@ actor ArchiveLoader {
             bytesCache.setObject(data as NSData, forKey: key, cost: data.count)
         }
         return data
+    }
+
+    // MARK: - Tankoubons
+
+    func listTankoubons(profile: Profile) async throws -> [Tankoubon] {
+        let client = try makeClient(profile: profile)
+        // Page -1 asks the server for the full unpaginated list.
+        return try await limiter.withPermit {
+            try await client.listTankoubons(page: -1).result
+        }
+    }
+
+    @discardableResult
+    func createTankoubon(profile: Profile, name: String, tankID: String? = nil) async throws -> String {
+        let client = try makeClient(profile: profile)
+        let id = try await limiter.withPermit {
+            try await client.createTankoubon(name: name, tankID: tankID)
+        }
+        metaCache[id] = nil
+        return id
+    }
+
+    func tankoubon(profile: Profile, tankID: String) async throws -> Tankoubon {
+        let client = try makeClient(profile: profile)
+        return try await limiter.withPermit {
+            try await client.getTankoubon(id: tankID)
+        }
+    }
+
+    func updateTankoubon(
+        profile: Profile,
+        tankID: String,
+        archives: [String]? = nil,
+        name: String? = nil,
+        summary: String? = nil,
+        tags: String? = nil
+    ) async throws {
+        let client = try makeClient(profile: profile)
+        try await limiter.withPermit {
+            try await client.updateTankoubon(
+                id: tankID,
+                archives: archives,
+                name: name,
+                summary: summary,
+                tags: tags
+            )
+        }
+        metaCache[tankID] = nil
+    }
+
+    func deleteTankoubon(profile: Profile, tankID: String) async throws {
+        let client = try makeClient(profile: profile)
+        try await limiter.withPermit {
+            try await client.deleteTankoubon(id: tankID)
+        }
+        metaCache[tankID] = nil
+    }
+
+    func addArchiveToTankoubon(profile: Profile, tankID: String, arcid: String) async throws {
+        let client = try makeClient(profile: profile)
+        try await limiter.withPermit {
+            try await client.addArchiveToTankoubon(tankID: tankID, arcid: arcid)
+        }
+        metaCache[tankID] = nil
+    }
+
+    func removeArchiveFromTankoubon(profile: Profile, tankID: String, arcid: String) async throws {
+        let client = try makeClient(profile: profile)
+        try await limiter.withPermit {
+            try await client.removeArchiveFromTankoubon(tankID: tankID, arcid: arcid)
+        }
+        metaCache[tankID] = nil
+    }
+
+    func archiveTankoubons(profile: Profile, arcid: String) async throws -> [String] {
+        let client = try makeClient(profile: profile)
+        return try await limiter.withPermit {
+            try await client.getArchiveTankoubons(arcid: arcid)
+        }
+    }
+
+    // MARK: - Stamps
+
+    func stampedPages(profile: Profile, arcid: String) async throws -> [Int] {
+        let client = try makeClient(profile: profile)
+        return try await limiter.withPermit {
+            try await client.getStampedPages(arcid: arcid)
+        }
+    }
+
+    func stamps(profile: Profile, arcid: String, page: Int) async throws -> [Stamp] {
+        let client = try makeClient(profile: profile)
+        return try await limiter.withPermit {
+            try await client.getStamps(arcid: arcid, page: page)
+        }
+    }
+
+    @discardableResult
+    func addStamp(profile: Profile, arcid: String, page: Int, content: String, position: String) async throws -> String {
+        let client = try makeClient(profile: profile)
+        return try await limiter.withPermit {
+            try await client.addStamp(arcid: arcid, page: page, content: content, position: position)
+        }
+    }
+
+    func updateStamp(profile: Profile, stampID: String, content: String? = nil, position: String? = nil) async throws {
+        let client = try makeClient(profile: profile)
+        try await limiter.withPermit {
+            try await client.updateStamp(id: stampID, content: content, position: position)
+        }
+    }
+
+    func deleteStamp(profile: Profile, stampID: String) async throws {
+        let client = try makeClient(profile: profile)
+        try await limiter.withPermit {
+            try await client.deleteStamp(id: stampID)
+        }
     }
 
     /// Drops the cached client, API key, and all derived caches for a profile.

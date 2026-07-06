@@ -88,7 +88,8 @@ public struct FingerprintIndexer {
         var start = startOffset
 
         // First page establishes total.
-        var page = try await client.search(start: start)
+        // Tanks must never enter the fingerprint index; always enumerate raw archives.
+        var page = try await client.search(start: start, groupByTanks: false)
         let total = page.recordsTotal
         progress(await counters.snapshot(phase: .enumerating(total: total), total: total, currentArcid: nil))
 
@@ -178,7 +179,7 @@ public struct FingerprintIndexer {
                 break
             }
 
-            page = try await client.search(start: start)
+            page = try await client.search(start: start, groupByTanks: false)
         }
 
         // After a full enumeration we know every arcid on the server, so drop

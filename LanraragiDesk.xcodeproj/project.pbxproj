@@ -10,6 +10,7 @@
 		0C08E467F7D7B634D7226213 /* ProcessRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A83932B085B518AD0C096ECD /* ProcessRunner.swift */; };
 		130862FF85B509435312CB5E /* ReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD459C22BE11F681F28C2F38 /* ReaderView.swift */; };
 		18480DB763E93B8B9BEFD8C6 /* CodexCLITranslationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100F835342ECA0C078C5C26 /* CodexCLITranslationService.swift */; };
+		2BC216CEF8ED35FD4C2B6C67 /* TankoubonEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF63F092B11CB2B629E4E351 /* TankoubonEditorView.swift */; };
 		2CC4FCA30B43919EBE99690B /* LibraryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1F2885B0666E3F9BE5689F9 /* LibraryViewModel.swift */; };
 		312DD4B589175DEA77C410C6 /* ActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A25853A38F0BC5127176B04 /* ActivityView.swift */; };
 		33CF8B707739292031D70AED /* TitleTranslationFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F5DDB45BE710FEF17C2EFD /* TitleTranslationFormat.swift */; };
@@ -112,6 +113,7 @@
 		B86D008FE0E3FC57FBA6B31A /* Profile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Profile.swift; sourceTree = "<group>"; };
 		BAAC758F0873DA44E0C627AC /* OpenAITranslationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAITranslationService.swift; sourceTree = "<group>"; };
 		CA2F400E81B9A7C645B84CDD /* ReaderFitMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderFitMode.swift; sourceTree = "<group>"; };
+		CF63F092B11CB2B629E4E351 /* TankoubonEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TankoubonEditorView.swift; sourceTree = "<group>"; };
 		D02DE20BBA0EE2C6AF4692AB /* ProfileEditorMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileEditorMode.swift; sourceTree = "<group>"; };
 		D0705B9BBB876D1BB705AA53 /* ProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileStore.swift; sourceTree = "<group>"; };
 		D0B4C016BE5ACCF114FD7456 /* ReaderRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderRoute.swift; sourceTree = "<group>"; };
@@ -234,6 +236,7 @@
 				358F4E9A6F34DDEB4C2966B1 /* RootView.swift */,
 				55DB22001120CA1D977F2D22 /* SettingsView.swift */,
 				E21E702AD8E780D4140E265F /* StatisticsView.swift */,
+				CF63F092B11CB2B629E4E351 /* TankoubonEditorView.swift */,
 				A7A1CD4891181418913FA15A /* Components */,
 			);
 			path = UI;
@@ -405,6 +408,7 @@
 				7E613CA1B3641F9B7D503358 /* StatisticsView.swift in Sources */,
 				8ECBF476E3DACD7FD2406ED8 /* TagParsing.swift in Sources */,
 				4984C7D6A3203AFF6C091E10 /* TagSuggestionStore.swift in Sources */,
+				2BC216CEF8ED35FD4C2B6C67 /* TankoubonEditorView.swift in Sources */,
 				6B35F39BF0AD26CD55A13641 /* ThumbnailLoader.swift in Sources */,
 				8AF2D2ECDE384C052C773137 /* TitleNormalizationRunService.swift in Sources */,
 				33CF8B707739292031D70AED /* TitleTranslationFormat.swift in Sources */,

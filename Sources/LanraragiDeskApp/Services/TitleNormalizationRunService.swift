@@ -342,7 +342,7 @@ actor TitleNormalizationRunService {
 
         while true {
             try Task.checkCancellation()
-            let response = try await client.search(start: start, sortBy: "title", order: "asc")
+            let response = try await client.search(start: start, sortBy: "title", order: "asc", groupByTanks: false)
             let chunk = response.data.map(\.arcid)
             out.append(contentsOf: chunk)
             start += chunk.count
