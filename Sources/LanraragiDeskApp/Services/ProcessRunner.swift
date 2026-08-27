@@ -1,7 +1,7 @@
 import Foundation
 
 struct ProcessRunner {
-    private final class CompletionBox: @unchecked Sendable {
+    final class CompletionBox: @unchecked Sendable {
         private enum PendingResult {
             case status(Int32)
             case error(any Error)
@@ -33,12 +33,13 @@ struct ProcessRunner {
             lock.unlock()
         }
 
-        func resume(returning status: Int32) {
+        @discardableResult
+        func resume(returning status: Int32) -> Bool {
             let continuation: CheckedContinuation<Int32, Error>?
             lock.lock()
             if isCompleted {
                 lock.unlock()
-                return
+                return false
             }
             isCompleted = true
             continuation = self.continuation
@@ -48,14 +49,16 @@ struct ProcessRunner {
             }
             lock.unlock()
             continuation?.resume(returning: status)
+            return true
         }
 
-        func resume(throwing error: Error) {
+        @discardableResult
+        func resume(throwing error: Error) -> Bool {
             let continuation: CheckedContinuation<Int32, Error>?
             lock.lock()
             if isCompleted {
                 lock.unlock()
-                return
+                return false
             }
             isCompleted = true
             continuation = self.continuation
@@ -65,6 +68,7 @@ struct ProcessRunner {
             }
             lock.unlock()
             continuation?.resume(throwing: error)
+            return true
         }
     }
 
@@ -177,10 +181,29 @@ struct ProcessRunner {
                 group.addTask {
                     try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
                     let error = RunnerError.timedOut(executableURL.lastPathComponent)
-                    completionBox.resume(throwing: error)
+                    guard completionBox.resume(throwing: error) else {
+                        return try await terminationTask.value
+                    }
                     await terminateIfNeeded(process)
                     try? stdinPipe?.fileHandleForWriting.close()
                     throw error
+                }
+                if let stdinTask {
+                    group.addTask {
+                        do {
+                            try await stdinTask.value
+                        } catch {
+                            guard completionBox.resume(throwing: error) else {
+                                return try await terminationTask.value
+                            }
+                            await terminateIfNeeded(process)
+                            throw error
+                        }
+
+                        // A successful write is not process completion. Keep waiting
+                        // on the same single-assignment process result.
+                        return try await terminationTask.value
+                    }
                 }
                 let result = try await group.next()
                 group.cancelAll()
@@ -188,7 +211,9 @@ struct ProcessRunner {
                 return result ?? process.terminationStatus
             }
 
-            try await stdinTask?.value
+            // Process termination won the race. A simultaneous broken pipe is a
+            // consequence of that exit rather than a replacement result.
+            _ = try? await stdinTask?.value
             let stdout = String(decoding: try await stdoutTask.value, as: UTF8.self)
             let stderr = String(decoding: try await stderrTask.value, as: UTF8.self)
             return .init(terminationStatus: status, stdout: stdout, stderr: stderr)
