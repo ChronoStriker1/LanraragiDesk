@@ -102,16 +102,7 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func refresh(profile: Profile) {
-        let generation = makeGeneration(profile: profile)
-        loadGeneration = generation
-        activeLoadGenerationID = nil
-        start = 0
-        totalFiltered = 0
-        reachedEnd = false
-        arcids = []
-        isLoading = false
-        bannerText = nil
-        errorText = nil
+        let generation = beginGeneration(profile: profile)
         Task { await loadMore(profile: profile, generationID: generation.id) }
     }
 
@@ -150,9 +141,7 @@ final class LibraryViewModel: ObservableObject {
         if let existing = loadGeneration, existing.profileID == profile.id {
             generation = existing
         } else {
-            let newGeneration = makeGeneration(profile: profile)
-            loadGeneration = newGeneration
-            generation = newGeneration
+            generation = beginGeneration(profile: profile)
         }
         await loadMore(profile: profile, generationID: generation.id)
     }
@@ -193,6 +182,7 @@ final class LibraryViewModel: ObservableObject {
                 supportsDateAddedSort = dateAddedSortSupport
             }
             if result.fellBackToTitle {
+                // Keep subsequent pages in this generation on the same fallback sort.
                 loadGeneration?.sort = .title
                 sort = .title
                 bannerText = "Server doesn’t support sorting by date added; using Title instead."
@@ -325,6 +315,24 @@ final class LibraryViewModel: ObservableObject {
             sort: sort,
             groupTanks: groupTanks
         )
+    }
+
+    private func beginGeneration(profile: Profile) -> LoadGeneration {
+        let profileChanged = loadGeneration?.profileID != profile.id
+        let generation = makeGeneration(profile: profile)
+        loadGeneration = generation
+        activeLoadGenerationID = nil
+        start = 0
+        totalFiltered = 0
+        reachedEnd = false
+        arcids = []
+        isLoading = false
+        bannerText = nil
+        errorText = nil
+        if profileChanged {
+            supportsDateAddedSort = nil
+        }
+        return generation
     }
 
     private func makeClient(profile: Profile) throws -> LANraragiClient {

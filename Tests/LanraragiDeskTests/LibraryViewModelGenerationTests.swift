@@ -130,6 +130,46 @@ final class LibraryViewModelGenerationTests: XCTestCase {
         XCTAssertNil(viewModel.errorText)
     }
 
+    func testLoadMoreForDifferentProfileStartsAtZeroAndReplacesResults() async throws {
+        let loader = ControlledLibraryPageLoader()
+        let viewModel = makeViewModel(loader: loader)
+        let firstProfile = makeProfile()
+        let secondProfile = Profile(
+            id: UUID(uuidString: "9EC26B84-4587-4D1C-9A81-C55AE41ED539")!,
+            name: "Second",
+            baseURL: URL(string: "https://second.example.test")!,
+            language: "ja-JP"
+        )
+
+        viewModel.query = "first profile"
+        let firstLoad = Task { await viewModel.loadMore(profile: firstProfile) }
+        await loader.waitForRequestCount(1)
+        await loader.succeed(call: 0, arcids: ["first-1"], recordsFiltered: 3)
+        await firstLoad.value
+        XCTAssertEqual(viewModel.arcids, ["first-1"])
+
+        viewModel.query = "second profile"
+        viewModel.categoryID = "second-category"
+        viewModel.newOnly = true
+        viewModel.groupTanks = false
+        let secondLoad = Task { await viewModel.loadMore(profile: secondProfile) }
+        await loader.waitForRequestCount(2)
+
+        XCTAssertTrue(viewModel.arcids.isEmpty)
+        let storedRequest = await loader.request(at: 1)
+        let request = try XCTUnwrap(storedRequest)
+        XCTAssertEqual(request.start, 0)
+        XCTAssertEqual(request.query, "second profile")
+        XCTAssertEqual(request.categoryID, "second-category")
+        XCTAssertTrue(request.newOnly)
+        XCTAssertFalse(request.groupTanks)
+        XCTAssertNil(request.knownDateAddedSortSupport)
+
+        await loader.succeed(call: 1, arcids: ["second-1"], recordsFiltered: 1)
+        await secondLoad.value
+        XCTAssertEqual(viewModel.arcids, ["second-1"])
+    }
+
     private func makeViewModel(loader: ControlledLibraryPageLoader) -> LibraryViewModel {
         LibraryViewModel(pageLoader: { _, request in
             try await loader.load(request: request)
@@ -145,10 +185,15 @@ final class LibraryViewModelGenerationTests: XCTestCase {
         )
     }
 
-    private func eventually(_ condition: () -> Bool) async -> Bool {
-        for _ in 0..<1_000 {
+    private func eventually(
+        timeout: Duration = .seconds(1),
+        _ condition: () -> Bool
+    ) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        while clock.now < deadline {
             if condition() { return true }
-            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(1))
         }
         return condition()
     }
