@@ -16,6 +16,47 @@ final class LANraragiClientURLTests: XCTestCase {
         XCTAssertEqual(url.absoluteString, "http://192.168.2.4:3001/api/archives/abc/metadata")
     }
 
+    func testMakeAbsoluteURLRetainsBasePathWithoutTrailingSlash() throws {
+        let client = makeClient(baseURL: "https://lanraragi.example/lrr")
+
+        let url = try client.makeAbsoluteURL(from: "/api/archives/abc/metadata")
+
+        XCTAssertEqual(url.absoluteString, "https://lanraragi.example/lrr/api/archives/abc/metadata")
+    }
+
+    func testMakeAbsoluteURLRetainsBasePathWithTrailingSlash() throws {
+        let client = makeClient(baseURL: "https://lanraragi.example/lrr/")
+
+        let url = try client.makeAbsoluteURL(from: "/api/archives/abc/metadata")
+
+        XCTAssertEqual(url.absoluteString, "https://lanraragi.example/lrr/api/archives/abc/metadata")
+    }
+
+    func testInternalRequestURLRetainsOriginAndPercentEncodedPaths() throws {
+        let client = makeClient(baseURL: "http://lanraragi.example:3001/lrr%20desk/")
+
+        let url = try client.makeURL(path: "/api/archives/a%2Fb/thumbnail")
+
+        XCTAssertEqual(
+            url.absoluteString,
+            "http://lanraragi.example:3001/lrr%20desk/api/archives/a%2Fb/thumbnail"
+        )
+    }
+
+    func testMakeAbsoluteURLPreservesRelativeQueryAndFragment() throws {
+        let client = makeClient(baseURL: "https://lanraragi.example/lrr")
+
+        let url = try client.makeAbsoluteURL(
+            from: "/api/archives/abc/page?path=folder%2Fpage+1.jpg&quality=high#preview%201"
+        )
+
+        XCTAssertEqual(
+            url.absoluteString,
+            "https://lanraragi.example/lrr/api/archives/abc/page"
+                + "?path=folder%2Fpage+1.jpg&quality=high#preview%201"
+        )
+    }
+
     func testMakeAbsoluteURLPreservesAbsoluteURLs() throws {
         let client = LANraragiClient(configuration: .init(baseURL: URL(string: "https://lanraragi.cstriker.us")!))
         let absolute = "https://example.net/path/file.jpg"
