@@ -76,7 +76,11 @@ struct ReaderView: View {
                         currentIndex: pageIndex,
                         stampedPages: showStamps ? stampedPages : [],
                         onJump: { idx in
-                            pageIndex = idx
+                            pageIndex = ReaderNavigation.normalizedIndex(
+                                idx,
+                                pageCount: pages.count,
+                                twoPageSpread: twoPageSpread
+                            )
                             restartAutoAdvance()
                         },
                         onSetCover: { setPageAsCover(pageNumber: $0) }
@@ -199,9 +203,18 @@ struct ReaderView: View {
                 }
             )
         }
-        .onChange(of: twoPageSpread) { _, _ in
-            loadCurrentPage()
-            restartAutoAdvance()
+        .onChange(of: twoPageSpread) { _, enabled in
+            let normalized = ReaderNavigation.normalizedIndex(
+                pageIndex,
+                pageCount: pages.count,
+                twoPageSpread: enabled
+            )
+            if normalized != pageIndex {
+                pageIndex = normalized
+            } else {
+                loadCurrentPage()
+                restartAutoAdvance()
+            }
         }
         .onChange(of: fitModeRaw) { _, _ in
             restartAutoAdvance()
@@ -272,11 +285,26 @@ struct ReaderView: View {
         ReaderFitMode(rawValue: fitModeRaw) ?? .fit
     }
 
-    private var step: Int { twoPageSpread ? 2 : 1 }
-
     private var canGoNext: Bool {
-        guard !pages.isEmpty else { return false }
-        return (pageIndex + step) <= pages.count - 1
+        if case .page = ReaderNavigation.advance(
+            from: pageIndex,
+            pageCount: pages.count,
+            twoPageSpread: twoPageSpread
+        ) {
+            return true
+        }
+        return false
+    }
+
+    private var canGoPrevious: Bool {
+        if case .page = ReaderNavigation.retreat(
+            from: pageIndex,
+            pageCount: pages.count,
+            twoPageSpread: twoPageSpread
+        ) {
+            return true
+        }
+        return false
     }
 
     private var clampedAutoAdvanceSeconds: Double {
@@ -303,12 +331,12 @@ struct ReaderView: View {
         if readingDirection == .rtl {
             return canGoNext
         }
-        return pageIndex > 0
+        return canGoPrevious
     }
 
     private var canGoRightFromToolbar: Bool {
         if readingDirection == .rtl {
-            return pageIndex > 0
+            return canGoPrevious
         }
         return canGoNext
     }
@@ -692,8 +720,8 @@ struct ReaderView: View {
         guard autoAdvanceEnabled else { return }
         guard pages.count > 1 else { return }
 
-        // If we're already at the end, stop auto-advance.
-        if pageIndex >= pages.count - 1 {
+        // If we're already at the final page or spread, stop auto-advance.
+        guard canGoNext else {
             autoAdvanceEnabled = false
             return
         }
@@ -710,8 +738,9 @@ struct ReaderView: View {
                 countdownRemaining = remaining
             }
 
-            // Finished countdown. If we're at the last page, stop; otherwise go next.
-            if pageIndex >= pages.count - 1 {
+            // The page may have changed during the countdown. Recheck the same
+            // navigation decision used by every other page-turn input.
+            guard canGoNext else {
                 autoAdvanceEnabled = false
                 countdownRemaining = nil
                 return
@@ -725,24 +754,36 @@ struct ReaderView: View {
         if userInitiated {
             restartAutoAdvance()
         }
-        guard !pages.isEmpty else { return }
-
-        let next = min(pages.count - 1, pageIndex + step)
-        guard next != pageIndex else {
+        switch ReaderNavigation.advance(
+            from: pageIndex,
+            pageCount: pages.count,
+            twoPageSpread: twoPageSpread
+        ) {
+        case .page(let next):
+            pageIndex = next
+        case .endOfArchive:
             if autoAdvanceEnabled {
                 autoAdvanceEnabled = false
             }
-            return
+        case .startOfArchive:
+            break
         }
-        pageIndex = next
     }
 
     private func goPrev(userInitiated: Bool) {
         if userInitiated {
             restartAutoAdvance()
         }
-        guard pageIndex > 0 else { return }
-        pageIndex = max(0, pageIndex - step)
+        switch ReaderNavigation.retreat(
+            from: pageIndex,
+            pageCount: pages.count,
+            twoPageSpread: twoPageSpread
+        ) {
+        case .page(let previous):
+            pageIndex = previous
+        case .startOfArchive, .endOfArchive:
+            break
+        }
     }
 
     private func handleKeyDown(_ event: NSEvent) {
