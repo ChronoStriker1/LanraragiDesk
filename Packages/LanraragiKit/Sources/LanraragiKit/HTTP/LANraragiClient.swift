@@ -952,13 +952,15 @@ public final class LANraragiClient: Sendable {
         return url
     }
 
-    private func makeURL(path: String, queryItems: [URLQueryItem]) throws -> URL {
+    func makeURL(path: String, queryItems: [URLQueryItem]) throws -> URL {
         var url = try makeURL(path: path)
         guard var comps = URLComponents(url: url, resolvingAgainstBaseURL: true) else {
             throw LANraragiError.invalidBaseURL
         }
         if !queryItems.isEmpty {
             comps.queryItems = queryItems
+            comps.percentEncodedQuery = comps.percentEncodedQuery?
+                .replacingOccurrences(of: "+", with: "%2B")
         }
         guard let out = comps.url else { throw LANraragiError.invalidBaseURL }
         url = out
@@ -1195,10 +1197,11 @@ public final class LANraragiClient: Sendable {
         return nil
     }
 
-    private func makeFormBody(_ items: [URLQueryItem]) -> Data {
+    func makeFormBody(_ items: [URLQueryItem]) -> Data {
         var comps = URLComponents()
         comps.queryItems = items
-        let encoded = comps.percentEncodedQuery ?? ""
+        let encoded = comps.percentEncodedQuery?
+            .replacingOccurrences(of: "+", with: "%2B") ?? ""
         return Data(encoded.utf8)
     }
 }
