@@ -24,6 +24,7 @@ final class EnglishTitlesOnlyViewModel: ObservableObject {
     private let translationService = OpenAITranslationService()
     private let codexService = CodexCLITranslationService()
     private var activeTask: Task<Void, Never>?
+    private var runOwnership = EnglishTitlesRunOwnership()
     private static let openAIKeyAccount = "openai.apiKey"
     private static let providerDefaultsKey = "secret.englishTitlesOnly.provider"
     private static let modelDefaultsKey = "secret.englishTitlesOnly.model"
@@ -111,11 +112,12 @@ final class EnglishTitlesOnlyViewModel: ObservableObject {
     }
 
     func cancel() {
+        guard let run = runOwnership.activeRun else { return }
+        guard runOwnership.requestCancellation(of: run) else { return }
+
         activeTask?.cancel()
-        activeTask = nil
-        isBusy = false
-        statusText = "Cancelled."
-        appendLog("Cancelled by user.")
+        statusText = "Cancelling…"
+        appendLog("Cancellation requested by user.")
     }
 
     func startDryRun(profile: Profile) {
@@ -140,7 +142,7 @@ final class EnglishTitlesOnlyViewModel: ObservableObject {
             translationConfig = .init(provider: .codexCLI, model: selectedModel, openAIKey: nil)
         }
 
-        isBusy = true
+        guard let run = beginRun() else { return }
         statusText = "Starting dry run…"
         plan = nil
         failures = []
@@ -150,12 +152,7 @@ final class EnglishTitlesOnlyViewModel: ObservableObject {
 
         activeTask = Task { [weak self] in
             guard let self else { return }
-            defer {
-                Task { @MainActor in
-                    self.isBusy = false
-                    self.activeTask = nil
-                }
-            }
+            defer { self.finishRun(run) }
 
             do {
                 let plan = try await self.runService.buildPlan(
@@ -163,29 +160,25 @@ final class EnglishTitlesOnlyViewModel: ObservableObject {
                     translationConfig: translationConfig,
                     report: { update in
                         Task { @MainActor [weak self] in
-                            self?.progress = update
-                            self?.statusText = update.message
-                            self?.appendLog(update.message)
+                            self?.receive(update, from: run)
                         }
                     }
                 )
 
-                await MainActor.run {
-                    self.plan = plan
-                    self.statusText = "Dry run complete. \(plan.itemCount) archives would be updated."
-                    self.appendLog("Dry run complete. Planned updates: \(plan.itemCount).")
+                guard self.runOwnership.acceptsUpdates(from: run), !Task.isCancelled else {
+                    self.markCancelled(run: run, operation: "Dry run")
+                    return
                 }
+                self.plan = plan
+                self.statusText = "Dry run complete. \(plan.itemCount) archives would be updated."
+                self.appendLog("Dry run complete. Planned updates: \(plan.itemCount).")
             } catch {
-                if ErrorPresenter.isCancellationLike(error) {
-                    await MainActor.run {
-                        self.statusText = "Cancelled."
-                        self.appendLog("Dry run cancelled.")
-                    }
+                guard self.runOwnership.owns(run) else { return }
+                if Task.isCancelled || ErrorPresenter.isCancellationLike(error) {
+                    self.markCancelled(run: run, operation: "Dry run")
                 } else {
-                    await MainActor.run {
-                        self.statusText = "Dry run failed: \(ErrorPresenter.short(error))"
-                        self.appendLog("Dry run failed: \(String(describing: error))")
-                    }
+                    self.statusText = "Dry run failed: \(ErrorPresenter.short(error))"
+                    self.appendLog("Dry run failed: \(String(describing: error))")
                 }
             }
         }
@@ -211,7 +204,7 @@ final class EnglishTitlesOnlyViewModel: ObservableObject {
             subset = ids
         }
 
-        isBusy = true
+        guard let run = beginRun() else { return }
         statusText = mode == .all ? "Applying updates…" : "Retrying failed updates…"
         appendLog(mode == .all ? "Apply started." : "Retry failed started.")
         progress = .init(stage: .applying, scanned: 0, candidates: plan.itemCount, translated: plan.itemCount, applied: 0, failed: 0, message: "Starting apply…")
@@ -221,12 +214,7 @@ final class EnglishTitlesOnlyViewModel: ObservableObject {
 
         activeTask = Task { [weak self] in
             guard let self else { return }
-            defer {
-                Task { @MainActor in
-                    self.isBusy = false
-                    self.activeTask = nil
-                }
-            }
+            defer { self.finishRun(run) }
 
             let result = await self.runService.applyPlan(
                 profile: profile,
@@ -235,24 +223,50 @@ final class EnglishTitlesOnlyViewModel: ObservableObject {
                 onlyArcids: subset,
                 report: { update in
                     Task { @MainActor [weak self] in
-                        self?.progress = update
-                        self?.statusText = update.message
-                        self?.appendLog(update.message)
+                        self?.receive(update, from: run)
                     }
                 }
             )
 
-            await MainActor.run {
-                self.failures = result.failures
-                if result.failures.isEmpty {
-                    self.statusText = "Apply complete. Updated \(result.successCount) archives."
-                    self.appendLog("Apply complete. Updated \(result.successCount) archives.")
-                } else {
-                    self.statusText = "Apply complete. Updated \(result.successCount), failed \(result.failures.count)."
-                    self.appendLog("Apply complete with \(result.failures.count) failures.")
-                }
+            guard self.runOwnership.acceptsUpdates(from: run), !Task.isCancelled else {
+                self.markCancelled(run: run, operation: "Apply")
+                return
+            }
+
+            self.failures = result.failures
+            if result.failures.isEmpty {
+                self.statusText = "Apply complete. Updated \(result.successCount) archives."
+                self.appendLog("Apply complete. Updated \(result.successCount) archives.")
+            } else {
+                self.statusText = "Apply complete. Updated \(result.successCount), failed \(result.failures.count)."
+                self.appendLog("Apply complete with \(result.failures.count) failures.")
             }
         }
+    }
+
+    private func beginRun() -> EnglishTitlesRunOwnership.Run? {
+        guard let run = runOwnership.begin() else { return nil }
+        isBusy = true
+        return run
+    }
+
+    private func finishRun(_ run: EnglishTitlesRunOwnership.Run) {
+        guard runOwnership.finish(run) else { return }
+        activeTask = nil
+        isBusy = false
+    }
+
+    private func receive(_ update: TitleNormalizationProgress, from run: EnglishTitlesRunOwnership.Run) {
+        guard runOwnership.acceptsUpdates(from: run) else { return }
+        progress = update
+        statusText = update.message
+        appendLog(update.message)
+    }
+
+    private func markCancelled(run: EnglishTitlesRunOwnership.Run, operation: String) {
+        guard runOwnership.owns(run) else { return }
+        statusText = "Cancelled."
+        appendLog("\(operation) cancelled.")
     }
 
     private func appendLog(_ message: String) {
