@@ -109,8 +109,10 @@ final class AppModel: ObservableObject {
     /// Call after a profile's base URL, language, or API key changes so cached
     /// clients don't keep using stale configuration until app restart.
     func invalidateClients(profileID: Profile.ID) {
+        // This cache is invalidated synchronously so a profile editor cannot
+        // return while request-heavy paths can still obtain the old client.
+        clients.invalidate(profileID: profileID)
         Task {
-            await clients.invalidate(profileID: profileID)
             await archives.invalidateClient(profileID: profileID)
             await thumbnails.invalidateClient(profileID: profileID)
         }

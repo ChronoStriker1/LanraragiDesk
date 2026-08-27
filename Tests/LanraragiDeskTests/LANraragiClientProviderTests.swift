@@ -48,7 +48,7 @@ final class LANraragiClientProviderTests: XCTestCase {
         let profile = makeProfile()
 
         let original = try await provider.client(for: profile)
-        await provider.invalidate(profileID: profile.id)
+        provider.invalidate(profileID: profile.id)
         let replacement = try await provider.client(for: profile)
 
         XCTAssertFalse(original === replacement)

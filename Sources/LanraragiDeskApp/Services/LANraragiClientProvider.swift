@@ -16,6 +16,7 @@ actor LANraragiClientProvider {
         let baseURL: URL
         let acceptLanguage: String
         let maxConnectionsPerHost: Int
+        let invalidationGeneration: UInt64
     }
 
     private struct CachedClient: Sendable {
@@ -26,6 +27,7 @@ actor LANraragiClientProvider {
     private let credentialLoader: CredentialLoader
     private let maxConnectionsLoader: MaxConnectionsLoader
     private let clientFactory: ClientFactory
+    nonisolated private let invalidationGenerations = ClientProviderInvalidationGenerations()
     private var clientsByProfileID: [Profile.ID: CachedClient] = [:]
 
     init(
@@ -46,33 +48,65 @@ actor LANraragiClientProvider {
     }
 
     func client(for profile: Profile) throws -> LANraragiClient {
-        let fingerprint = ConfigurationFingerprint(
-            baseURL: profile.baseURL,
-            acceptLanguage: profile.language,
-            maxConnectionsPerHost: maxConnectionsLoader()
-        )
+        while true {
+            let invalidationGeneration = invalidationGenerations.current(for: profile.id)
+            let fingerprint = ConfigurationFingerprint(
+                baseURL: profile.baseURL,
+                acceptLanguage: profile.language,
+                maxConnectionsPerHost: maxConnectionsLoader(),
+                invalidationGeneration: invalidationGeneration
+            )
 
-        if let cached = clientsByProfileID[profile.id], cached.fingerprint == fingerprint {
-            return cached.client
+            if let cached = clientsByProfileID[profile.id], cached.fingerprint == fingerprint {
+                return cached.client
+            }
+
+            // A missing credential is a valid unauthenticated configuration. Actual
+            // Keychain read failures are allowed to propagate and are never cached.
+            let apiKey = try credentialLoader(profile.id)
+            let client = clientFactory(.init(
+                baseURL: fingerprint.baseURL,
+                apiKey: apiKey,
+                acceptLanguage: fingerprint.acceptLanguage,
+                maxConnectionsPerHost: fingerprint.maxConnectionsPerHost
+            ))
+
+            // Invalidation is synchronous so profile saves take effect before
+            // returning. If it raced this construction, retry with fresh credentials.
+            guard invalidationGenerations.current(for: profile.id) == invalidationGeneration else {
+                continue
+            }
+
+            clientsByProfileID[profile.id] = CachedClient(
+                fingerprint: fingerprint,
+                client: client
+            )
+            return client
         }
-
-        // A missing credential is a valid unauthenticated configuration. Actual
-        // Keychain read failures are allowed to propagate and are never cached.
-        let apiKey = try credentialLoader(profile.id)
-        let client = clientFactory(.init(
-            baseURL: fingerprint.baseURL,
-            apiKey: apiKey,
-            acceptLanguage: fingerprint.acceptLanguage,
-            maxConnectionsPerHost: fingerprint.maxConnectionsPerHost
-        ))
-        clientsByProfileID[profile.id] = CachedClient(
-            fingerprint: fingerprint,
-            client: client
-        )
-        return client
     }
 
-    func invalidate(profileID: Profile.ID) {
-        clientsByProfileID[profileID] = nil
+    nonisolated func invalidate(profileID: Profile.ID) {
+        invalidationGenerations.advance(for: profileID)
+    }
+}
+
+private final class ClientProviderInvalidationGenerations: @unchecked Sendable {
+    private let lock = NSLock()
+    private var generationsByProfileID: [Profile.ID: UInt64] = [:]
+
+    func current(for profileID: Profile.ID) -> UInt64 {
+        lock.withLock {
+            generationsByProfileID[profileID, default: 0]
+        }
+    }
+
+    func advance(for profileID: Profile.ID) {
+        lock.withLock {
+            generationsByProfileID[profileID] = currentValue(for: profileID) &+ 1
+        }
+    }
+
+    private func currentValue(for profileID: Profile.ID) -> UInt64 {
+        generationsByProfileID[profileID, default: 0]
     }
 }
