@@ -58,6 +58,42 @@ final class LANraragiClientProviderTests: XCTestCase {
         )
     }
 
+    func testInvalidationDuringConstructionDiscardsStaleClient() async throws {
+        let probe = ClientProviderProbe(credentials: ["old-key", "new-key"])
+        let provider = makeProvider(probe: probe)
+        let profile = makeProfile()
+        probe.blockNextCredentialRead()
+
+        let clientTask = Task.detached {
+            try await provider.client(for: profile)
+        }
+        let credentialReadStarted = await Task.detached {
+            probe.waitForBlockedCredentialRead()
+        }.value
+
+        guard credentialReadStarted else {
+            probe.releaseBlockedCredentialRead()
+            _ = try? await clientTask.value
+            XCTFail("Timed out waiting for the credential loader")
+            return
+        }
+
+        provider.invalidate(profileID: profile.id)
+        probe.releaseBlockedCredentialRead()
+
+        let returnedClient = try await clientTask.value
+        let constructedClients = probe.clients
+
+        XCTAssertEqual(
+            probe.configurations.map { $0.apiKey?.rawValue },
+            ["old-key", "new-key"]
+        )
+        XCTAssertEqual(constructedClients.count, 2)
+        guard constructedClients.count == 2 else { return }
+        XCTAssertFalse(returnedClient === constructedClients[0])
+        XCTAssertTrue(returnedClient === constructedClients[1])
+    }
+
     func testProfileIDsUseSeparateCacheEntries() async throws {
         let probe = ClientProviderProbe(credentials: ["first", "second"])
         let provider = makeProvider(probe: probe)
@@ -153,8 +189,12 @@ private final class ClientProviderProbe: @unchecked Sendable {
     private var credentials: [String?]
     private var storedCredentialReadCount = 0
     private var storedConfigurations: [LANraragiClient.Configuration] = []
+    private var storedClients: [LANraragiClient] = []
     private var storedMaxConnections = 8
     private var storedCredentialError: TestCredentialError?
+    private var shouldBlockNextCredentialRead = false
+    private let credentialReadStarted = DispatchSemaphore(value: 0)
+    private let credentialReadRelease = DispatchSemaphore(value: 0)
 
     init(credentials: [String?]) {
         self.credentials = credentials
@@ -168,6 +208,10 @@ private final class ClientProviderProbe: @unchecked Sendable {
         lock.withLock { storedConfigurations }
     }
 
+    var clients: [LANraragiClient] {
+        lock.withLock { storedClients }
+    }
+
     var maxConnections: Int {
         get { lock.withLock { storedMaxConnections } }
         set { lock.withLock { storedMaxConnections = newValue } }
@@ -178,21 +222,51 @@ private final class ClientProviderProbe: @unchecked Sendable {
         set { lock.withLock { storedCredentialError = newValue } }
     }
 
+    func blockNextCredentialRead() {
+        lock.withLock {
+            shouldBlockNextCredentialRead = true
+        }
+    }
+
+    func waitForBlockedCredentialRead() -> Bool {
+        switch credentialReadStarted.wait(timeout: .now() + 5) {
+        case .success:
+            return true
+        case .timedOut:
+            return false
+        }
+    }
+
+    func releaseBlockedCredentialRead() {
+        credentialReadRelease.signal()
+    }
+
     func loadCredential() throws -> LANraragiAPIKey? {
-        try lock.withLock {
+        let result: (credential: LANraragiAPIKey?, shouldBlock: Bool) = try lock.withLock {
             storedCredentialReadCount += 1
             if let storedCredentialError {
                 throw storedCredentialError
             }
             let value = credentials.isEmpty ? nil : credentials.removeFirst()
-            return value.map(LANraragiAPIKey.init)
+            let shouldBlock = shouldBlockNextCredentialRead
+            shouldBlockNextCredentialRead = false
+            return (value.map(LANraragiAPIKey.init), shouldBlock)
         }
+
+        if result.shouldBlock {
+            credentialReadStarted.signal()
+            credentialReadRelease.wait()
+        }
+
+        return result.credential
     }
 
     func makeClient(configuration: LANraragiClient.Configuration) -> LANraragiClient {
+        let client = LANraragiClient(configuration: configuration)
         lock.withLock {
             storedConfigurations.append(configuration)
+            storedClients.append(client)
         }
-        return LANraragiClient(configuration: configuration)
+        return client
     }
 }

@@ -48,31 +48,42 @@ actor LANraragiClientProvider {
     }
 
     func client(for profile: Profile) throws -> LANraragiClient {
-        let fingerprint = ConfigurationFingerprint(
-            baseURL: profile.baseURL,
-            acceptLanguage: profile.language,
-            maxConnectionsPerHost: maxConnectionsLoader(),
-            invalidationGeneration: invalidationGenerations.current(for: profile.id)
-        )
+        while true {
+            let invalidationGeneration = invalidationGenerations.current(for: profile.id)
+            let fingerprint = ConfigurationFingerprint(
+                baseURL: profile.baseURL,
+                acceptLanguage: profile.language,
+                maxConnectionsPerHost: maxConnectionsLoader(),
+                invalidationGeneration: invalidationGeneration
+            )
 
-        if let cached = clientsByProfileID[profile.id], cached.fingerprint == fingerprint {
-            return cached.client
+            if let cached = clientsByProfileID[profile.id], cached.fingerprint == fingerprint {
+                return cached.client
+            }
+
+            // A missing credential is a valid unauthenticated configuration. Actual
+            // Keychain read failures are allowed to propagate and are never cached.
+            let apiKey = try credentialLoader(profile.id)
+            let client = clientFactory(.init(
+                baseURL: fingerprint.baseURL,
+                apiKey: apiKey,
+                acceptLanguage: fingerprint.acceptLanguage,
+                maxConnectionsPerHost: fingerprint.maxConnectionsPerHost
+            ))
+
+            // invalidate(profileID:) is nonisolated so profile saves can advance
+            // this generation from another thread while a synchronous loader or
+            // factory is still running inside the actor. Discard that stale client.
+            guard invalidationGenerations.current(for: profile.id) == invalidationGeneration else {
+                continue
+            }
+
+            clientsByProfileID[profile.id] = CachedClient(
+                fingerprint: fingerprint,
+                client: client
+            )
+            return client
         }
-
-        // A missing credential is a valid unauthenticated configuration. Actual
-        // Keychain read failures are allowed to propagate and are never cached.
-        let apiKey = try credentialLoader(profile.id)
-        let client = clientFactory(.init(
-            baseURL: fingerprint.baseURL,
-            apiKey: apiKey,
-            acceptLanguage: fingerprint.acceptLanguage,
-            maxConnectionsPerHost: fingerprint.maxConnectionsPerHost
-        ))
-        clientsByProfileID[profile.id] = CachedClient(
-            fingerprint: fingerprint,
-            client: client
-        )
-        return client
     }
 
     nonisolated func invalidate(profileID: Profile.ID) {
