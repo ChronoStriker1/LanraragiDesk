@@ -1,6 +1,12 @@
 import Foundation
 
 public final class LANraragiClient: Sendable {
+    enum ThumbnailJobPollDecision: Equatable {
+        case completed
+        case failed(state: String)
+        case pending(state: String)
+    }
+
     public struct Configuration: Sendable {
         public var baseURL: URL
         public var apiKey: LANraragiAPIKey?
@@ -715,25 +721,46 @@ public final class LANraragiClient: Sendable {
         case .bytes(let data):
             return data
         case .job(let job):
-            var polls = 0
-            while polls < maxPolls {
+            for _ in 0..<max(0, maxPolls) {
                 try Task.checkCancellation()
                 try await Task.sleep(for: pollInterval)
                 let st = try await getMinionStatus(job: job.job)
-                let state = st.state ?? st.data?.state
-                if state == nil || state == "finished" {
-                    break
+                switch Self.thumbnailJobPollDecision(state: st.state ?? st.data?.state) {
+                case .completed:
+                    // Retry only after the job reports completion.
+                    switch try await getArchiveThumbnail(arcid: arcid, noFallback: noFallback, page: nil) {
+                    case .bytes(let data):
+                        return data
+                    case .job:
+                        throw LANraragiError.invalidResponse
+                    }
+                case .failed(let state):
+                    let message = "Thumbnail generation job \(job.job) failed (state: \(state))."
+                    throw LANraragiError.httpStatus(500, body: Data(message.utf8))
+                case .pending:
+                    continue
                 }
-                polls += 1
             }
 
-            // Retry after the job completes.
-            switch try await getArchiveThumbnail(arcid: arcid, noFallback: noFallback, page: nil) {
-            case .bytes(let data):
-                return data
-            case .job:
-                throw LANraragiError.invalidResponse
-            }
+            let message = "Thumbnail generation job \(job.job) did not finish after \(max(0, maxPolls)) polls."
+            throw LANraragiError.httpStatus(504, body: Data(message.utf8))
+        }
+    }
+
+    static func thumbnailJobPollDecision(state: String?) -> ThumbnailJobPollDecision {
+        guard let state else {
+            // Some LANraragi variants omit state once a job is complete.
+            return .completed
+        }
+
+        let normalizedState = state.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalizedState {
+        case "finished":
+            return .completed
+        case "failed":
+            return .failed(state: normalizedState)
+        default:
+            return .pending(state: normalizedState)
         }
     }
 
