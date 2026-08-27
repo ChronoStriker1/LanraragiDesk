@@ -62,7 +62,7 @@ final class LibraryViewModelGenerationTests: XCTestCase {
             dateAddedSortSupport: false,
             fellBackToTitle: true
         )
-        await staleLoad.value
+        _ = await staleLoad.value
 
         XCTAssertEqual(viewModel.arcids, ["new-1"])
         XCTAssertEqual(viewModel.sort, .newestAdded)
@@ -97,8 +97,8 @@ final class LibraryViewModelGenerationTests: XCTestCase {
         XCTAssertFalse(paginationRequest.groupTanks)
 
         await loader.succeed(call: 2, arcids: ["new-2", "new-3"], recordsFiltered: 3)
-        await firstScrollLoad.value
-        await coalescedScrollLoad.value
+        _ = await firstScrollLoad.value
+        _ = await coalescedScrollLoad.value
         XCTAssertEqual(viewModel.arcids, ["new-1", "new-2", "new-3"])
     }
 
@@ -116,7 +116,7 @@ final class LibraryViewModelGenerationTests: XCTestCase {
         await loader.waitForRequestCount(2)
 
         await loader.fail(call: 0, error: TestLoadError.staleFailure)
-        await staleLoad.value
+        _ = await staleLoad.value
 
         XCTAssertTrue(viewModel.isLoading, "Stale defer must not clear the current load's busy state")
         XCTAssertNil(viewModel.errorText, "A stale failure must not become the current generation's error")
@@ -145,7 +145,7 @@ final class LibraryViewModelGenerationTests: XCTestCase {
         let firstLoad = Task { await viewModel.loadMore(profile: firstProfile) }
         await loader.waitForRequestCount(1)
         await loader.succeed(call: 0, arcids: ["first-1"], recordsFiltered: 3)
-        await firstLoad.value
+        _ = await firstLoad.value
         XCTAssertEqual(viewModel.arcids, ["first-1"])
 
         viewModel.query = "second profile"
@@ -166,7 +166,7 @@ final class LibraryViewModelGenerationTests: XCTestCase {
         XCTAssertNil(request.knownDateAddedSortSupport)
 
         await loader.succeed(call: 1, arcids: ["second-1"], recordsFiltered: 1)
-        await secondLoad.value
+        _ = await secondLoad.value
         XCTAssertEqual(viewModel.arcids, ["second-1"])
     }
 

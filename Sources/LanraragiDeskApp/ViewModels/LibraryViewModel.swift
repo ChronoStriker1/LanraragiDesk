@@ -70,6 +70,14 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
+    enum LoadMoreOutcome: Equatable, Sendable {
+        case loaded
+        case reachedEnd
+        case alreadyLoading
+        case failed
+        case cancelledOrStale
+    }
+
     typealias PageLoader = @MainActor (Profile, SearchRequest) async throws -> PageLoadResult
 
     private struct LoadGeneration {
@@ -136,20 +144,24 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    func loadMore(profile: Profile) async {
+    @discardableResult
+    func loadMore(profile: Profile) async -> LoadMoreOutcome {
         let generation: LoadGeneration
         if let existing = loadGeneration, existing.profileID == profile.id {
             generation = existing
         } else {
             generation = beginGeneration(profile: profile)
         }
-        await loadMore(profile: profile, generationID: generation.id)
+        return await loadMore(profile: profile, generationID: generation.id)
     }
 
-    private func loadMore(profile: Profile, generationID: UUID) async {
-        guard let generation = loadGeneration, generation.id == generationID else { return }
-        guard activeLoadGenerationID != generationID else { return }
-        guard !reachedEnd else { return }
+    private func loadMore(profile: Profile, generationID: UUID) async -> LoadMoreOutcome {
+        guard let generation = loadGeneration, generation.id == generationID else {
+            return .cancelledOrStale
+        }
+        guard !Task.isCancelled else { return .cancelledOrStale }
+        guard activeLoadGenerationID != generationID else { return .alreadyLoading }
+        guard !reachedEnd else { return .reachedEnd }
 
         let request = SearchRequest(
             start: start,
@@ -176,7 +188,8 @@ final class LibraryViewModel: ObservableObject {
         do {
             let result = try await loadPage(profile: profile, request: request)
             guard loadGeneration?.id == generationID,
-                  activeLoadGenerationID == generationID else { return }
+                  activeLoadGenerationID == generationID,
+                  !Task.isCancelled else { return .cancelledOrStale }
 
             if let dateAddedSortSupport = result.dateAddedSortSupport {
                 supportsDateAddedSort = dateAddedSortSupport
@@ -188,25 +201,50 @@ final class LibraryViewModel: ObservableObject {
                 bannerText = "Server doesn’t support sorting by date added; using Title instead."
             }
             apply(resp: result.response)
+            return reachedEnd ? .reachedEnd : .loaded
         } catch {
             guard loadGeneration?.id == generationID,
-                  activeLoadGenerationID == generationID,
-                  !Task.isCancelled else { return }
+                  activeLoadGenerationID == generationID else {
+                return .cancelledOrStale
+            }
+            guard !Task.isCancelled, !(error is CancellationError) else {
+                return .cancelledOrStale
+            }
             errorText = ErrorPresenter.short(error)
+            return .failed
         }
     }
 
     func loadAll(profile: Profile) async -> [String] {
         guard !isLoadingAll else { return arcids }
+
+        let generation: LoadGeneration
+        if let existing = loadGeneration, existing.profileID == profile.id {
+            generation = existing
+        } else {
+            generation = beginGeneration(profile: profile)
+        }
+
         isLoadingAll = true
         defer { isLoadingAll = false }
 
-        while !reachedEnd {
-            if Task.isCancelled { break }
-            await loadMore(profile: profile)
-            if isLoading { break }
+        var accumulatedArcids = arcids
+        while true {
+            guard !Task.isCancelled else { return accumulatedArcids }
+
+            switch await loadMore(profile: profile, generationID: generation.id) {
+            case .loaded:
+                guard loadGeneration?.id == generation.id else { return accumulatedArcids }
+                accumulatedArcids = arcids
+            case .reachedEnd:
+                if loadGeneration?.id == generation.id {
+                    accumulatedArcids = arcids
+                }
+                return accumulatedArcids
+            case .alreadyLoading, .failed, .cancelledOrStale:
+                return accumulatedArcids
+            }
         }
-        return arcids
     }
 
     private func apply(resp: ArchiveSearch) {
