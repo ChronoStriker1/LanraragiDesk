@@ -137,6 +137,17 @@ private enum CoverThumbCache {
 }
 
 @MainActor
+enum CoverThumbCacheTestSupport {
+    static func insert(_ image: NSImage, for request: CoverThumbRequestKey) {
+        CoverThumbCache.insert(image, for: request)
+    }
+
+    static func contains(_ request: CoverThumbRequestKey) -> Bool {
+        CoverThumbCache.image(for: request) != nil
+    }
+}
+
+@MainActor
 final class CoverThumbInvalidationStore {
     static let shared = CoverThumbInvalidationStore()
 
@@ -165,7 +176,7 @@ struct CoverThumb: View {
     let showsBorder: Bool
     let reloadToken: Int
 
-    private let invalidations = CoverThumbInvalidationStore.shared
+    private let invalidationPublisher: AnyPublisher<Void, Never>
     @State private var image: NSImage?
     @State private var errorText: String?
     @State private var activeRequest: CoverThumbRequestKey?
@@ -190,11 +201,13 @@ struct CoverThumb: View {
         self.contentInset = contentInset
         self.showsBorder = showsBorder
         self.reloadToken = reloadToken
+        self.invalidationPublisher = CoverThumbInvalidationStore.shared.publisher(
+            for: CoverThumbIdentity(profileID: profile.id, arcid: arcid)
+        )
     }
 
     var body: some View {
         let clipShape = RoundedRectangle(cornerRadius: 10, style: .continuous)
-        let identity = CoverThumbIdentity(profileID: profile.id, arcid: arcid)
         let request = CoverThumbRequestKey(
             profileID: profile.id,
             arcid: arcid,
@@ -284,7 +297,7 @@ struct CoverThumb: View {
             task?.cancel()
             task = nil
         }
-        .onReceive(invalidations.publisher(for: identity)) {
+        .onReceive(invalidationPublisher) {
             revision &+= 1
         }
     }
