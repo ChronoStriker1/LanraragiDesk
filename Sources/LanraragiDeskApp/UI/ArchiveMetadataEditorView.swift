@@ -27,6 +27,7 @@ struct ArchiveMetadataEditorView: View {
     @State private var loadedSummary: String = ""
     @State private var tagQuery: String = ""
     @State private var tagSuggestions: [TagSuggestionStore.Suggestion] = []
+    @State private var suggestionTask: Task<Void, Never>?
     @State private var pageCount: Int = 0
     @State private var coverPage: Int = 1
     @State private var coverStatusText: String?
@@ -350,11 +351,17 @@ struct ArchiveMetadataEditorView: View {
             await loadPlugins()
         }
         .onChange(of: tagQuery) { _, _ in
-            Task { await refreshSuggestions() }
+            queueSuggestionRefresh()
         }
-        .onChange(of: summary) { _, newValue in
-            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            showSummaryEditor = !trimmed.isEmpty
+        .onChange(of: summary) { oldValue, newValue in
+            let wasEmpty = oldValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let isEmpty = newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            if wasEmpty, !isEmpty {
+                showSummaryEditor = true
+            }
+        }
+        .onDisappear {
+            suggestionTask?.cancel()
         }
     }
 
@@ -563,8 +570,22 @@ struct ArchiveMetadataEditorView: View {
         return TagSuggestionStore.Settings(minWeight: minWeight, ttlSeconds: ttlHours * 60 * 60)
     }
 
-    private func refreshSuggestions() async {
-        let q = tagQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func queueSuggestionRefresh() {
+        suggestionTask?.cancel()
+        let query = tagQuery
+        suggestionTask = Task {
+            do {
+                try await Task.sleep(for: .milliseconds(150))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            await refreshSuggestions(for: query)
+        }
+    }
+
+    private func refreshSuggestions(for query: String) async {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else {
             await MainActor.run { tagSuggestions = [] }
             return
@@ -573,6 +594,7 @@ struct ArchiveMetadataEditorView: View {
         let settings = tagSuggestionSettings()
 
         let sugg = await appModel.tagSuggestions.suggestions(profile: profile, settings: settings, prefix: q, limit: 20)
+        guard !Task.isCancelled, tagQuery == query else { return }
         await MainActor.run { tagSuggestions = sugg }
     }
 
