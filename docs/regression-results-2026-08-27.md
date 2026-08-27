@@ -14,6 +14,20 @@ Checklist source: [`REGRESSION_CHECKLIST.md`](REGRESSION_CHECKLIST.md)
 | Not Applicable | 0 |
 | **Total** | **32** |
 
+Per-section reconciliation:
+
+| Section | Pass | Blocked | Total |
+|---|---:|---:|---:|
+| Environment | 2 | 1 | 3 |
+| Library | 2 | 3 | 5 |
+| Reader | 0 | 4 | 4 |
+| Metadata Editor + Plugins | 0 | 4 | 4 |
+| Batch (Tags + Plugins) | 0 | 4 | 4 |
+| Duplicates | 0 | 7 | 7 |
+| Activity | 0 | 3 | 3 |
+| Final Sanity | 2 | 0 | 2 |
+| **Total** | **6** | **26** | **32** |
+
 No product failure was observed. This is not a fully qualified manual release
 pass: the 26 blocked checks still need the access or operator evidence listed
 below. Every blocked row is linked to [#77][blocker-77], which is the remaining
