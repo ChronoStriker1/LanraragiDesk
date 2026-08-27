@@ -25,10 +25,11 @@ final class AppModel: ObservableObject {
     let activity: ActivityStore
     let tagSuggestions: TagSuggestionStore
     let selection: SelectionModel
+    let clients: LANraragiClientProvider
 
     private var cancellables: Set<AnyCancellable> = []
 
-    init() {
+    init(clientProvider: LANraragiClientProvider = .shared) {
         self.profileStore = ProfileStore()
         self.savedQueryStore = SavedQueryStore()
         self.archives = ArchiveLoader()
@@ -36,6 +37,7 @@ final class AppModel: ObservableObject {
         self.activity = ActivityStore()
         self.tagSuggestions = TagSuggestionStore()
         self.selection = SelectionModel()
+        self.clients = clientProvider
         self.duplicates = DuplicateScanViewModel(thumbnails: thumbnails, archives: archives)
         self.duplicates.activitySink = { [weak self] event in
             self?.activity.add(event)
@@ -104,10 +106,11 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Call after a profile's base URL or API key changes so cached clients
-    /// don't keep using stale credentials until app restart.
+    /// Call after a profile's base URL, language, or API key changes so cached
+    /// clients don't keep using stale configuration until app restart.
     func invalidateClients(profileID: Profile.ID) {
         Task {
+            await clients.invalidate(profileID: profileID)
             await archives.invalidateClient(profileID: profileID)
             await thumbnails.invalidateClient(profileID: profileID)
         }

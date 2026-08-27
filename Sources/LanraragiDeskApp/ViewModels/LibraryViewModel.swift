@@ -48,6 +48,11 @@ final class LibraryViewModel: ObservableObject {
     private let pageSize: Int = 100
     private var reachedEnd: Bool = false
     private var supportsDateAddedSort: Bool?
+    private let clientProvider: LANraragiClientProvider
+
+    init(clientProvider: LANraragiClientProvider = .shared) {
+        self.clientProvider = clientProvider
+    }
 
     func refresh(profile: Profile) {
         start = 0
@@ -97,7 +102,7 @@ final class LibraryViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            let client = try makeClient(profile: profile)
+            let client = try await clientProvider.client(for: profile)
             let reqSort = sort
             let effectiveSort = await effectiveSortForServer(client: client, requested: reqSort)
 

@@ -41,6 +41,11 @@ final class PluginsViewModel: ObservableObject {
     private var pollTask: Task<Void, Never>?
     private var jobsProfileID: Profile.ID?
     private var jobsProfile: Profile?
+    private let clientProvider: LANraragiClientProvider
+
+    init(clientProvider: LANraragiClientProvider = .shared) {
+        self.clientProvider = clientProvider
+    }
 
     func load(profile: Profile) async {
         setActiveJobsProfileIfNeeded(profile)
@@ -59,7 +64,7 @@ final class PluginsViewModel: ObservableObject {
 
     func queue(profile: Profile, pluginID: String, arcid: String, arg: String?) async throws -> MinionJob {
         setActiveJobsProfileIfNeeded(profile)
-        let client = try makeClient(profile: profile)
+        let client = try await clientProvider.client(for: profile)
         return try await client.queuePlugin(pluginID: pluginID, arcid: arcid, arg: arg)
     }
 
@@ -97,7 +102,7 @@ final class PluginsViewModel: ObservableObject {
         guard jobID > 0 else { return .finished }
 
         do {
-            let client = try makeClient(profile: profile)
+            let client = try await clientProvider.client(for: profile)
             let pollLimit = max(1, maxPolls)
             let statusErrorLimit = max(1, maxConsecutiveStatusErrors)
             var consecutiveStatusErrors = 0
@@ -204,7 +209,7 @@ final class PluginsViewModel: ObservableObject {
             guard let profile = jobsProfile else { return }
 
             do {
-                let client = try makeClient(profile: profile)
+                let client = try await clientProvider.client(for: profile)
                 await pollJobsOnce(client: client)
             } catch {
                 statusText = "Failed to poll jobs: \(ErrorPresenter.short(error))"
