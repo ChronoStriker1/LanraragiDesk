@@ -61,21 +61,21 @@ final class AsyncImageDownsamplerTests: XCTestCase {
     }
 
     func testRunForwardsCallerCancellationToWorker() async throws {
-        let workerStarted = DispatchSemaphore(value: 0)
+        let (workerStarted, workerStartedContinuation) = AsyncStream<Void>.makeStream()
         let releaseWorker = DispatchSemaphore(value: 0)
         let workerObservation = LockedBoolean()
         let task = Task {
             try await AsyncImageDownsampler.run {
-                workerStarted.signal()
+                workerStartedContinuation.yield()
+                workerStartedContinuation.finish()
                 releaseWorker.wait()
                 workerObservation.set(Task.isCancelled)
                 return 1
             }
         }
 
-        await Task.detached {
-            workerStarted.wait()
-        }.value
+        var workerStartedIterator = workerStarted.makeAsyncIterator()
+        _ = await workerStartedIterator.next()
         task.cancel()
         releaseWorker.signal()
 
