@@ -185,6 +185,7 @@ struct CoverThumb: View {
 
     @AppStorage("thumbs.cropToFill") private var cropToFill: Bool = false
 
+    @MainActor
     init(
         profile: Profile,
         arcid: String,
