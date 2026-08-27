@@ -6,9 +6,11 @@ struct RootView: View {
     @EnvironmentObject private var appModel: AppModel
 
     @State private var showNotMatchesPanel: Bool = false
+    @State private var showClearNotMatchesConfirmation: Bool = false
     @State private var collapseRunCard: Bool = false
     @State private var advancedExpanded: Bool = false
     @State private var section: Section = .library
+    @State private var activatedSections: Set<Section> = [.library]
     @State private var sidebarVisible: Bool = true
     @AppStorage("sidebar.showStatistics") private var showStatisticsPage: Bool = false
 
@@ -46,6 +48,9 @@ struct RootView: View {
             if !enabled, section == .statistics {
                 section = .library
             }
+        }
+        .onChange(of: section) { _, activeSection in
+            activatedSections.insert(activeSection)
         }
         .onReceive(appModel.$librarySearchRequest) { request in
             guard let request else { return }
@@ -161,7 +166,7 @@ struct RootView: View {
                 .allowsHitTesting(section == .library)
                 .accessibilityHidden(section != .library)
 
-            if showStatisticsPage {
+            if showStatisticsPage, shouldMount(.statistics) {
                 StatisticsView(profile: profile)
                     .environmentObject(appModel)
                     .opacity(section == .statistics ? 1 : 0)
@@ -180,11 +185,13 @@ struct RootView: View {
                 .allowsHitTesting(section == .activity)
                 .accessibilityHidden(section != .activity)
 
-            BatchView()
-                .environmentObject(appModel)
-                .opacity(section == .batch ? 1 : 0)
-                .allowsHitTesting(section == .batch)
-                .accessibilityHidden(section != .batch)
+            if shouldMount(.batch) {
+                BatchView()
+                    .environmentObject(appModel)
+                    .opacity(section == .batch ? 1 : 0)
+                    .allowsHitTesting(section == .batch)
+                    .accessibilityHidden(section != .batch)
+            }
 
             SettingsView()
                 .environmentObject(appModel)
@@ -195,6 +202,10 @@ struct RootView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(24)
         .clipped()
+    }
+
+    private func shouldMount(_ target: Section) -> Bool {
+        section == target || activatedSections.contains(target)
     }
 
     @ViewBuilder
@@ -410,7 +421,7 @@ struct RootView: View {
             .font(.callout)
 
             Button("Clear “Not a match” decisions", role: .destructive) {
-                appModel.duplicates.clearNotDuplicateDecisions(profile: profile)
+                showClearNotMatchesConfirmation = true
             }
             .font(.callout)
 
@@ -431,6 +442,18 @@ struct RootView: View {
                 appModel.duplicates.start(profile: profile, rebuildIndex: true)
             }
             .font(.callout)
+        }
+        .confirmationDialog(
+            "Clear all “Not a match” decisions?",
+            isPresented: $showClearNotMatchesConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Clear All", role: .destructive) {
+                appModel.duplicates.clearNotDuplicateDecisions(profile: profile)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes all saved exclusions. Those pairs can appear in future duplicate scans again.")
         }
     }
 
