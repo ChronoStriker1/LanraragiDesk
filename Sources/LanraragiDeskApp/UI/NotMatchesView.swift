@@ -11,6 +11,7 @@ struct NotMatchesView: View {
 
     @State private var query: String = ""
     @State private var confirmRemove: IndexStore.NotDuplicatePair?
+    @State private var showClearAllConfirmation: Bool = false
 
     init(profile: Profile, embedded: Bool = false) {
         self.profile = profile
@@ -133,7 +134,7 @@ struct NotMatchesView: View {
             .disabled(appModel.duplicates.isRefreshingNotMatches)
 
             Button("Clear All", role: .destructive) {
-                appModel.duplicates.clearNotDuplicateDecisions(profile: profile)
+                showClearAllConfirmation = true
             }
 
             Button("Close") {
@@ -144,6 +145,18 @@ struct NotMatchesView: View {
         .padding(14)
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .confirmationDialog(
+            "Clear all “Not a match” decisions?",
+            isPresented: $showClearAllConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Clear All", role: .destructive) {
+                appModel.duplicates.clearNotDuplicateDecisions(profile: profile)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes all saved exclusions. Those pairs can appear in future duplicate scans again.")
+        }
     }
 
     private var embeddedHeader: some View {

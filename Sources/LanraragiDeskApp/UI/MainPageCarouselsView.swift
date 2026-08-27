@@ -423,7 +423,7 @@ private struct MainPageCarouselCard: View {
         popoverCloseTask?.cancel()
 
         if hoveringCover {
-            showDetails = true
+            // Avoid opening details during incidental passes across the carousel.
             popoverOpenTask = Task {
                 try? await Task.sleep(nanoseconds: Self.hoverOpenDelayNs)
                 if Task.isCancelled { return }
