@@ -805,6 +805,9 @@ struct ReaderView: View {
             do {
                 try await appModel.archives.updateThumbnail(
                     profile: profile, arcid: route.arcid, page: pageNumber)
+                await appModel.thumbnails.invalidate(profile: profile, arcid: route.arcid)
+                CoverThumbInvalidationStore.shared.invalidate(
+                    profileID: profile.id, arcid: route.arcid)
                 appModel.activity.add(.init(
                     kind: .action, title: "Cover updated",
                     detail: "Page \(pageNumber)", component: "Reader"))
