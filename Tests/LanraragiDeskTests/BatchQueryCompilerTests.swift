@@ -47,6 +47,29 @@ final class BatchQueryCompilerTests: XCTestCase {
         XCTAssertEqual(compiled.filter, "language:")
     }
 
+    func testCommaInNamespaceCannotCreateAnAdditionalPredicate() {
+        let invalid = BatchQueryCondition(
+            type: .tagPresent,
+            namespace: "artist, -language"
+        )
+
+        XCTAssertFalse(invalid.isValid)
+        XCTAssertEqual(invalid.validationMessage, "Namespaces cannot contain commas.")
+        XCTAssertTrue(BatchQueryCompiler.compile([invalid]).isEmpty)
+    }
+
+    func testCommaInExactValueCannotCreateAnAdditionalPredicate() {
+        let invalid = BatchQueryCondition(
+            type: .tagEquals,
+            namespace: "artist",
+            value: "wada rco, -language:japanese"
+        )
+
+        XCTAssertFalse(invalid.isValid)
+        XCTAssertEqual(invalid.validationMessage, "Exact tag values cannot contain commas.")
+        XCTAssertTrue(BatchQueryCompiler.compile([invalid]).isEmpty)
+    }
+
     func testNonTagConditionsStillCompileAlongsideTagConditions() {
         let compiled = BatchQueryCompiler.compile([
             BatchQueryCondition(type: .tagEquals, namespace: "language", value: "english"),

@@ -43,6 +43,11 @@ struct FindArchivesCard: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
+                Text("Existing saved “Tag equals” conditions are kept and now use complete exact-tag matching.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 HStack(spacing: 8) {
                     Text("Main page searches")
                         .font(.caption.weight(.semibold))
@@ -76,7 +81,7 @@ struct FindArchivesCard: View {
                         searchTask = Task { await runSearch() }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(BatchQueryCompiler.compile(conditions).isEmpty)
+                    .disabled(!canSubmitQuery)
                 }
 
                 if let categoriesError {
@@ -114,7 +119,7 @@ struct FindArchivesCard: View {
                         saveNameDraft = ""
                         showSaveSheet = true
                     }
-                    .disabled(BatchQueryCompiler.compile(conditions).isEmpty)
+                    .disabled(!canSubmitQuery)
 
                     Button("Delete", role: .destructive) {
                         if let id = selectedSavedQueryID {
@@ -267,6 +272,10 @@ struct FindArchivesCard: View {
         }
     }
 
+    private var canSubmitQuery: Bool {
+        conditions.allSatisfy(\.isValid) && !BatchQueryCompiler.compile(conditions).isEmpty
+    }
+
     private func applyMainPageSearch(_ kind: MainPageCarouselKind) {
         let target = kind.batchConditionType
         let hasTarget = conditions.contains { $0.type == target }
@@ -373,51 +382,59 @@ private struct ConditionRowView: View {
     let onRemove: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
-            Picker("Type", selection: $condition.type) {
-                ForEach(BatchQueryCondition.ConditionType.allCases, id: \.self) { type in
-                    Text(type.label).tag(type)
-                }
-            }
-            .pickerStyle(.menu)
-            .labelsHidden()
-            .fixedSize()
-
-            if condition.type.needsNamespace {
-                TextField("namespace", text: $condition.namespace)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 100)
-            }
-
-            if condition.type.needsValue {
-                Text(":")
-                    .foregroundStyle(.secondary)
-                TextField("exact value", text: $condition.value)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 120)
-            }
-
-            if condition.type.needsCategory {
-                Picker("Category", selection: $condition.categoryID) {
-                    Text("Select category").tag("")
-                    ForEach(categories, id: \.id) { cat in
-                        Text(cat.name).tag(cat.id)
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
+                Picker("Type", selection: $condition.type) {
+                    ForEach(BatchQueryCondition.ConditionType.allCases, id: \.self) { type in
+                        Text(type.label).tag(type)
                     }
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
+                .fixedSize()
+
+                if condition.type.needsNamespace {
+                    TextField("namespace", text: $condition.namespace)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 100)
+                }
+
+                if condition.type.needsValue {
+                    Text(":")
+                        .foregroundStyle(.secondary)
+                    TextField("exact value", text: $condition.value)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 120)
+                }
+
+                if condition.type.needsCategory {
+                    Picker("Category", selection: $condition.categoryID) {
+                        Text("Select category").tag("")
+                        ForEach(categories, id: \.id) { cat in
+                            Text(cat.name).tag(cat.id)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                }
+
+                Spacer()
+
+                Button(role: .destructive) {
+                    onRemove()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
             }
 
-            Spacer()
-
-            Button(role: .destructive) {
-                onRemove()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.caption.weight(.semibold))
+            if let validationMessage = condition.validationMessage {
+                Text(validationMessage)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
             }
-            .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
         }
     }
 }
