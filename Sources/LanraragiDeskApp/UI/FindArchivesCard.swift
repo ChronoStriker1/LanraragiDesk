@@ -17,6 +17,7 @@ struct FindArchivesCard: View {
     @State private var showSaveSheet: Bool = false
     @State private var saveNameDraft: String = ""
     @State private var selectedSavedQueryID: UUID? = nil
+    @State private var savedQueryErrorMessage: String?
     @State private var searchTask: Task<Void, Never>? = nil
 
     enum SearchStatus {
@@ -112,11 +113,32 @@ struct FindArchivesCard: View {
 
                     Button("Delete", role: .destructive) {
                         if let id = selectedSavedQueryID {
-                            appModel.savedQueryStore.delete(id: id)
-                            selectedSavedQueryID = nil
+                            do {
+                                try appModel.savedQueryStore.delete(id: id)
+                                selectedSavedQueryID = nil
+                                savedQueryErrorMessage = nil
+                            } catch {
+                                savedQueryErrorMessage = error.localizedDescription
+                            }
                         }
                     }
                     .disabled(selectedSavedQueryID == nil)
+                }
+
+                if let message = savedQueryErrorMessage ?? appModel.savedQueryStore.errorMessage {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                        Text(message)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        Button("Dismiss") {
+                            savedQueryErrorMessage = nil
+                            appModel.savedQueryStore.clearError()
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.red)
                 }
 
                 switch searchStatus {
@@ -205,6 +227,12 @@ struct FindArchivesCard: View {
                 TextField("Query name", text: $saveNameDraft)
                     .textFieldStyle(.roundedBorder)
                     .frame(minWidth: 260)
+                if let message = savedQueryErrorMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 HStack {
                     Button("Cancel") { showSaveSheet = false }
                     Spacer()
@@ -214,9 +242,14 @@ struct FindArchivesCard: View {
                             profileID: profile.id,
                             conditions: conditions
                         )
-                        appModel.savedQueryStore.save(q)
-                        selectedSavedQueryID = q.id
-                        showSaveSheet = false
+                        do {
+                            try appModel.savedQueryStore.save(q)
+                            selectedSavedQueryID = q.id
+                            savedQueryErrorMessage = nil
+                            showSaveSheet = false
+                        } catch {
+                            savedQueryErrorMessage = error.localizedDescription
+                        }
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(saveNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
