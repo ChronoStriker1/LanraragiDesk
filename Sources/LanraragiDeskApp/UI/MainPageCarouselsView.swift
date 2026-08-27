@@ -99,7 +99,8 @@ struct MainPageCarouselsView: View {
                         appModel.activity.add(.init(kind: .error, title: "Delete archive failed", detail: "\(arcid)\n\(error)"))
                         throw error
                     }
-                }
+                },
+                onRequestTiming: nil
             )
             .environmentObject(appModel)
         }

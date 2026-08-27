@@ -658,6 +658,7 @@ private struct PairCompareView: View {
                 }
                 activeInlineEditorSide = nil
             },
+            onRequestTiming: nil,
             isEmbedded: true
         )
         .frame(maxWidth: 640, maxHeight: topHeight)

@@ -58,7 +58,7 @@ struct ArchiveMetadataEditorView: View {
             LibraryRequestTimingOperation,
             Duration,
             LibraryRequestTimingOutcome
-        ) -> Void)? = nil,
+        ) -> Void)?,
         isEmbedded: Bool = false
     ) {
         self.profile = profile

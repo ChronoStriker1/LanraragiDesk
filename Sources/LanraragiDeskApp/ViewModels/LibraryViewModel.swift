@@ -192,13 +192,20 @@ final class LibraryViewModel: ObservableObject {
         let startedAt = clock.now
         do {
             let result = try await loadPage(profile: profile, request: request)
-            guard loadGeneration?.id == generationID,
-                  activeLoadGenerationID == generationID,
-                  !Task.isCancelled else {
+            guard !Task.isCancelled else {
                 recordPageTiming(
                     request: request,
                     duration: startedAt.duration(to: clock.now),
                     outcome: .cancelled
+                )
+                return .cancelledOrStale
+            }
+            guard loadGeneration?.id == generationID,
+                  activeLoadGenerationID == generationID else {
+                recordPageTiming(
+                    request: request,
+                    duration: startedAt.duration(to: clock.now),
+                    outcome: .superseded
                 )
                 return .cancelledOrStale
             }
@@ -222,13 +229,13 @@ final class LibraryViewModel: ObservableObject {
             return reachedEnd ? .reachedEnd : .loaded
         } catch {
             let duration = startedAt.duration(to: clock.now)
-            guard loadGeneration?.id == generationID,
-                  activeLoadGenerationID == generationID else {
+            guard !Task.isCancelled, !(error is CancellationError) else {
                 recordPageTiming(request: request, duration: duration, outcome: .cancelled)
                 return .cancelledOrStale
             }
-            guard !Task.isCancelled, !(error is CancellationError) else {
-                recordPageTiming(request: request, duration: duration, outcome: .cancelled)
+            guard loadGeneration?.id == generationID,
+                  activeLoadGenerationID == generationID else {
+                recordPageTiming(request: request, duration: duration, outcome: .superseded)
                 return .cancelledOrStale
             }
             recordPageTiming(request: request, duration: duration, outcome: .failed)
@@ -298,10 +305,8 @@ final class LibraryViewModel: ObservableObject {
         duration: Duration,
         outcome: LibraryRequestTimingOutcome
     ) {
-        let isInitialTextSearch = request.start == 0
-            && !request.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         recordTiming(
-            operation: isInitialTextSearch ? .search : .archivePage,
+            operation: .pageLoad(start: request.start, query: request.query),
             duration: duration,
             outcome: outcome
         )

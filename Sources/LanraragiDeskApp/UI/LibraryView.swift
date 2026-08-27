@@ -386,6 +386,7 @@ struct LibraryView: View {
         case .succeeded: return "checkmark.circle.fill"
         case .failed: return "exclamationmark.triangle.fill"
         case .cancelled: return "xmark.circle"
+        case .superseded: return "arrow.triangle.2.circlepath"
         }
     }
 
@@ -394,6 +395,7 @@ struct LibraryView: View {
         case .succeeded: return .green
         case .failed: return .red
         case .cancelled: return .secondary
+        case .superseded: return .orange
         }
     }
 

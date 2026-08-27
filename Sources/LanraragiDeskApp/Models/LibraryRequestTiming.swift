@@ -36,18 +36,27 @@ enum LibraryRequestTimingOperation: String, CaseIterable, Sendable {
         case .metadataUpdate: return "Metadata update"
         }
     }
+
+    /// Only the first page of a non-empty text query is labeled a search.
+    /// Empty-query loads and every subsequent page are archive page fetches.
+    static func pageLoad(start: Int, query: String) -> Self {
+        let hasTextQuery = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return start == 0 && hasTextQuery ? .search : .archivePage
+    }
 }
 
 enum LibraryRequestTimingOutcome: String, CaseIterable, Sendable {
     case succeeded
     case failed
     case cancelled
+    case superseded
 
     var title: String {
         switch self {
         case .succeeded: return "Succeeded"
         case .failed: return "Failed"
         case .cancelled: return "Cancelled"
+        case .superseded: return "Superseded"
         }
     }
 }

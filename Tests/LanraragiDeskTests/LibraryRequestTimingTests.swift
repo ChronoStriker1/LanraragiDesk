@@ -19,18 +19,24 @@ final class LibraryRequestTimingTests: XCTestCase {
         XCTAssertEqual(LibraryRequestTimingFormatter.duration(.milliseconds(62_500)), "1m 2.5 s")
     }
 
+    func testPageLoadClassificationBoundaries() {
+        XCTAssertEqual(LibraryRequestTimingOperation.pageLoad(start: 0, query: "artist:test"), .search)
+        XCTAssertEqual(LibraryRequestTimingOperation.pageLoad(start: 0, query: "  \n  "), .archivePage)
+        XCTAssertEqual(LibraryRequestTimingOperation.pageLoad(start: 100, query: "artist:test"), .archivePage)
+    }
+
     func testHistoryIsNewestFirstAndBounded() {
         var history = LibraryRequestTimingHistory(capacity: 2)
         let first = timing(id: 1, operation: .search, outcome: .succeeded)
         let second = timing(id: 2, operation: .archivePage, outcome: .failed)
-        let third = timing(id: 3, operation: .metadataRefresh, outcome: .cancelled)
+        let third = timing(id: 3, operation: .metadataRefresh, outcome: .superseded)
 
         history.record(first)
         history.record(second)
         history.record(third)
 
         XCTAssertEqual(history.entries, [third, second])
-        XCTAssertEqual(history.entries.map(\.outcome), [.cancelled, .failed])
+        XCTAssertEqual(history.entries.map(\.outcome), [.superseded, .failed])
     }
 
     func testNonPositiveCapacityStillRetainsLatestEntry() {
@@ -59,7 +65,7 @@ final class LibraryRequestTimingTests: XCTestCase {
 
 @MainActor
 final class LibraryRequestTimingGenerationTests: XCTestCase {
-    func testStaleSuccessIsRecordedAsCancelledAndCurrentSuccessRemainsLatest() async {
+    func testStaleSuccessIsRecordedAsSupersededAndCurrentSuccessRemainsLatest() async {
         let loader = TimingControlledLibraryPageLoader()
         let viewModel = LibraryViewModel(pageLoader: { _, request in
             try await loader.load(request: request)
@@ -81,18 +87,18 @@ final class LibraryRequestTimingGenerationTests: XCTestCase {
 
         await loader.succeed(call: 0, arcids: ["stale"])
         _ = await oldLoad.value
-        XCTAssertEqual(viewModel.requestTimingHistory.entries.first?.outcome, .cancelled)
+        XCTAssertEqual(viewModel.requestTimingHistory.entries.first?.outcome, .superseded)
 
         await loader.succeed(call: 1, arcids: ["current"])
         let finished = await eventually {
             viewModel.arcids == ["current"] && !viewModel.isLoading
         }
         XCTAssertTrue(finished)
-        XCTAssertEqual(viewModel.requestTimingHistory.entries.map(\.outcome), [.succeeded, .cancelled])
+        XCTAssertEqual(viewModel.requestTimingHistory.entries.map(\.outcome), [.succeeded, .superseded])
         XCTAssertEqual(viewModel.requestTimingHistory.entries.map(\.operation), [.search, .search])
     }
 
-    func testFailureAndCancellationOutcomesAreRetained() async {
+    func testFailureOutcomeIsRetained() async {
         let loader = TimingControlledLibraryPageLoader()
         let viewModel = LibraryViewModel(pageLoader: { _, request in
             try await loader.load(request: request)
@@ -108,20 +114,51 @@ final class LibraryRequestTimingGenerationTests: XCTestCase {
         await loader.fail(call: 0)
         _ = await failedLoad.value
         XCTAssertEqual(viewModel.requestTimingHistory.entries.first?.outcome, .failed)
+    }
 
-        viewModel.refresh(profile: profile)
-        await loader.waitForRequestCount(2)
-        viewModel.query = "replacement"
-        viewModel.refresh(profile: profile)
-        await loader.waitForRequestCount(3)
-        await loader.succeed(call: 1, arcids: ["cancelled"])
-        await loader.succeed(call: 2, arcids: ["replacement"])
+    func testTaskCancellationIsRecordedAsCancelled() async {
+        let loader = TimingControlledLibraryPageLoader()
+        let viewModel = LibraryViewModel(pageLoader: { _, request in
+            try await loader.load(request: request)
+        })
+        let profile = Profile(
+            name: "Test",
+            baseURL: URL(string: "https://example.test")!,
+            language: "en-US"
+        )
 
-        let finished = await eventually {
-            viewModel.arcids == ["replacement"] && !viewModel.isLoading
-        }
-        XCTAssertTrue(finished)
-        XCTAssertTrue(viewModel.requestTimingHistory.entries.contains { $0.outcome == .cancelled })
+        let cancelledLoad = Task { await viewModel.loadMore(profile: profile) }
+        await loader.waitForRequestCount(1)
+        cancelledLoad.cancel()
+        await loader.succeed(call: 0, arcids: ["ignored"])
+        let outcome = await cancelledLoad.value
+
+        XCTAssertEqual(outcome, .cancelledOrStale)
+        XCTAssertTrue(viewModel.arcids.isEmpty)
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertEqual(viewModel.requestTimingHistory.entries.map(\.outcome), [.cancelled])
+    }
+
+    func testCancellationErrorIsRecordedAsCancelled() async {
+        let loader = TimingControlledLibraryPageLoader()
+        let viewModel = LibraryViewModel(pageLoader: { _, request in
+            try await loader.load(request: request)
+        })
+        let profile = Profile(
+            name: "Test",
+            baseURL: URL(string: "https://example.test")!,
+            language: "en-US"
+        )
+
+        let load = Task { await viewModel.loadMore(profile: profile) }
+        await loader.waitForRequestCount(1)
+        await loader.cancel(call: 0)
+        let outcome = await load.value
+
+        XCTAssertEqual(outcome, .cancelledOrStale)
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertNil(viewModel.errorText)
+        XCTAssertEqual(viewModel.requestTimingHistory.entries.map(\.outcome), [.cancelled])
     }
 
     private func eventually(
@@ -179,6 +216,10 @@ private actor TimingControlledLibraryPageLoader {
 
     func fail(call: Int) {
         pending.removeValue(forKey: call)?.resume(throwing: TimingTestError.failure)
+    }
+
+    func cancel(call: Int) {
+        pending.removeValue(forKey: call)?.resume(throwing: CancellationError())
     }
 
     private func resumeWaiters() {
