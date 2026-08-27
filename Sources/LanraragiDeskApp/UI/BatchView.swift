@@ -198,11 +198,13 @@ struct BatchView: View {
                             Text(pluginCheckpointBannerText(checkpoint))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            Button("Resume Queue") {
-                                resumePluginBatchFromCheckpoint()
+                            if !pluginPaused {
+                                Button("Resume Queue") {
+                                    resumePluginBatchFromCheckpoint()
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(running || pluginRunning || previewRunning)
                             }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(running || pluginRunning || previewRunning)
                             Button("Discard") {
                                 clearPluginBatchCheckpoint()
                                 refreshResumablePluginBatch()
@@ -285,11 +287,21 @@ struct BatchView: View {
                                 .foregroundStyle(.secondary)
                         }
 
-                        Button(pluginRunning ? "Queueing…" : "Queue Batch") {
-                            runPluginBatch()
+                        let primaryAction = PluginBatchPrimaryAction.select(pluginPaused: pluginPaused)
+                        Button(primaryAction.title(pluginRunning: pluginRunning)) {
+                            switch primaryAction {
+                            case .queue:
+                                runPluginBatch()
+                            case .resume:
+                                resumePluginBatchFromCheckpoint()
+                            }
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(running || pluginRunning || previewRunning || selectedPluginID == nil || appModel.selection.count == 0)
+                        .disabled(
+                            running || pluginRunning || previewRunning
+                                || (primaryAction == .queue && (selectedPluginID == nil || appModel.selection.count == 0))
+                                || (primaryAction == .resume && resumablePluginBatch == nil)
+                        )
 
                         Button(pluginCancelRequested ? "Stopping…" : "Cancel", role: .destructive) {
                             requestPluginCancel()

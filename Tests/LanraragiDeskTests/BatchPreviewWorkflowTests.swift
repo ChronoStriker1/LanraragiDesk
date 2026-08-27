@@ -12,6 +12,18 @@ final class BatchPreviewWorkflowTests: XCTestCase {
         XCTAssertEqual(BatchPreviewWorkflow.startAction(previewEnabled: false), .queueImmediately)
     }
 
+    func testPluginBatchPrimaryActionReplacesQueueOnlyWhilePaused() {
+        let queue = PluginBatchPrimaryAction.select(pluginPaused: false)
+        XCTAssertEqual(queue, .queue)
+        XCTAssertEqual(queue.title(pluginRunning: false), "Queue Batch")
+        XCTAssertEqual(queue.title(pluginRunning: true), "Queueing…")
+
+        let resume = PluginBatchPrimaryAction.select(pluginPaused: true)
+        XCTAssertEqual(resume, .resume)
+        XCTAssertEqual(resume.title(pluginRunning: false), "Resume")
+        XCTAssertEqual(resume.title(pluginRunning: true), "Resume")
+    }
+
     func testSuccessfulPreviewThenQueueQueuesExactlyOnce() throws {
         var workflow = BatchPreviewWorkflow()
         let run = try startedRun(workflow.begin(intent: .previewThenQueue, id: UUID()))

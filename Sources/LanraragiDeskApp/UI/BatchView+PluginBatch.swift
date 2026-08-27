@@ -458,17 +458,21 @@ extension BatchView {
     func refreshResumablePluginBatch() {
         guard let profile = appModel.selectedProfile else {
             resumablePluginBatch = nil
+            pluginPaused = false
             return
         }
         guard let checkpoint = loadPluginBatchCheckpoint() else {
             resumablePluginBatch = nil
+            pluginPaused = false
             return
         }
         if checkpoint.profileID == profile.id || checkpoint.profileBaseURL == profile.baseURL.absoluteString {
             resumablePluginBatch = checkpoint
+            pluginPaused = checkpoint.paused ?? false
             restorePluginUIFromCheckpointIfNeeded(checkpoint)
         } else {
             resumablePluginBatch = nil
+            pluginPaused = false
         }
     }
     func persistPluginCheckpointIndexAndUI(

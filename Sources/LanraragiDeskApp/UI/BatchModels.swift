@@ -93,6 +93,24 @@ struct PluginBatchLaunch {
     let pluginApplyMode: PluginApplyMode
 }
 
+enum PluginBatchPrimaryAction: Equatable {
+    case queue
+    case resume
+
+    static func select(pluginPaused: Bool) -> Self {
+        pluginPaused ? .resume : .queue
+    }
+
+    func title(pluginRunning: Bool) -> String {
+        switch self {
+        case .queue:
+            return pluginRunning ? "Queueing…" : "Queue Batch"
+        case .resume:
+            return "Resume"
+        }
+    }
+}
+
 enum PluginBatchLaunchDecision: Equatable {
     case allowed
     case busy
