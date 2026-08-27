@@ -180,6 +180,10 @@ public final class IndexStore: @unchecked Sendable {
             }
 
             if let db {
+                // Do not make opening another short-lived store contend on a truncate.
+                // A passive checkpoint at close copies whatever is currently safe without
+                // invoking the busy handler; explicit index resets still request a truncate.
+                sqlite3_wal_checkpoint_v2(db, nil, SQLITE_CHECKPOINT_PASSIVE, nil, nil)
                 sqlite3_close(db)
             }
 
@@ -592,7 +596,26 @@ public final class IndexStore: @unchecked Sendable {
         let flags = SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX
         let rc = sqlite3_open_v2(url.path, &db, flags, nil)
         guard rc == SQLITE_OK else {
-            throw IndexStoreError.sqlite(rc: rc, message: db.flatMap { errorMessage($0) })
+            let message = db.flatMap { errorMessage($0) }
+            if let db {
+                sqlite3_close(db)
+            }
+            db = nil
+            throw IndexStoreError.sqlite(rc: rc, message: message)
+        }
+
+        guard let opened = db else {
+            throw IndexStoreError.notOpen
+        }
+
+        // Install contention handling before migration: CREATE TABLE and schema upgrades
+        // can need the writer lock before the remaining connection PRAGMAs are applied.
+        let busyTimeoutRC = sqlite3_busy_timeout(opened, 5_000)
+        guard busyTimeoutRC == SQLITE_OK else {
+            let message = errorMessage(opened)
+            sqlite3_close(opened)
+            db = nil
+            throw IndexStoreError.sqlite(rc: busyTimeoutRC, message: message)
         }
     }
 
@@ -605,9 +628,6 @@ public final class IndexStore: @unchecked Sendable {
         // Keep WAL bounded; large libraries can otherwise grow the -wal file until the disk fills.
         try exec(db, "PRAGMA wal_autocheckpoint = 1000;")
         try exec(db, "PRAGMA journal_size_limit = 67108864;") // 64 MiB
-
-        // Best-effort: shrink an existing huge WAL when opening (helps after a previous run ballooned it).
-        try exec(db, "PRAGMA wal_checkpoint(TRUNCATE);")
     }
 
     private static func migrate(db: OpaquePointer) throws {
