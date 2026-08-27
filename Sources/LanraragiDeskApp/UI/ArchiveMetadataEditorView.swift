@@ -531,6 +531,7 @@ struct ArchiveMetadataEditorView: View {
         do {
             try await archives.updateThumbnail(profile: profile, arcid: arcid, page: boundedPage)
             await appModel.thumbnails.invalidate(profile: profile, arcid: arcid)
+            CoverThumbInvalidationStore.shared.invalidate(profileID: profile.id, arcid: arcid)
 
             coverStatusText = "Cover updated to page \(boundedPage)."
             appModel.activity.add(.init(kind: .action, title: "Updated archive cover", detail: "\(arcid) • page \(boundedPage)"))

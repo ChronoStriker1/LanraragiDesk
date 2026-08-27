@@ -682,6 +682,7 @@ private struct PairCompareView: View {
         do {
             try await archives.updateThumbnail(profile: profile, arcid: arcid, page: page)
             await appModel.thumbnails.invalidate(profile: profile, arcid: arcid)
+            CoverThumbInvalidationStore.shared.invalidate(profileID: profile.id, arcid: arcid)
             if arcid == pair.arcidA {
                 metaA = try? await archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
             } else if arcid == pair.arcidB {
