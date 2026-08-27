@@ -514,7 +514,7 @@ struct BatchView: View {
                                 arcid: arcid,
                                 arg: pluginArgText
                             )
-                            if let patch = parsePluginMetadataPatch(from: raw) {
+                            if let patch = PluginMetadataSupport.parsePatch(from: raw) {
                                 let applied = applyPluginPatch(
                                     patch,
                                     currentTitle: previewTitle,
@@ -602,19 +602,18 @@ struct BatchView: View {
     @ViewBuilder
     func pluginOptionRow(_ param: PluginInfo.Parameter) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            let title = pluginOptionName(param)
-            let fallbackValue = pluginOptionValueText(param)
-            if pluginOptionIsBool(param), let boolValue = pluginBoolValue(param) {
+            let option = PluginMetadataSupport.optionPresentation(for: param)
+            if option.isBoolean, let boolValue = option.booleanValue {
                 Toggle(isOn: .constant(boolValue)) {
-                    Text(title)
+                    Text(option.name)
                         .font(.caption.weight(.semibold))
                 }
                 .toggleStyle(.switch)
                 .disabled(true)
             } else {
-                Text(title)
+                Text(option.name)
                     .font(.caption.weight(.semibold))
-                TextField("", text: .constant(fallbackValue))
+                TextField("", text: .constant(option.valueText))
                     .textFieldStyle(.roundedBorder)
                     .disabled(true)
                     .font(.caption2.monospaced())
@@ -633,37 +632,6 @@ struct BatchView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
-    func pluginOptionName(_ param: PluginInfo.Parameter) -> String {
-        let raw = param.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return raw.isEmpty ? "Option" : raw
-    }
-
-    func pluginOptionValueText(_ param: PluginInfo.Parameter) -> String {
-        let value = param.value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !value.isEmpty { return value }
-        let fallback = param.defaultValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return fallback
-    }
-
-    func pluginOptionIsBool(_ param: PluginInfo.Parameter) -> Bool {
-        let type = param.type?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
-        if type == "bool" || type == "boolean" { return true }
-        let v = pluginOptionValueText(param).lowercased()
-        return v == "true" || v == "false" || v == "1" || v == "0" || v == "yes" || v == "no"
-    }
-
-    func pluginBoolValue(_ param: PluginInfo.Parameter) -> Bool? {
-        let v = pluginOptionValueText(param).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        switch v {
-        case "true", "1", "yes", "on":
-            return true
-        case "false", "0", "no", "off":
-            return false
-        default:
-            return nil
-        }
-    }
-
     func applyDefaultPluginDelayFromSelection() {
         let seconds = defaultPluginDelaySeconds(for: selectedPlugin)
         pluginDelayText = delayDisplay(seconds)
@@ -679,7 +647,7 @@ struct BatchView: View {
         }
 
         for param in candidates {
-            let raw = pluginOptionValueText(param)
+            let raw = PluginMetadataSupport.optionPresentation(for: param).valueText
             let value = sanitizedDelaySeconds(from: raw)
             if value > 0 || raw.trimmingCharacters(in: .whitespacesAndNewlines) == "0" {
                 return value

@@ -106,7 +106,7 @@ extension BatchView {
                 do {
                     let prePluginMeta = try? await appModel.archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
                     let preSignature = prePluginMeta.map {
-                        metadataSignature(title: $0.title ?? "", tags: $0.tags ?? "", summary: $0.summary ?? "")
+                        PluginMetadataSupport.signature(title: $0.title ?? "", tags: $0.tags ?? "", summary: $0.summary ?? "")
                     }
 
                     let job = try await pluginsVM.queue(profile: profile, pluginID: pluginID, arcid: arcid, arg: pluginArgText)
@@ -456,7 +456,7 @@ extension BatchView {
         do {
             for attempt in 0..<6 {
                 let latest = try await appModel.archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
-                let latestSignature = metadataSignature(title: latest.title ?? "", tags: latest.tags ?? "", summary: latest.summary ?? "")
+                let latestSignature = PluginMetadataSupport.signature(title: latest.title ?? "", tags: latest.tags ?? "", summary: latest.summary ?? "")
                 if previousSignature == nil || previousSignature != latestSignature {
                     return true
                 }
@@ -479,7 +479,7 @@ extension BatchView {
     ) async -> Bool {
         do {
             let raw = try await pluginsVM.run(profile: profile, pluginID: pluginID, arcid: arcid, arg: pluginArgText)
-            guard let patch = parsePluginMetadataPatch(from: raw) else {
+            guard let patch = PluginMetadataSupport.parsePatch(from: raw) else {
                 // Some plugins apply metadata directly during /use and return no structured patch payload.
                 let changed = await refreshMetadataAfterPluginBatch(
                     profile: profile,
@@ -508,8 +508,8 @@ extension BatchView {
             let summaryToSave = applied.summary
             let tagsToSave = applied.tags
 
-            let beforeSignature = previousSignature ?? metadataSignature(title: currentTitle, tags: currentTagsRaw, summary: currentSummary)
-            let nextSignature = metadataSignature(title: titleToSave, tags: tagsToSave, summary: summaryToSave)
+            let beforeSignature = previousSignature ?? PluginMetadataSupport.signature(title: currentTitle, tags: currentTagsRaw, summary: currentSummary)
+            let nextSignature = PluginMetadataSupport.signature(title: titleToSave, tags: tagsToSave, summary: summaryToSave)
             guard beforeSignature != nextSignature else { return false }
 
             _ = try await appModel.archives.updateMetadata(
@@ -525,105 +525,6 @@ extension BatchView {
             appModel.activity.add(.init(kind: .warning, title: "Plugin output apply failed", detail: "\(pluginID) • \(arcid)\n\(error)"))
             return false
         }
-    }
-
-    func parsePluginMetadataPatch(from response: String) -> (title: String?, tags: String?, summary: String?)? {
-        guard
-            let data = response.data(using: .utf8),
-            let obj = try? JSONSerialization.jsonObject(with: data)
-        else {
-            return nil
-        }
-
-        func scalarString(_ value: Any?) -> String? {
-            guard let value else { return nil }
-            if let str = value as? String {
-                let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
-                return trimmed.isEmpty ? nil : trimmed
-            }
-            if let num = value as? NSNumber {
-                if CFGetTypeID(num) == CFBooleanGetTypeID() {
-                    return num.boolValue ? "true" : "false"
-                }
-                return num.stringValue
-            }
-            return nil
-        }
-
-        func csvString(_ value: Any?) -> String? {
-            if let scalar = scalarString(value) {
-                return scalar
-            }
-            if let arr = value as? [Any] {
-                let parts = arr.compactMap { scalarString($0) }
-                guard !parts.isEmpty else { return nil }
-                return parts.joined(separator: ", ")
-            }
-            return nil
-        }
-
-        func parseJSONDictionaryString(_ value: String) -> [String: Any]? {
-            guard let rawData = value.data(using: .utf8),
-                  let nested = try? JSONSerialization.jsonObject(with: rawData) as? [String: Any] else {
-                return nil
-            }
-            return nested
-        }
-
-        func extractPayload(_ value: Any) -> [String: Any]? {
-            if let dict = value as? [String: Any] {
-                if let nested = dict["data"] {
-                    if let payload = extractPayload(nested) {
-                        return payload
-                    }
-                }
-                for key in ["result", "metadata", "plugin_data", "plugin_result"] {
-                    if let nested = dict[key], let payload = extractPayload(nested) {
-                        return payload
-                    }
-                }
-                if dict["title"] != nil || dict["summary"] != nil || dict["new_tags"] != nil || dict["tags"] != nil {
-                    return dict
-                }
-            }
-            if let text = value as? String {
-                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                if let nested = parseJSONDictionaryString(trimmed) {
-                    return extractPayload(nested)
-                }
-            }
-            return nil
-        }
-
-        guard let payload = extractPayload(obj) else { return nil }
-
-        let title = scalarString(payload["title"])
-        let summary = scalarString(payload["summary"])
-        let newTags = csvString(payload["new_tags"])
-        let fullTags = csvString(payload["tags"])
-
-        let tags = [newTags, fullTags]
-            .compactMap { $0 }
-            .filter { !$0.isEmpty }
-            .joined(separator: ", ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let normalizedTitle = (title?.isEmpty == true) ? nil : title
-        let normalizedSummary = (summary?.isEmpty == true) ? nil : summary
-        let normalizedTags = tags.isEmpty ? nil : tags
-
-        guard normalizedTitle != nil || normalizedSummary != nil || normalizedTags != nil else {
-            return nil
-        }
-        return (normalizedTitle, normalizedTags, normalizedSummary)
-    }
-
-    func metadataSignature(title: String, tags: String, summary: String) -> String {
-        [
-            title.trimmingCharacters(in: .whitespacesAndNewlines),
-            normalizeTags(tags),
-            summary.trimmingCharacters(in: .whitespacesAndNewlines),
-        ].joined(separator: "|||")
     }
 
     func mergeTagCSV(base: String, additions: String) -> String {
@@ -671,7 +572,7 @@ extension BatchView {
     }
 
     func applyPluginPatch(
-        _ patch: (title: String?, tags: String?, summary: String?),
+        _ patch: PluginMetadataPatch,
         currentTitle: String,
         currentTags: String,
         currentSummary: String,

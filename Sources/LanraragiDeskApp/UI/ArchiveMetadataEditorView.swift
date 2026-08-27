@@ -586,7 +586,7 @@ struct ArchiveMetadataEditorView: View {
 
     private func queuePluginForArchive() {
         guard let pluginID = selectedPluginID else { return }
-        let prePluginSignature = metadataSignature(title: title, tags: tags, summary: summary)
+        let prePluginSignature = PluginMetadataSupport.signature(title: title, tags: tags, summary: summary)
         pluginRunning = true
         pluginRunStatus = "Queueing plugin job…"
 
@@ -662,7 +662,7 @@ struct ArchiveMetadataEditorView: View {
                 let latest = try await archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
                 updated = latest
                 if let previousSignature {
-                    let latestSignature = metadataSignature(
+                    let latestSignature = PluginMetadataSupport.signature(
                         title: latest.title ?? "",
                         tags: latest.tags ?? "",
                         summary: latest.summary ?? ""
@@ -680,7 +680,7 @@ struct ArchiveMetadataEditorView: View {
 
             guard let updated else { return false }
             let changed = previousSignature.map {
-                metadataSignature(title: updated.title ?? "", tags: updated.tags ?? "", summary: updated.summary ?? "") != $0
+                PluginMetadataSupport.signature(title: updated.title ?? "", tags: updated.tags ?? "", summary: updated.summary ?? "") != $0
             } ?? true
             await MainActor.run {
                 if changed {
@@ -711,7 +711,7 @@ struct ArchiveMetadataEditorView: View {
     private func applyMetadataFromPluginOutput(pluginID: String, previousSignature: String) async {
         do {
             let raw = try await pluginsVM.run(profile: profile, pluginID: pluginID, arcid: arcid, arg: pluginArgText)
-            guard let patch = parsePluginMetadataPatch(from: raw) else {
+            guard let patch = PluginMetadataSupport.parsePatch(from: raw) else {
                 await MainActor.run {
                     pluginRunStatus = "Plugin completed. No metadata changes detected."
                 }
@@ -732,7 +732,7 @@ struct ArchiveMetadataEditorView: View {
                 tagsToSave = currentTags
             }
 
-            let nextSignature = metadataSignature(title: titleToSave, tags: tagsToSave, summary: summaryToSave)
+            let nextSignature = PluginMetadataSupport.signature(title: titleToSave, tags: tagsToSave, summary: summaryToSave)
             guard nextSignature != previousSignature else {
                 await MainActor.run {
                     pluginRunStatus = "Plugin completed. No metadata changes detected."
@@ -761,49 +761,6 @@ struct ArchiveMetadataEditorView: View {
         }
     }
 
-    private func parsePluginMetadataPatch(from response: String) -> (title: String?, tags: String?, summary: String?)? {
-        guard
-            let data = response.data(using: .utf8),
-            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else {
-            return nil
-        }
-        guard let payload = obj["data"] as? [String: Any] else { return nil }
-
-        let title = (payload["title"] as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let summary = (payload["summary"] as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let newTags = (payload["new_tags"] as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let fullTags = (payload["tags"] as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let tags = [newTags, fullTags]
-            .compactMap { $0 }
-            .filter { !$0.isEmpty }
-            .joined(separator: ", ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let normalizedTitle = (title?.isEmpty == true) ? nil : title
-        let normalizedSummary = (summary?.isEmpty == true) ? nil : summary
-        let normalizedTags = tags.isEmpty ? nil : tags
-
-        guard normalizedTitle != nil || normalizedSummary != nil || normalizedTags != nil else {
-            return nil
-        }
-
-        return (normalizedTitle, normalizedTags, normalizedSummary)
-    }
-
-    private func metadataSignature(title: String, tags: String, summary: String) -> String {
-        let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedTags = MetadataTagFormatter.normalizedCSV(from: tags)
-        let normalizedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
-        return [normalizedTitle, normalizedTags, normalizedSummary].joined(separator: "|||")
-    }
-
     private var selectedPlugin: PluginInfo? {
         guard let id = selectedPluginID else { return nil }
         return pluginsVM.plugins.first(where: { $0.id == id })
@@ -812,19 +769,18 @@ struct ArchiveMetadataEditorView: View {
     @ViewBuilder
     private func pluginOptionRow(_ param: PluginInfo.Parameter) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            let title = pluginOptionName(param)
-            let fallbackValue = pluginOptionValueText(param)
-            if pluginOptionIsBool(param), let boolValue = pluginBoolValue(param) {
+            let option = PluginMetadataSupport.optionPresentation(for: param)
+            if option.isBoolean, let boolValue = option.booleanValue {
                 Toggle(isOn: .constant(boolValue)) {
-                    Text(title)
+                    Text(option.name)
                         .font(.caption2.weight(.semibold))
                 }
                 .toggleStyle(.switch)
                 .disabled(true)
             } else {
-                Text(title)
+                Text(option.name)
                     .font(.caption2.weight(.semibold))
-                TextField("", text: .constant(fallbackValue))
+                TextField("", text: .constant(option.valueText))
                     .textFieldStyle(.roundedBorder)
                     .disabled(true)
                     .font(.caption2.monospaced())
@@ -840,37 +796,6 @@ struct ArchiveMetadataEditorView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.primary.opacity(0.06))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-    }
-
-    private func pluginOptionName(_ param: PluginInfo.Parameter) -> String {
-        let raw = param.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return raw.isEmpty ? "Option" : raw
-    }
-
-    private func pluginOptionValueText(_ param: PluginInfo.Parameter) -> String {
-        let value = param.value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !value.isEmpty { return value }
-        let fallback = param.defaultValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return fallback
-    }
-
-    private func pluginOptionIsBool(_ param: PluginInfo.Parameter) -> Bool {
-        let type = param.type?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
-        if type == "bool" || type == "boolean" { return true }
-        let v = pluginOptionValueText(param).lowercased()
-        return v == "true" || v == "false" || v == "1" || v == "0" || v == "yes" || v == "no"
-    }
-
-    private func pluginBoolValue(_ param: PluginInfo.Parameter) -> Bool? {
-        let v = pluginOptionValueText(param).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        switch v {
-        case "true", "1", "yes", "on":
-            return true
-        case "false", "0", "no", "off":
-            return false
-        default:
-            return nil
-        }
     }
 }
 
