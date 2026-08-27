@@ -945,11 +945,47 @@ public final class LANraragiClient: Sendable {
         return url
     }
 
-    private func applyDefaultHeaders(to req: inout URLRequest) {
+    func applyDefaultHeaders(to req: inout URLRequest) {
         req.setValue("LanraragiDesk", forHTTPHeaderField: "User-Agent")
         req.setValue(config.acceptLanguage, forHTTPHeaderField: "Accept-Language")
-        if let key = config.apiKey {
+        // Archive page URLs may be absolute and cross-origin. Never forward the
+        // server credential to a destination that the configured profile does
+        // not authenticate.
+        if let key = config.apiKey, hasSameOrigin(req.url, as: config.baseURL) {
             req.setValue(key.bearerHeaderValue, forHTTPHeaderField: "Authorization")
+        } else {
+            req.setValue(nil, forHTTPHeaderField: "Authorization")
+        }
+    }
+
+    private func hasSameOrigin(_ requestURL: URL?, as baseURL: URL) -> Bool {
+        guard
+            let requestURL,
+            let requestScheme = requestURL.scheme?.lowercased(),
+            let baseScheme = baseURL.scheme?.lowercased(),
+            let requestHost = requestURL.host?.lowercased(),
+            let baseHost = baseURL.host?.lowercased(),
+            requestScheme == baseScheme,
+            requestHost == baseHost
+        else {
+            return false
+        }
+
+        return effectivePort(for: requestURL, scheme: requestScheme)
+            == effectivePort(for: baseURL, scheme: baseScheme)
+    }
+
+    private func effectivePort(for url: URL, scheme: String) -> Int? {
+        if let port = url.port {
+            return port
+        }
+        switch scheme {
+        case "http":
+            return 80
+        case "https":
+            return 443
+        default:
+            return nil
         }
     }
 
