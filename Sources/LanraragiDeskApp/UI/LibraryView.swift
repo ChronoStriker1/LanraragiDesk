@@ -82,7 +82,7 @@ struct LibraryView: View {
                 initialMeta: nil,
                 archives: appModel.archives,
                 onSaved: { updated in
-                    storeListMetadata(updated, for: updated.arcid)
+                    storeListMetadata(updated, for: route.arcid)
                     metadataEpoch &+= 1
                 },
                 onDelete: { arcid in
@@ -91,12 +91,8 @@ struct LibraryView: View {
                         await appModel.thumbnails.invalidate(profile: profile, arcid: arcid)
                         appModel.selection.remove(arcid)
                         metaByArcid[arcid] = nil
-                        listRowsCache.updateMetadata(
-                            nil,
-                            for: arcid,
-                            sortOrder: listSortOrder
-                        )
-                        refreshLibrary()
+                        listRowsCache.removeRow(for: arcid)
+                        refreshLibrary(excluding: arcid)
                         appModel.activity.add(.init(kind: .action, title: "Deleted archive", detail: arcid))
                     } catch {
                         appModel.activity.add(.init(kind: .error, title: "Delete archive failed", detail: "\(arcid)\n\(error)"))
@@ -469,11 +465,17 @@ struct LibraryView: View {
         refreshLibrary()
     }
 
-    private func refreshLibrary() {
+    private func refreshLibrary(excluding excludedArcid: String? = nil) {
         metadataEpoch &+= 1
         metaByArcid.removeAll()
+        let visibleArcids: [String]
+        if let excludedArcid {
+            visibleArcids = vm.arcids.filter { $0 != excludedArcid }
+        } else {
+            visibleArcids = vm.arcids
+        }
         listRowsCache.rebuild(
-            arcids: vm.arcids,
+            arcids: visibleArcids,
             metadata: metaByArcid,
             sortOrder: listSortOrder
         )
@@ -879,6 +881,7 @@ struct LibraryView: View {
     }
 }
 
+// App-internal so the cache behavior can be covered through @testable import.
 struct LibraryListRow: Identifiable, Hashable {
     let arcid: String
     let sourceIndex: Int
@@ -921,92 +924,6 @@ struct LibraryListRow: Identifiable, Hashable {
 
         self.artist = ArchiveMetaHelpers.artists(meta).joined(separator: ", ")
         self.group = ArchiveMetaHelpers.groups(meta).joined(separator: ", ")
-    }
-}
-
-struct LibraryListRowsCache {
-    private(set) var rows: [LibraryListRow] = []
-
-    mutating func rebuild(
-        arcids: [String],
-        metadata: [String: ArchiveMetadata],
-        sortOrder: [KeyPathComparator<LibraryListRow>]
-    ) {
-        rows = arcids.enumerated().map { sourceIndex, arcid in
-            LibraryListRow(
-                arcid: arcid,
-                sourceIndex: sourceIndex,
-                meta: metadata[arcid]
-            )
-        }
-        sort(using: sortOrder)
-    }
-
-    mutating func updateMetadata(
-        _ metadata: ArchiveMetadata?,
-        for arcid: String,
-        sortOrder: [KeyPathComparator<LibraryListRow>]
-    ) {
-        guard let oldIndex = rows.firstIndex(where: { $0.arcid == arcid }) else {
-            return
-        }
-
-        let sourceIndex = rows[oldIndex].sourceIndex
-        rows.remove(at: oldIndex)
-
-        let updated = LibraryListRow(
-            arcid: arcid,
-            sourceIndex: sourceIndex,
-            meta: metadata
-        )
-        let insertionIndex = insertionIndex(for: updated, sortOrder: sortOrder)
-        rows.insert(updated, at: insertionIndex)
-    }
-
-    mutating func sort(using sortOrder: [KeyPathComparator<LibraryListRow>]) {
-        rows.sort { lhs, rhs in
-            Self.precedes(lhs, rhs, sortOrder: sortOrder)
-        }
-    }
-
-    private func insertionIndex(
-        for row: LibraryListRow,
-        sortOrder: [KeyPathComparator<LibraryListRow>]
-    ) -> Int {
-        var lowerBound = 0
-        var upperBound = rows.count
-
-        while lowerBound < upperBound {
-            let middle = lowerBound + (upperBound - lowerBound) / 2
-            if Self.precedes(rows[middle], row, sortOrder: sortOrder) {
-                lowerBound = middle + 1
-            } else {
-                upperBound = middle
-            }
-        }
-
-        return lowerBound
-    }
-
-    private static func precedes(
-        _ lhs: LibraryListRow,
-        _ rhs: LibraryListRow,
-        sortOrder: [KeyPathComparator<LibraryListRow>]
-    ) -> Bool {
-        for comparator in sortOrder {
-            let result = comparator.compare(lhs, rhs)
-            if result == .orderedAscending {
-                return true
-            }
-            if result == .orderedDescending {
-                return false
-            }
-        }
-
-        if lhs.sourceIndex != rhs.sourceIndex {
-            return lhs.sourceIndex < rhs.sourceIndex
-        }
-        return lhs.arcid < rhs.arcid
     }
 }
 

@@ -95,4 +95,68 @@ final class LibraryListRowsCacheTests: XCTestCase {
         XCTAssertEqual(cache.rows.map(\.title), ["Loaded", "Untitled"])
         XCTAssertEqual(cache.rows.map(\.sourceIndex), [0, 1])
     }
+
+    func testSortReordersExistingRowsForNewDescriptor() {
+        var cache = LibraryListRowsCache()
+        let metadata = [
+            "a": ArchiveMetadata(arcid: "a", title: "Alpha"),
+            "b": ArchiveMetadata(arcid: "b", title: "Zulu")
+        ]
+        cache.rebuild(
+            arcids: ["a", "b"],
+            metadata: metadata,
+            sortOrder: [.init(\.title)]
+        )
+
+        cache.sort(using: [.init(\.title, order: .reverse)])
+
+        XCTAssertEqual(cache.rows.map(\.arcid), ["b", "a"])
+    }
+
+    func testRemoveRowAndAbsentArcidOperationsAreNoOpsWhenMissing() {
+        var cache = LibraryListRowsCache()
+        cache.rebuild(
+            arcids: ["a", "b"],
+            metadata: [:],
+            sortOrder: []
+        )
+
+        cache.removeRow(for: "a")
+        XCTAssertEqual(cache.rows.map(\.arcid), ["b"])
+
+        cache.removeRow(for: "missing")
+        cache.updateMetadata(
+            ArchiveMetadata(arcid: "missing", title: "Should not appear"),
+            for: "missing",
+            sortOrder: []
+        )
+        XCTAssertEqual(cache.rows.map(\.arcid), ["b"])
+    }
+
+    func testMetadataUpdatePreservesMultiComparatorOrdering() {
+        var cache = LibraryListRowsCache()
+        let sortOrder: [KeyPathComparator<LibraryListRow>] = [
+            .init(\.isNewSortKey, order: .reverse),
+            .init(\.title)
+        ]
+        let metadata = [
+            "a": ArchiveMetadata(arcid: "a", title: "Beta", isnew: true),
+            "b": ArchiveMetadata(arcid: "b", title: "Alpha", isnew: false),
+            "c": ArchiveMetadata(arcid: "c", title: "Alpha", isnew: true)
+        ]
+        cache.rebuild(
+            arcids: ["a", "b", "c"],
+            metadata: metadata,
+            sortOrder: sortOrder
+        )
+        XCTAssertEqual(cache.rows.map(\.arcid), ["c", "a", "b"])
+
+        cache.updateMetadata(
+            ArchiveMetadata(arcid: "b", title: "Aardvark", isnew: true),
+            for: "b",
+            sortOrder: sortOrder
+        )
+
+        XCTAssertEqual(cache.rows.map(\.arcid), ["b", "c", "a"])
+    }
 }
