@@ -27,6 +27,7 @@ struct LibraryView: View {
     // Used by list/table view to avoid refetching metadata per-cell.
     @State private var metaByArcid: [String: ArchiveMetadata] = [:]
     @State private var metadataEpoch: Int = 0
+    @State private var listRowsCache = LibraryListRowsCache()
     @State private var listSortOrder: [KeyPathComparator<LibraryListRow>] = [
         .init(\.dateAddedSortKey, order: .reverse)
     ]
@@ -81,7 +82,7 @@ struct LibraryView: View {
                 initialMeta: nil,
                 archives: appModel.archives,
                 onSaved: { updated in
-                    metaByArcid[updated.arcid] = updated
+                    storeListMetadata(updated, for: updated.arcid)
                     metadataEpoch &+= 1
                 },
                 onDelete: { arcid in
@@ -90,6 +91,11 @@ struct LibraryView: View {
                         await appModel.thumbnails.invalidate(profile: profile, arcid: arcid)
                         appModel.selection.remove(arcid)
                         metaByArcid[arcid] = nil
+                        listRowsCache.updateMetadata(
+                            nil,
+                            for: arcid,
+                            sortOrder: listSortOrder
+                        )
                         refreshLibrary()
                         appModel.activity.add(.init(kind: .action, title: "Deleted archive", detail: arcid))
                     } catch {
@@ -144,6 +150,13 @@ struct LibraryView: View {
         }
         .onChange(of: vm.groupTanks) { _, _ in
             refreshLibrary()
+        }
+        .onChange(of: vm.arcids, initial: true) { _, arcids in
+            listRowsCache.rebuild(
+                arcids: arcids,
+                metadata: metaByArcid,
+                sortOrder: listSortOrder
+            )
         }
         .onReceive(appModel.$librarySearchRequest) { request in
             guard let request else { return }
@@ -459,6 +472,11 @@ struct LibraryView: View {
     private func refreshLibrary() {
         metadataEpoch &+= 1
         metaByArcid.removeAll()
+        listRowsCache.rebuild(
+            arcids: vm.arcids,
+            metadata: metaByArcid,
+            sortOrder: listSortOrder
+        )
         vm.refresh(profile: profile)
     }
 
@@ -570,19 +588,18 @@ struct LibraryView: View {
         }
     }
 
-    private var listRows: [LibraryListRow] {
-        vm.arcids.map { arcid in
-            let meta = metaByArcid[arcid]
-            return LibraryListRow(arcid: arcid, meta: meta)
-        }
-    }
-
-    private var sortedListRows: [LibraryListRow] {
-        listRows.sorted(using: listSortOrder)
+    private var listSortBinding: Binding<[KeyPathComparator<LibraryListRow>]> {
+        Binding(
+            get: { listSortOrder },
+            set: { newSortOrder in
+                listSortOrder = newSortOrder
+                listRowsCache.sort(using: newSortOrder)
+            }
+        )
     }
 
     private var libraryTable: some View {
-        Table(sortedListRows, sortOrder: $listSortOrder) {
+        Table(listRowsCache.rows, sortOrder: listSortBinding) {
             TableColumn("Select") { row in
                 if LANraragiID.isTankoubon(row.arcid) {
                     Image(systemName: "rectangle.stack")
@@ -618,7 +635,9 @@ struct LibraryView: View {
                     if metaByArcid[row.arcid] != nil { return }
                     do {
                         let meta = try await appModel.archives.metadata(profile: profile, arcid: row.arcid)
-                        await MainActor.run { metaByArcid[row.arcid] = meta }
+                        await MainActor.run {
+                            storeListMetadata(meta, for: row.arcid)
+                        }
                     } catch {
                         // Leave as-is; cover/title still show.
                     }
@@ -708,6 +727,15 @@ struct LibraryView: View {
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .background(.thinMaterial)
         .debugFrameNumber(2)
+    }
+
+    private func storeListMetadata(_ metadata: ArchiveMetadata, for arcid: String) {
+        metaByArcid[arcid] = metadata
+        listRowsCache.updateMetadata(
+            metadata,
+            for: arcid,
+            sortOrder: listSortOrder
+        )
     }
 
     private func refreshSuggestions() async {
@@ -851,8 +879,9 @@ struct LibraryView: View {
     }
 }
 
-private struct LibraryListRow: Identifiable, Hashable {
+struct LibraryListRow: Identifiable, Hashable {
     let arcid: String
+    let sourceIndex: Int
 
     let isNew: Bool
     let dateAdded: Date?
@@ -879,8 +908,9 @@ private struct LibraryListRow: Identifiable, Hashable {
         return f
     }()
 
-    init(arcid: String, meta: ArchiveMetadata?) {
+    init(arcid: String, sourceIndex: Int, meta: ArchiveMetadata?) {
         self.arcid = arcid
+        self.sourceIndex = sourceIndex
 
         let t = meta?.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         self.title = t.isEmpty ? "Untitled" : t
@@ -891,6 +921,92 @@ private struct LibraryListRow: Identifiable, Hashable {
 
         self.artist = ArchiveMetaHelpers.artists(meta).joined(separator: ", ")
         self.group = ArchiveMetaHelpers.groups(meta).joined(separator: ", ")
+    }
+}
+
+struct LibraryListRowsCache {
+    private(set) var rows: [LibraryListRow] = []
+
+    mutating func rebuild(
+        arcids: [String],
+        metadata: [String: ArchiveMetadata],
+        sortOrder: [KeyPathComparator<LibraryListRow>]
+    ) {
+        rows = arcids.enumerated().map { sourceIndex, arcid in
+            LibraryListRow(
+                arcid: arcid,
+                sourceIndex: sourceIndex,
+                meta: metadata[arcid]
+            )
+        }
+        sort(using: sortOrder)
+    }
+
+    mutating func updateMetadata(
+        _ metadata: ArchiveMetadata?,
+        for arcid: String,
+        sortOrder: [KeyPathComparator<LibraryListRow>]
+    ) {
+        guard let oldIndex = rows.firstIndex(where: { $0.arcid == arcid }) else {
+            return
+        }
+
+        let sourceIndex = rows[oldIndex].sourceIndex
+        rows.remove(at: oldIndex)
+
+        let updated = LibraryListRow(
+            arcid: arcid,
+            sourceIndex: sourceIndex,
+            meta: metadata
+        )
+        let insertionIndex = insertionIndex(for: updated, sortOrder: sortOrder)
+        rows.insert(updated, at: insertionIndex)
+    }
+
+    mutating func sort(using sortOrder: [KeyPathComparator<LibraryListRow>]) {
+        rows.sort { lhs, rhs in
+            Self.precedes(lhs, rhs, sortOrder: sortOrder)
+        }
+    }
+
+    private func insertionIndex(
+        for row: LibraryListRow,
+        sortOrder: [KeyPathComparator<LibraryListRow>]
+    ) -> Int {
+        var lowerBound = 0
+        var upperBound = rows.count
+
+        while lowerBound < upperBound {
+            let middle = lowerBound + (upperBound - lowerBound) / 2
+            if Self.precedes(rows[middle], row, sortOrder: sortOrder) {
+                lowerBound = middle + 1
+            } else {
+                upperBound = middle
+            }
+        }
+
+        return lowerBound
+    }
+
+    private static func precedes(
+        _ lhs: LibraryListRow,
+        _ rhs: LibraryListRow,
+        sortOrder: [KeyPathComparator<LibraryListRow>]
+    ) -> Bool {
+        for comparator in sortOrder {
+            let result = comparator.compare(lhs, rhs)
+            if result == .orderedAscending {
+                return true
+            }
+            if result == .orderedDescending {
+                return false
+            }
+        }
+
+        if lhs.sourceIndex != rhs.sourceIndex {
+            return lhs.sourceIndex < rhs.sourceIndex
+        }
+        return lhs.arcid < rhs.arcid
     }
 }
 
