@@ -353,6 +353,13 @@ struct ArchiveMetadataEditorView: View {
         .onChange(of: tagQuery) { _, _ in
             queueSuggestionRefresh()
         }
+        .onChange(of: summary) { oldValue, newValue in
+            let wasEmpty = oldValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let isEmpty = newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            if wasEmpty, !isEmpty {
+                showSummaryEditor = true
+            }
+        }
         .onDisappear {
             suggestionTask?.cancel()
         }
