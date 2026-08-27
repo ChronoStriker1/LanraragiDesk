@@ -1,10 +1,27 @@
 import Foundation
 
+enum ProfileUpsertResult: Equatable {
+    case inserted
+    case updated
+    case rejectedMismatchedID(existingID: UUID)
+}
+
+protocol ProfileCredentialStoring {
+    func deleteAPIKey(for profileID: UUID) throws
+}
+
+struct KeychainProfileCredentialStore: ProfileCredentialStoring {
+    func deleteAPIKey(for profileID: UUID) throws {
+        try KeychainService.delete(account: "apiKey.\(profileID.uuidString)")
+    }
+}
+
 @MainActor
 final class ProfileStore: ObservableObject {
     @Published private(set) var profiles: [Profile] = []
 
     private let fileURL: URL
+    private let credentialStore: any ProfileCredentialStoring
 
     init() {
         let fm = FileManager.default
@@ -12,6 +29,13 @@ final class ProfileStore: ObservableObject {
         let dir = appSupport.appendingPathComponent("LanraragiDesk", isDirectory: true)
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         self.fileURL = dir.appendingPathComponent("profiles.json")
+        self.credentialStore = KeychainProfileCredentialStore()
+        load()
+    }
+
+    init(fileURL: URL, credentialStore: any ProfileCredentialStoring) {
+        self.fileURL = fileURL
+        self.credentialStore = credentialStore
         load()
     }
 
@@ -33,36 +57,73 @@ final class ProfileStore: ObservableObject {
 
         // This app is single-profile by design: keep only the first.
         if profiles.count > 1 {
+            let loadedProfiles = profiles
+            let discardedProfiles = profiles.dropFirst()
             profiles = [profiles[0]]
-            save()
+            do {
+                try save()
+                for profile in discardedProfiles {
+                    try? credentialStore.deleteAPIKey(for: profile.id)
+                }
+            } catch {
+                profiles = loadedProfiles
+                NSLog("ProfileStore: failed to persist single-profile cleanup: %@", String(describing: error))
+            }
         }
     }
 
-    func upsert(_ profile: Profile) {
+    @discardableResult
+    func upsert(_ profile: Profile) throws -> ProfileUpsertResult {
+        let previousProfiles = profiles
         if let idx = profiles.firstIndex(where: { $0.id == profile.id }) {
             profiles[idx] = profile
+            do {
+                try save()
+                return .updated
+            } catch {
+                profiles = previousProfiles
+                throw error
+            }
         } else if profiles.isEmpty {
             profiles = [profile]
+            do {
+                try save()
+                return .inserted
+            } catch {
+                profiles = previousProfiles
+                throw error
+            }
         } else {
-            // Replace existing profile.
-            profiles[0] = profile
+            let existingID = profiles[0].id
+            NSLog(
+                "ProfileStore: rejected replacement profile %@ because existing profile uses %@",
+                profile.id.uuidString,
+                existingID.uuidString
+            )
+            return .rejectedMismatchedID(existingID: existingID)
         }
-        save()
+    }
+
+    func canUpsert(profileID: UUID) -> Bool {
+        profiles.isEmpty || profiles.contains { $0.id == profileID }
     }
 
     func delete(_ profile: Profile) {
+        let previousProfiles = profiles
         profiles.removeAll { $0.id == profile.id }
-        save()
+        do {
+            try save()
+        } catch {
+            profiles = previousProfiles
+            NSLog("ProfileStore: failed to delete profile: %@", String(describing: error))
+            return
+        }
         // Remove the orphaned API key; it is useless without the profile.
-        try? KeychainService.delete(account: "apiKey.\(profile.id.uuidString)")
+        try? credentialStore.deleteAPIKey(for: profile.id)
     }
 
-    private func save() {
-        do {
-            let data = try JSONEncoder().encode(profiles)
-            try data.write(to: fileURL, options: [.atomic])
-        } catch {
-            NSLog("ProfileStore: failed to save profiles.json: %@", String(describing: error))
-        }
+    private func save() throws {
+        let data = try JSONEncoder().encode(profiles)
+        try data.write(to: fileURL, options: [.atomic])
     }
 }

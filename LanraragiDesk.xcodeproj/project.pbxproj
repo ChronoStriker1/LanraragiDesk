@@ -16,6 +16,7 @@
 		33CF8B707739292031D70AED /* TitleTranslationFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F5DDB45BE710FEF17C2EFD /* TitleTranslationFormat.swift */; };
 		357E6825CEFEFA8EA5B45966 /* LanraragiDeskApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF5978E02C65E10E0EEF7643 /* LanraragiDeskApp.swift */; };
 		3698660AF1E0714F3D6AD2D1 /* PluginsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFD900A7362E768EBA9F7DB7 /* PluginsViewModel.swift */; };
+		3DDFE226FA27B60AD10E38D8 /* ProfileStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E551FB8BE2467E33966B9B1B /* ProfileStoreTests.swift */; };
 		44067B787F238A575A8D41E2 /* ActivityStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE2BADC8CB7C849ECEB31B07 /* ActivityStore.swift */; };
 		462D167127B78592933CCE35 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64DB4339053B57ED7A535ED8 /* AppModel.swift */; };
 		4984C7D6A3203AFF6C091E10 /* TagSuggestionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FFDF919F3AE218E040DC8AA /* TagSuggestionStore.swift */; };
@@ -65,6 +66,16 @@
 		FA5BDE6D31A4CC65C617F51F /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 358F4E9A6F34DDEB4C2966B1 /* RootView.swift */; };
 		FB01ACC42D58C3B314B9F14D /* SavedQueryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04D2944602309E71F5B99003 /* SavedQueryStore.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		50233064281DCF1B4CAC69F4 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 55F312868218BE3B34B6F507 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 36C6289B53ACD56E63D46D91;
+			remoteInfo = LanraragiDesk;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		04D2944602309E71F5B99003 /* SavedQueryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedQueryStore.swift; sourceTree = "<group>"; };
@@ -118,6 +129,8 @@
 		DE62110528AA64B748238A7C /* EnglishTitlesOnlySecretView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnglishTitlesOnlySecretView.swift; sourceTree = "<group>"; };
 		E1D28020732D5BF8A4282FBE /* FindArchivesCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FindArchivesCard.swift; sourceTree = "<group>"; };
 		E21E702AD8E780D4140E265F /* StatisticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatisticsView.swift; sourceTree = "<group>"; };
+		E551FB8BE2467E33966B9B1B /* ProfileStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileStoreTests.swift; sourceTree = "<group>"; };
+		E55B873C8167D2ED58123DE9 /* LanraragiDeskTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LanraragiDeskTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		EA0092A389E3EFF8BEBF77C7 /* DebugFrameNumber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugFrameNumber.swift; sourceTree = "<group>"; };
 		EE2BADC8CB7C849ECEB31B07 /* ActivityStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityStore.swift; sourceTree = "<group>"; };
 		F100F835342ECA0C078C5C26 /* CodexCLITranslationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexCLITranslationService.swift; sourceTree = "<group>"; };
@@ -144,6 +157,7 @@
 			isa = PBXGroup;
 			children = (
 				367FD6B12C893A96F63201E8 /* LanraragiDesk.app */,
+				E55B873C8167D2ED58123DE9 /* LanraragiDeskTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -181,6 +195,15 @@
 				76F557803B708694C1EF5904 /* Info.plist */,
 			);
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		8059F69B7DC240EB0F9429D3 /* LanraragiDeskTests */ = {
+			isa = PBXGroup;
+			children = (
+				E551FB8BE2467E33966B9B1B /* ProfileStoreTests.swift */,
+			);
+			name = LanraragiDeskTests;
+			path = Tests/LanraragiDeskTests;
 			sourceTree = "<group>";
 		};
 		A1ECF872C46C10EE7A7EA0E2 /* Models */ = {
@@ -273,6 +296,7 @@
 			isa = PBXGroup;
 			children = (
 				5B2AA8A19E02154C6D365EBC /* LanraragiDeskApp */,
+				8059F69B7DC240EB0F9429D3 /* LanraragiDeskTests */,
 				CE99D07805C2693536945862 /* Packages */,
 				0357898A6296F5F09EB21DF0 /* Products */,
 			);
@@ -300,6 +324,24 @@
 			productName = LanraragiDesk;
 			productReference = 367FD6B12C893A96F63201E8 /* LanraragiDesk.app */;
 			productType = "com.apple.product-type.application";
+		};
+		DCD91EEF0D63A36694ED4B2B /* LanraragiDeskTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0038E01159211C883F88EFC7 /* Build configuration list for PBXNativeTarget "LanraragiDeskTests" */;
+			buildPhases = (
+				97C83E3EF1F6C25600225E58 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				3008CC4481E5063291633C3B /* PBXTargetDependency */,
+			);
+			name = LanraragiDeskTests;
+			packageProductDependencies = (
+			);
+			productName = LanraragiDeskTests;
+			productReference = E55B873C8167D2ED58123DE9 /* LanraragiDeskTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
 		};
 /* End PBXNativeTarget section */
 
@@ -330,6 +372,7 @@
 			projectRoot = "";
 			targets = (
 				36C6289B53ACD56E63D46D91 /* LanraragiDesk */,
+				DCD91EEF0D63A36694ED4B2B /* LanraragiDeskTests */,
 			);
 		};
 /* End PBXProject section */
@@ -346,6 +389,14 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		97C83E3EF1F6C25600225E58 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3DDFE226FA27B60AD10E38D8 /* ProfileStoreTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B8AFA0A619ED38F07B712DF9 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -410,6 +461,14 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		3008CC4481E5063291633C3B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 36C6289B53ACD56E63D46D91 /* LanraragiDesk */;
+			targetProxy = 50233064281DCF1B4CAC69F4 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
 		3B27D3B67E153CE6E93C3399 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -426,6 +485,24 @@
 				SDKROOT = macosx;
 			};
 			name = Release;
+		};
+		60198FBA1ED02A307DF4790B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = us.cstriker.lanraragidesk.tests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LanraragiDesk.app/Contents/MacOS/LanraragiDesk";
+			};
+			name = Debug;
 		};
 		780C57288D013BB1C339C533 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -483,6 +560,24 @@
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
 				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		78500FF31016711BB4E40BA5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = us.cstriker.lanraragidesk.tests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LanraragiDesk.app/Contents/MacOS/LanraragiDesk";
 			};
 			name = Release;
 		};
@@ -571,6 +666,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		0038E01159211C883F88EFC7 /* Build configuration list for PBXNativeTarget "LanraragiDeskTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				60198FBA1ED02A307DF4790B /* Debug */,
+				78500FF31016711BB4E40BA5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		0D91B0F6BC6AE0B68F7CE9A3 /* Build configuration list for PBXProject "LanraragiDesk" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

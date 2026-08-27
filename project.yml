@@ -35,3 +35,15 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: us.cstriker.lanraragidesk
+  LanraragiDeskTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: '14.0'
+    sources:
+      - path: Tests/LanraragiDeskTests
+    dependencies:
+      - target: LanraragiDesk
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: us.cstriker.lanraragidesk.tests
+        GENERATE_INFOPLIST_FILE: 'YES'
