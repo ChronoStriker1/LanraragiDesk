@@ -89,21 +89,48 @@ struct ProfileEditorView: View {
             profile = Profile(id: existing.id, name: name, baseURL: url, language: language)
         }
 
+        guard appModel.profileStore.canUpsert(profileID: profile.id) else {
+            saveError = "Another profile already exists. Only one profile is supported."
+            return false
+        }
+
+        let keychainAccount = "apiKey.\(profile.id.uuidString)"
+        var previousAPIKey: String?
         if !apiKey.isEmpty {
             do {
-                try KeychainService.setString(apiKey, account: "apiKey.\(profile.id.uuidString)")
+                previousAPIKey = try KeychainService.getString(account: keychainAccount)
+                try KeychainService.setString(apiKey, account: keychainAccount)
             } catch {
                 saveError = "Could not save the API key to the Keychain (\(error)). Profile not saved."
                 return false
             }
         }
 
-        appModel.profileStore.upsert(profile)
+        do {
+            if case .rejectedMismatchedID = try appModel.profileStore.upsert(profile) {
+                restoreAPIKey(previousAPIKey, account: keychainAccount)
+                saveError = "Another profile already exists. Profile not saved."
+                return false
+            }
+        } catch {
+            restoreAPIKey(previousAPIKey, account: keychainAccount)
+            saveError = "Could not save the profile (\(error))."
+            return false
+        }
         appModel.selectedProfileID = profile.id
 
         // Cached clients hold the old base URL/API key; drop them.
         appModel.invalidateClients(profileID: profile.id)
         return true
+    }
+
+    private func restoreAPIKey(_ previousAPIKey: String?, account: String) {
+        guard !apiKey.isEmpty else { return }
+        if let previousAPIKey {
+            try? KeychainService.setString(previousAPIKey, account: account)
+        } else {
+            try? KeychainService.delete(account: account)
+        }
     }
 
     private var normalizedBaseURL: URL? {
