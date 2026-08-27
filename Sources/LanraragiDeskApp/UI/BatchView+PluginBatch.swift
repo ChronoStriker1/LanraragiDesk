@@ -22,30 +22,71 @@ extension BatchView {
         let arcids = selectedArcidsSorted
         guard !arcids.isEmpty else { return }
 
-        if previewBeforeQueue {
-            pluginRunStatus = "Generating preview for \(arcids.count) archives…"
-            appendPluginLiveEvent("Preview started for \(pluginID) on \(arcids.count) archives")
-            generatePreview(executePlugin: true)
-            appModel.activity.add(.init(kind: .action, title: "Plugin batch preview generated", detail: "\(pluginID) on sample of \(arcids.count) selected"))
+        let launch = PluginBatchLaunch(
+            profile: profile,
+            pluginID: pluginID,
+            arcids: arcids,
+            pluginArgText: pluginArgText,
+            pluginDelayText: pluginDelayText,
+            pluginApplyMode: pluginApplyMode
+        )
+
+        switch BatchPreviewWorkflow.startAction(previewEnabled: previewBeforeQueue) {
+        case .previewThenQueue:
+            let startResult = generatePreview(
+                executePlugin: true,
+                purpose: .previewThenQueue,
+                pendingBatch: launch
+            )
+            pluginRunStatus = startResult.pluginBatchStatus(archiveCount: arcids.count)
+            if startResult == .started {
+                appendPluginLiveEvent("Preview started for \(pluginID) on \(arcids.count) archives")
+            }
             return
+        case .queueImmediately:
+            queuePluginBatch(launch)
+        }
+    }
+
+    func queuePluginBatch(_ launch: PluginBatchLaunch) {
+        let decision = PluginBatchLaunchDecision.evaluate(
+            launch: launch,
+            running: running,
+            pluginRunning: pluginRunning,
+            selectedProfile: appModel.selectedProfile,
+            selectedPluginID: selectedPluginID,
+            selectedArcids: selectedArcidsSorted,
+            pluginArgText: pluginArgText,
+            pluginDelayText: pluginDelayText,
+            pluginApplyMode: pluginApplyMode
+        )
+        switch decision {
+        case .busy:
+            pluginRunStatus = "Another batch is already running. Batch was not queued."
+            return
+        case .settingsChanged:
+            pluginRunStatus = "Preview settings changed. Batch was not queued."
+            return
+        case .allowed:
+            break
         }
 
         let checkpoint = PluginBatchCheckpoint(
-            profileID: profile.id,
-            profileBaseURL: profile.baseURL.absoluteString,
-            arcids: arcids,
+            profileID: launch.profile.id,
+            profileBaseURL: launch.profile.baseURL.absoluteString,
+            arcids: launch.arcids,
             nextIndex: 0,
-            selectedPluginID: pluginID,
-            pluginArgText: pluginArgText,
-            pluginDelayText: pluginDelayText,
-            pluginApplyModeRaw: pluginApplyMode.rawValue,
+            selectedPluginID: launch.pluginID,
+            pluginArgText: launch.pluginArgText,
+            pluginDelayText: launch.pluginDelayText,
+            pluginApplyModeRaw: launch.pluginApplyMode.rawValue,
             inProgress: true,
             paused: false,
             interrupted: false,
             okCount: 0,
             failCount: 0,
             indeterminateCount: 0,
-            lastRunStatus: "Running plugin on \(arcids.count) archives…",
+            lastRunStatus: "Running plugin on \(launch.arcids.count) archives…",
             lastCurrentArchive: nil,
             lastLiveEvents: [],
             lastUpdatedAt: Date()
@@ -54,9 +95,11 @@ extension BatchView {
         refreshResumablePluginBatch()
 
         startPluginBatch(
-            profile: profile,
-            pluginID: pluginID,
-            arcids: arcids,
+            profile: launch.profile,
+            pluginID: launch.pluginID,
+            pluginArgument: launch.pluginArgText,
+            delayText: launch.pluginDelayText,
+            arcids: launch.arcids,
             startIndex: 0,
             resumed: false
         )
@@ -65,6 +108,8 @@ extension BatchView {
     func startPluginBatch(
         profile: Profile,
         pluginID: String,
+        pluginArgument: String,
+        delayText: String,
         arcids: [String],
         startIndex: Int,
         resumed: Bool,
@@ -72,7 +117,7 @@ extension BatchView {
         initialFail: Int = 0,
         initialIndeterminate: Int = 0
     ) {
-        let delaySeconds = sanitizedDelaySeconds(from: pluginDelayText)
+        let delaySeconds = sanitizedDelaySeconds(from: delayText)
 
         pluginRunning = true
         pluginCancelRequested = false
@@ -121,7 +166,7 @@ extension BatchView {
                         PluginMetadataSupport.signature(title: $0.title ?? "", tags: $0.tags ?? "", summary: $0.summary ?? "")
                     }
 
-                    let job = try await pluginsVM.queue(profile: profile, pluginID: pluginID, arcid: arcid, arg: pluginArgText)
+                    let job = try await pluginsVM.queue(profile: profile, pluginID: pluginID, arcid: arcid, arg: pluginArgument)
                     pluginsVM.trackQueuedJob(profile: profile, pluginID: pluginID, arcid: arcid, jobID: job.job)
                     let detail = job.job > 0
                         ? "\(pluginID) • \(arcid) • job \(job.job)"
@@ -399,6 +444,8 @@ extension BatchView {
         startPluginBatch(
             profile: profile,
             pluginID: checkpoint.selectedPluginID,
+            pluginArgument: checkpoint.pluginArgText,
+            delayText: checkpoint.pluginDelayText,
             arcids: checkpoint.arcids,
             startIndex: startIndex,
             resumed: true,

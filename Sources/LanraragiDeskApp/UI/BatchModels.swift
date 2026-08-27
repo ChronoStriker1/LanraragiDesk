@@ -84,6 +84,140 @@ struct BatchPreviewRow: Identifiable {
     let kind: Kind
 }
 
+struct PluginBatchLaunch {
+    let profile: Profile
+    let pluginID: String
+    let arcids: [String]
+    let pluginArgText: String
+    let pluginDelayText: String
+    let pluginApplyMode: PluginApplyMode
+}
+
+enum PluginBatchLaunchDecision: Equatable {
+    case allowed
+    case busy
+    case settingsChanged
+
+    static func evaluate(
+        launch: PluginBatchLaunch,
+        running: Bool,
+        pluginRunning: Bool,
+        selectedProfile: Profile?,
+        selectedPluginID: String?,
+        selectedArcids: [String],
+        pluginArgText: String,
+        pluginDelayText: String,
+        pluginApplyMode: PluginApplyMode
+    ) -> Self {
+        guard !running, !pluginRunning else { return .busy }
+        guard selectedProfile == launch.profile,
+              selectedPluginID == launch.pluginID,
+              selectedArcids == launch.arcids,
+              pluginArgText == launch.pluginArgText,
+              pluginDelayText == launch.pluginDelayText,
+              pluginApplyMode == launch.pluginApplyMode else {
+            return .settingsChanged
+        }
+        return .allowed
+    }
+}
+
+enum BatchPreviewStartResult: Equatable {
+    case started
+    case alreadyRunning
+    case unavailable
+
+    func pluginBatchStatus(archiveCount: Int) -> String {
+        switch self {
+        case .started:
+            return "Generating preview for \(archiveCount) archives…"
+        case .alreadyRunning:
+            return "Another preview is already running. Batch was not queued."
+        case .unavailable:
+            return "Preview could not be started. Batch was not queued."
+        }
+    }
+}
+
+struct BatchPreviewWorkflow {
+    enum StartAction: Equatable, Sendable {
+        case previewThenQueue
+        case queueImmediately
+    }
+
+    enum Intent: Equatable, Sendable {
+        case previewOnly
+        case previewThenQueue
+    }
+
+    enum Outcome: Equatable, Sendable {
+        case succeeded
+        case failed
+        case cancelled
+    }
+
+    enum Completion: Equatable, Sendable {
+        case ignored
+        case previewOnly
+        case queueBatch
+        case failed
+        case cancelled
+    }
+
+    enum BeginResult: Equatable, Sendable {
+        case started(Run)
+        case alreadyRunning
+    }
+
+    struct Run: Equatable, Sendable {
+        fileprivate let id: UUID
+        fileprivate let intent: Intent
+    }
+
+    private(set) var activeRun: Run?
+    private(set) var isCancellationRequested = false
+
+    static func startAction(previewEnabled: Bool) -> StartAction {
+        previewEnabled ? .previewThenQueue : .queueImmediately
+    }
+
+    mutating func begin(intent: Intent, id: UUID = UUID()) -> BeginResult {
+        guard activeRun == nil else { return .alreadyRunning }
+
+        let run = Run(id: id, intent: intent)
+        activeRun = run
+        isCancellationRequested = false
+        return .started(run)
+    }
+
+    func owns(_ run: Run) -> Bool {
+        activeRun == run
+    }
+
+    func acceptsUpdates(from run: Run) -> Bool {
+        owns(run) && !isCancellationRequested
+    }
+
+    @discardableResult
+    mutating func requestCancellation() -> Bool {
+        guard activeRun != nil, !isCancellationRequested else { return false }
+        isCancellationRequested = true
+        return true
+    }
+
+    mutating func complete(_ run: Run, outcome: Outcome) -> Completion {
+        guard owns(run) else { return .ignored }
+
+        activeRun = nil
+        let wasCancelled = isCancellationRequested || outcome == .cancelled
+        isCancellationRequested = false
+
+        if wasCancelled { return .cancelled }
+        if outcome == .failed { return .failed }
+        return run.intent == .previewThenQueue ? .queueBatch : .previewOnly
+    }
+}
+
 enum PluginApplyMode: String, CaseIterable {
     case mergeWithExisting
     case replaceWithPluginData
