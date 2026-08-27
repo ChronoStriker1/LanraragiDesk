@@ -7,6 +7,98 @@ import XCTest
 
 @MainActor
 final class CoverThumbInvalidationTests: XCTestCase {
+    func testLoadOwnershipOnlyPermitsCurrentUncancelledGeneration() {
+        let request = CoverThumbRequestKey(
+            profileID: UUID(),
+            arcid: "archive-a",
+            size: CGSize(width: 56, height: 72),
+            contentInset: 4,
+            reloadToken: 0,
+            revision: 0
+        )
+        let current = CoverThumbLoadToken(request: request)
+
+        XCTAssertTrue(
+            CoverThumbLoadOwnership.permitsWrite(
+                active: current,
+                candidate: current,
+                isCancelled: false
+            )
+        )
+        XCTAssertFalse(
+            CoverThumbLoadOwnership.permitsWrite(
+                active: current,
+                candidate: current,
+                isCancelled: true
+            )
+        )
+        XCTAssertFalse(
+            CoverThumbLoadOwnership.permitsWrite(
+                active: nil,
+                candidate: current,
+                isCancelled: false
+            )
+        )
+    }
+
+    func testLoadOwnershipRejectsStaleCompletionWithSameRequestKey() {
+        let request = CoverThumbRequestKey(
+            profileID: UUID(),
+            arcid: "archive-a",
+            size: CGSize(width: 56, height: 72),
+            contentInset: 4,
+            reloadToken: 0,
+            revision: 0
+        )
+        let stale = CoverThumbLoadToken(
+            request: request,
+            generation: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        )
+        let replacement = CoverThumbLoadToken(
+            request: request,
+            generation: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        )
+
+        XCTAssertNotEqual(stale, replacement)
+        XCTAssertFalse(
+            CoverThumbLoadOwnership.permitsWrite(
+                active: replacement,
+                candidate: stale,
+                isCancelled: false
+            )
+        )
+    }
+
+    func testLoadOwnershipRejectsCompletionForDifferentArchive() {
+        let profileID = UUID()
+        let firstRequest = CoverThumbRequestKey(
+            profileID: profileID,
+            arcid: "archive-a",
+            size: CGSize(width: 56, height: 72),
+            contentInset: 4,
+            reloadToken: 0,
+            revision: 0
+        )
+        let replacementRequest = CoverThumbRequestKey(
+            profileID: profileID,
+            arcid: "archive-b",
+            size: CGSize(width: 56, height: 72),
+            contentInset: 4,
+            reloadToken: 0,
+            revision: 0
+        )
+        let stale = CoverThumbLoadToken(request: firstRequest)
+        let replacement = CoverThumbLoadToken(request: replacementRequest)
+
+        XCTAssertFalse(
+            CoverThumbLoadOwnership.permitsWrite(
+                active: replacement,
+                candidate: stale,
+                isCancelled: false
+            )
+        )
+    }
+
     func testRequestKeysIsolateProfilesAndRevisions() {
         let profileA = UUID()
         let profileB = UUID()
