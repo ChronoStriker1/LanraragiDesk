@@ -632,37 +632,33 @@ struct ArchiveMetadataEditorView: View {
                     let state = await pluginsVM.waitForJobCompletion(profile: profile, jobID: job.job)
                     switch state {
                     case .finished:
-                        let changed = await refreshMetadataAfterPlugin(
+                        // The queued plugin already ran. Minion status has no output payload,
+                        // so only refresh metadata here; calling `run` would execute it again.
+                        _ = await refreshMetadataAfterPlugin(
                             status: "Plugin completed. Metadata refreshed.",
-                            previousSignature: prePluginSignature,
-                            allowPluginOutputFallback: true
+                            previousSignature: prePluginSignature
                         )
-                        if !changed {
-                            await applyMetadataFromPluginOutput(pluginID: pluginID, previousSignature: prePluginSignature)
-                        }
                     case .failed:
                         await MainActor.run {
                             pluginRunStatus = "Plugin job \(job.job) failed."
                         }
                     case .queued, .running, .unknown:
-                        let changed = await refreshMetadataAfterPlugin(
-                            status: "Plugin job \(job.job) ended with unknown state. Metadata refreshed.",
+                        _ = await refreshMetadataAfterPlugin(
+                            status: "Plugin job \(job.job) has an indeterminate outcome. Metadata refreshed.",
                             previousSignature: prePluginSignature,
-                            allowPluginOutputFallback: true
+                            unchangedStatus: "Plugin job \(job.job) has an indeterminate outcome. No metadata changes detected."
                         )
-                        if !changed {
-                            await applyMetadataFromPluginOutput(pluginID: pluginID, previousSignature: prePluginSignature)
-                        }
+                        appModel.activity.add(.init(
+                            kind: .warning,
+                            title: "Plugin job outcome indeterminate",
+                            detail: "\(pluginID) • \(arcid) • job \(job.job) • \(state.rawValue)"
+                        ))
                     }
                 } else {
-                    let changed = await refreshMetadataAfterPlugin(
+                    _ = await refreshMetadataAfterPlugin(
                         status: "Plugin completed. Metadata refreshed.",
-                        previousSignature: prePluginSignature,
-                        allowPluginOutputFallback: true
+                        previousSignature: prePluginSignature
                     )
-                    if !changed {
-                        await applyMetadataFromPluginOutput(pluginID: pluginID, previousSignature: prePluginSignature)
-                    }
                 }
             } catch {
                 await MainActor.run {
@@ -677,7 +673,7 @@ struct ArchiveMetadataEditorView: View {
     private func refreshMetadataAfterPlugin(
         status: String,
         previousSignature: String? = nil,
-        allowPluginOutputFallback: Bool = false
+        unchangedStatus: String = "Plugin completed. No metadata changes detected."
     ) async -> Bool {
         do {
             var updated: ArchiveMetadata?
@@ -709,16 +705,14 @@ struct ArchiveMetadataEditorView: View {
                 if changed {
                     apply(meta: updated)
                     pluginRunStatus = status
-                } else if allowPluginOutputFallback {
-                    pluginRunStatus = "Plugin completed. Applying plugin output…"
                 } else {
                     apply(meta: updated)
-                    pluginRunStatus = "Plugin completed. No metadata changes detected."
+                    pluginRunStatus = unchangedStatus
                 }
             }
             if changed {
                 appModel.activity.add(.init(kind: .action, title: "Plugin metadata refreshed", detail: arcid))
-            } else if !allowPluginOutputFallback {
+            } else {
                 appModel.activity.add(.init(kind: .action, title: "Plugin completed with no metadata changes", detail: arcid))
             }
             return changed
@@ -728,59 +722,6 @@ struct ArchiveMetadataEditorView: View {
             }
             appModel.activity.add(.init(kind: .warning, title: "Plugin refresh failed", detail: "\(arcid)\n\(error)"))
             return false
-        }
-    }
-
-    private func applyMetadataFromPluginOutput(pluginID: String, previousSignature: String) async {
-        do {
-            let raw = try await pluginsVM.run(profile: profile, pluginID: pluginID, arcid: arcid, arg: pluginArgText)
-            guard let patch = PluginMetadataSupport.parsePatch(from: raw) else {
-                await MainActor.run {
-                    pluginRunStatus = "Plugin completed. No metadata changes detected."
-                }
-                return
-            }
-
-            let current = try await archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
-            let currentTitle = (current.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let currentSummary = (current.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let currentTags = MetadataTagFormatter.normalizedCSV(from: current.tags ?? "")
-
-            let titleToSave = patch.title ?? currentTitle
-            let summaryToSave = patch.summary ?? currentSummary
-            let tagsToSave: String
-            if let patchTags = patch.tags {
-                tagsToSave = MetadataTagFormatter.normalizedCSV(from: currentTags + ", " + patchTags)
-            } else {
-                tagsToSave = currentTags
-            }
-
-            let nextSignature = PluginMetadataSupport.signature(title: titleToSave, tags: tagsToSave, summary: summaryToSave)
-            guard nextSignature != previousSignature else {
-                await MainActor.run {
-                    pluginRunStatus = "Plugin completed. No metadata changes detected."
-                }
-                return
-            }
-
-            let updated = try await archives.updateMetadata(
-                profile: profile,
-                arcid: arcid,
-                title: titleToSave,
-                tags: tagsToSave,
-                summary: summaryToSave
-            )
-
-            await MainActor.run {
-                apply(meta: updated)
-                pluginRunStatus = "Plugin output applied and metadata refreshed."
-            }
-            appModel.activity.add(.init(kind: .action, title: "Plugin output applied", detail: "\(pluginID) • \(arcid)"))
-        } catch {
-            await MainActor.run {
-                pluginRunStatus = "Plugin completed, but output apply failed: \(ErrorPresenter.short(error))"
-            }
-            appModel.activity.add(.init(kind: .warning, title: "Plugin output apply failed", detail: "\(pluginID) • \(arcid)\n\(error)"))
         }
     }
 

@@ -39,6 +39,7 @@ struct PluginBatchCheckpoint: Codable {
     var interrupted: Bool?
     var okCount: Int?
     var failCount: Int?
+    var indeterminateCount: Int?
     var lastRunStatus: String?
     var lastCurrentArchive: String?
     var lastLiveEvents: [String]?
