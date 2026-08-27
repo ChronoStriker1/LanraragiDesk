@@ -464,19 +464,26 @@ struct BatchView: View {
         previewStatus = nil
     }
 
+    @discardableResult
     func generatePreview(
         sampleSize: Int = 10,
         executePlugin: Bool = false,
         purpose: BatchPreviewWorkflow.Intent = .previewOnly,
         pendingBatch: PluginBatchLaunch? = nil
-    ) {
-        guard let profile = appModel.selectedProfile else { return }
+    ) -> BatchPreviewStartResult {
+        guard let profile = appModel.selectedProfile else { return .unavailable }
         let selectedArcids = selectedArcidsSorted
         let actualSampleSize = min(max(0, sampleSize), selectedArcids.count)
         let arcids = Array(selectedArcids.prefix(actualSampleSize))
-        guard !arcids.isEmpty else { return }
-        guard purpose != .previewThenQueue || pendingBatch != nil else { return }
-        guard let previewRun = previewWorkflow.begin(intent: purpose) else { return }
+        guard !arcids.isEmpty else { return .unavailable }
+        guard purpose != .previewThenQueue || pendingBatch != nil else { return .unavailable }
+        let previewRun: BatchPreviewWorkflow.Run
+        switch previewWorkflow.begin(intent: purpose) {
+        case .started(let run):
+            previewRun = run
+        case .alreadyRunning:
+            return .alreadyRunning
+        }
 
         let add = parseTags(addTagsText)
         let remove = parseTags(removeTagsText)
@@ -657,6 +664,7 @@ struct BatchView: View {
                 }
             }
         }
+        return .started
     }
     var selectedPlugin: PluginInfo? {
         guard let id = selectedPluginID else { return nil }

@@ -93,6 +93,52 @@ struct PluginBatchLaunch {
     let pluginApplyMode: PluginApplyMode
 }
 
+enum PluginBatchLaunchDecision: Equatable {
+    case allowed
+    case busy
+    case settingsChanged
+
+    static func evaluate(
+        launch: PluginBatchLaunch,
+        running: Bool,
+        pluginRunning: Bool,
+        selectedProfile: Profile?,
+        selectedPluginID: String?,
+        selectedArcids: [String],
+        pluginArgText: String,
+        pluginDelayText: String,
+        pluginApplyMode: PluginApplyMode
+    ) -> Self {
+        guard !running, !pluginRunning else { return .busy }
+        guard selectedProfile == launch.profile,
+              selectedPluginID == launch.pluginID,
+              selectedArcids == launch.arcids,
+              pluginArgText == launch.pluginArgText,
+              pluginDelayText == launch.pluginDelayText,
+              pluginApplyMode == launch.pluginApplyMode else {
+            return .settingsChanged
+        }
+        return .allowed
+    }
+}
+
+enum BatchPreviewStartResult: Equatable {
+    case started
+    case alreadyRunning
+    case unavailable
+
+    func pluginBatchStatus(archiveCount: Int) -> String {
+        switch self {
+        case .started:
+            return "Generating preview for \(archiveCount) archives…"
+        case .alreadyRunning:
+            return "Another preview is already running. Batch was not queued."
+        case .unavailable:
+            return "Preview could not be started. Batch was not queued."
+        }
+    }
+}
+
 struct BatchPreviewWorkflow {
     enum StartAction: Equatable, Sendable {
         case previewThenQueue
@@ -118,6 +164,11 @@ struct BatchPreviewWorkflow {
         case cancelled
     }
 
+    enum BeginResult: Equatable, Sendable {
+        case started(Run)
+        case alreadyRunning
+    }
+
     struct Run: Equatable, Sendable {
         fileprivate let id: UUID
         fileprivate let intent: Intent
@@ -130,13 +181,13 @@ struct BatchPreviewWorkflow {
         previewEnabled ? .previewThenQueue : .queueImmediately
     }
 
-    mutating func begin(intent: Intent, id: UUID = UUID()) -> Run? {
-        guard activeRun == nil else { return nil }
+    mutating func begin(intent: Intent, id: UUID = UUID()) -> BeginResult {
+        guard activeRun == nil else { return .alreadyRunning }
 
         let run = Run(id: id, intent: intent)
         activeRun = run
         isCancellationRequested = false
-        return run
+        return .started(run)
     }
 
     func owns(_ run: Run) -> Bool {

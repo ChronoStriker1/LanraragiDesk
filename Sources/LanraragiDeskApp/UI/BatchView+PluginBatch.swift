@@ -33,13 +33,15 @@ extension BatchView {
 
         switch BatchPreviewWorkflow.startAction(previewEnabled: previewBeforeQueue) {
         case .previewThenQueue:
-            pluginRunStatus = "Generating preview for \(arcids.count) archives…"
-            appendPluginLiveEvent("Preview started for \(pluginID) on \(arcids.count) archives")
-            generatePreview(
+            let startResult = generatePreview(
                 executePlugin: true,
                 purpose: .previewThenQueue,
                 pendingBatch: launch
             )
+            pluginRunStatus = startResult.pluginBatchStatus(archiveCount: arcids.count)
+            if startResult == .started {
+                appendPluginLiveEvent("Preview started for \(pluginID) on \(arcids.count) archives")
+            }
             return
         case .queueImmediately:
             queuePluginBatch(launch)
@@ -47,18 +49,26 @@ extension BatchView {
     }
 
     func queuePluginBatch(_ launch: PluginBatchLaunch) {
-        guard !running, !pluginRunning else {
-            pluginRunStatus = "Preview complete, but another batch is already running. Batch was not queued."
+        let decision = PluginBatchLaunchDecision.evaluate(
+            launch: launch,
+            running: running,
+            pluginRunning: pluginRunning,
+            selectedProfile: appModel.selectedProfile,
+            selectedPluginID: selectedPluginID,
+            selectedArcids: selectedArcidsSorted,
+            pluginArgText: pluginArgText,
+            pluginDelayText: pluginDelayText,
+            pluginApplyMode: pluginApplyMode
+        )
+        switch decision {
+        case .busy:
+            pluginRunStatus = "Another batch is already running. Batch was not queued."
             return
-        }
-        guard appModel.selectedProfile == launch.profile,
-              selectedPluginID == launch.pluginID,
-              selectedArcidsSorted == launch.arcids,
-              pluginArgText == launch.pluginArgText,
-              pluginDelayText == launch.pluginDelayText,
-              pluginApplyMode == launch.pluginApplyMode else {
+        case .settingsChanged:
             pluginRunStatus = "Preview settings changed. Batch was not queued."
             return
+        case .allowed:
+            break
         }
 
         let checkpoint = PluginBatchCheckpoint(
