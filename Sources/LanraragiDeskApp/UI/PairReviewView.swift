@@ -1543,8 +1543,8 @@ private struct PageThumbTile: View {
     @State private var errorText: String?
     @State private var hovering: Bool = false
     @State private var resolutionText: String?
-    @State private var activeTileLoadID: UUID?
-    @State private var activePreviewLoadID: UUID?
+    @State private var tileLoadOwnership = ImageLoadOwnership()
+    @State private var previewLoadOwnership = ImageLoadOwnership()
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -1632,9 +1632,8 @@ private struct PageThumbTile: View {
             }
         }
         .task(id: url) {
-            let loadID = UUID()
-            activeTileLoadID = loadID
-            activePreviewLoadID = nil
+            let load = tileLoadOwnership.begin()
+            previewLoadOwnership.invalidate()
             image = nil
             fullImage = nil
             errorText = nil
@@ -1647,38 +1646,38 @@ private struct PageThumbTile: View {
                     maxPixelSize: 540,
                     metadata: .resolutionText
                 )
-                try Task.checkCancellation()
-                guard activeTileLoadID == loadID else { return }
-                if let decodedImage = decoded.image {
-                    image = decodedImage
-                    resolutionText = decoded.resolutionText
-                } else {
-                    errorText = "Decode failed"
+                tileLoadOwnership.performIfCurrent(load) {
+                    if let decodedImage = decoded.image {
+                        image = decodedImage
+                        resolutionText = decoded.resolutionText
+                    } else {
+                        errorText = "Decode failed"
+                    }
                 }
             } catch {
                 if Task.isCancelled || ErrorPresenter.isCancellationLike(error) {
                     return
                 }
-                guard activeTileLoadID == loadID else { return }
-                errorText = ErrorPresenter.short(error)
+                tileLoadOwnership.performIfCurrent(load) {
+                    errorText = ErrorPresenter.short(error)
+                }
             }
         }
         .onDisappear {
-            activeTileLoadID = nil
-            activePreviewLoadID = nil
+            tileLoadOwnership.invalidate()
+            previewLoadOwnership.invalidate()
         }
     }
 
     private func loadFullPreview() async {
         guard fullImage == nil, let url else { return }
-        let loadID = UUID()
-        activePreviewLoadID = loadID
+        let load = previewLoadOwnership.begin()
         do {
             let bytes = try await archives.bytes(profile: profile, url: url)
             let decoded = try await AsyncImageDownsampler.decode(bytes, maxPixelSize: 1600)
-            try Task.checkCancellation()
-            guard activePreviewLoadID == loadID else { return }
-            fullImage = decoded.image
+            previewLoadOwnership.performIfCurrent(load) {
+                fullImage = decoded.image
+            }
         } catch {
             // Ignore preview failures; tiles still work.
         }

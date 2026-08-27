@@ -28,7 +28,7 @@ struct ReaderView: View {
     @State private var countdownRemaining: Int?
     @State private var timerTask: Task<Void, Never>?
     @State private var loadTask: Task<Void, Never>?
-    @State private var activePageLoadID: UUID?
+    @State private var pageLoadOwnership = ImageLoadOwnership()
     @State private var prefetchTask: Task<Void, Never>?
 
     @AppStorage("reader.showStamps") private var showStamps: Bool = true
@@ -235,7 +235,7 @@ struct ReaderView: View {
         .onDisappear {
             timerTask?.cancel()
             loadTask?.cancel()
-            activePageLoadID = nil
+            pageLoadOwnership.invalidate()
             prefetchTask?.cancel()
             stampsTask?.cancel()
         }
@@ -517,7 +517,7 @@ struct ReaderView: View {
         countdownRemaining = nil
         timerTask?.cancel()
         loadTask?.cancel()
-        activePageLoadID = nil
+        pageLoadOwnership.invalidate()
         prefetchTask?.cancel()
         stampsTask?.cancel()
         currentStamps = []
@@ -612,7 +612,7 @@ struct ReaderView: View {
 
     private func loadCurrentPage() {
         loadTask?.cancel()
-        activePageLoadID = nil
+        pageLoadOwnership.invalidate()
         image = nil
         imageB = nil
         imagePixelSize = nil
@@ -630,8 +630,7 @@ struct ReaderView: View {
         let urlA = pages[pageIndex]
         let idxB = pageIndex + 1
         let urlB = (twoPageSpread && idxB < pages.count) ? pages[idxB] : nil
-        let loadID = UUID()
-        activePageLoadID = loadID
+        let load = pageLoadOwnership.begin()
 
         loadTask = Task {
             do {
@@ -641,14 +640,14 @@ struct ReaderView: View {
                     maxPixelSize: 2400,
                     metadata: .pixelSize
                 )
-                try Task.checkCancellation()
-                guard activePageLoadID == loadID else { return }
-                if let imageA = decodedA.image {
-                    self.image = imageA
-                    self.imagePixelSize = decodedA.pixelSize
-                } else {
-                    self.errorText = "Decode failed"
-                }
+                guard pageLoadOwnership.performIfCurrent(load) {
+                    if let imageA = decodedA.image {
+                        self.image = imageA
+                        self.imagePixelSize = decodedA.pixelSize
+                    } else {
+                        self.errorText = "Decode failed"
+                    }
+                } else { return }
 
                 if let urlB {
                     let bytesB = try await appModel.archives.bytes(profile: profile, url: urlB)
@@ -657,19 +656,20 @@ struct ReaderView: View {
                         maxPixelSize: 2400,
                         metadata: .pixelSize
                     )
-                    try Task.checkCancellation()
-                    guard activePageLoadID == loadID else { return }
-                    self.imageB = decodedB.image
-                    self.imageBPixelSize = decodedB.pixelSize
+                    guard pageLoadOwnership.performIfCurrent(load) {
+                        self.imageB = decodedB.image
+                        self.imageBPixelSize = decodedB.pixelSize
+                    } else { return }
                 }
 
-                try Task.checkCancellation()
-                guard activePageLoadID == loadID else { return }
-                startPrefetch(profile: profile)
+                guard pageLoadOwnership.performIfCurrent(load, {
+                    startPrefetch(profile: profile)
+                }) else { return }
             } catch {
                 if Task.isCancelled || ErrorPresenter.isCancellationLike(error) { return }
-                guard activePageLoadID == loadID else { return }
-                self.errorText = ErrorPresenter.short(error)
+                pageLoadOwnership.performIfCurrent(load) {
+                    self.errorText = ErrorPresenter.short(error)
+                }
             }
         }
     }
@@ -1133,7 +1133,7 @@ private struct PageThumbnailCell: View {
 
     @State private var thumbnail: NSImage?
     @State private var isLoading = true
-    @State private var activeLoadID: UUID?
+    @State private var loadOwnership = ImageLoadOwnership()
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -1193,24 +1193,24 @@ private struct PageThumbnailCell: View {
             Button("Set as Cover") { onSetCover() }
         }
         .task(id: url) {
-            let loadID = UUID()
-            activeLoadID = loadID
+            let load = loadOwnership.begin()
             isLoading = true
             thumbnail = nil
             do {
                 let bytes = try await appModel.archives.bytes(profile: profile, url: url)
                 let decoded = try await AsyncImageDownsampler.decode(bytes, maxPixelSize: 240)
-                try Task.checkCancellation()
-                guard activeLoadID == loadID else { return }
-                thumbnail = decoded.image
+                guard loadOwnership.performIfCurrent(load, {
+                    thumbnail = decoded.image
+                }) else { return }
             } catch {
                 // placeholder shown on failure
             }
-            guard !Task.isCancelled, activeLoadID == loadID else { return }
-            isLoading = false
+            loadOwnership.performIfCurrent(load) {
+                isLoading = false
+            }
         }
         .onDisappear {
-            activeLoadID = nil
+            loadOwnership.invalidate()
         }
     }
 }

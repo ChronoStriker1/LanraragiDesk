@@ -16,6 +16,43 @@ struct AsyncDecodedImage: @unchecked Sendable {
     let resolutionText: String?
 }
 
+/// Owns the right to commit the result of one asynchronous image load.
+/// Starting a replacement invalidates every earlier token, while cancellation
+/// prevents even the current token from mutating view state.
+struct ImageLoadOwnership {
+    struct Token: Equatable {
+        fileprivate let id: UUID
+    }
+
+    private var current: Token?
+
+    mutating func begin(id: UUID = UUID()) -> Token {
+        let token = Token(id: id)
+        current = token
+        return token
+    }
+
+    mutating func invalidate() {
+        current = nil
+    }
+
+    @discardableResult
+    func performIfCurrent(
+        _ token: Token,
+        isCancelled: Bool,
+        _ mutation: () -> Void
+    ) -> Bool {
+        guard !isCancelled, current == token else { return false }
+        mutation()
+        return true
+    }
+
+    @discardableResult
+    func performIfCurrent(_ token: Token, _ mutation: () -> Void) -> Bool {
+        performIfCurrent(token, isCancelled: Task.isCancelled, mutation)
+    }
+}
+
 enum AsyncImageDownsampler {
     static func decode(
         _ data: Data,
