@@ -64,6 +64,37 @@ final class LANraragiClientURLTests: XCTestCase {
         XCTAssertEqual(url.absoluteString, absolute)
     }
 
+    func testQueryValuesPercentEncodeLiteralPlusWithoutChangingOtherEscapes() throws {
+        let client = makeClient(baseURL: "https://lanraragi.example/lrr")
+
+        let url = try client.makeURL(
+            path: "/api/search",
+            queryItems: [
+                URLQueryItem(name: "filter+type", value: "artist:C++ 100% 日本"),
+            ]
+        )
+
+        XCTAssertEqual(
+            url.absoluteString,
+            "https://lanraragi.example/lrr/api/search"
+                + "?filter%2Btype=artist:C%2B%2B%20100%25%20%E6%97%A5%E6%9C%AC"
+        )
+    }
+
+    func testFormBodyPercentEncodesLiteralPlusWithoutChangingOtherEscapes() throws {
+        let client = makeClient(baseURL: "https://lanraragi.example")
+
+        let body = client.makeFormBody([
+            URLQueryItem(name: "title", value: "C++ Primer"),
+            URLQueryItem(name: "tags", value: "math+science, 100% 日本"),
+        ])
+
+        XCTAssertEqual(
+            String(decoding: body, as: UTF8.self),
+            "title=C%2B%2B%20Primer&tags=math%2Bscience,%20100%25%20%E6%97%A5%E6%9C%AC"
+        )
+    }
+
     func testRelativeURLReceivesAuthorizationAfterResolution() throws {
         let client = makeClient(baseURL: "https://lanraragi.example/library")
         let url = try client.makeAbsoluteURL(from: "/api/archives/abc/page?path=1.jpg")
