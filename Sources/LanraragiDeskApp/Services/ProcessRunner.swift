@@ -149,12 +149,10 @@ struct ProcessRunner {
         let stderrTask = Task {
             try await readToEndOffCooperativeExecutor(stderrPipe.fileHandleForReading)
         }
-        let stdinTask: Task<Void, Error>? = if
-            let stdinPipe,
-            let stdin
-        {
+        let stdinTask: Task<Void, Error>?
+        if let stdinPipe, let stdin {
             let inputData = Data(stdin.utf8)
-            Task {
+            stdinTask = Task {
                 do {
                     try await writeOffCooperativeExecutor(
                         inputData,
@@ -165,7 +163,7 @@ struct ProcessRunner {
                 }
             }
         } else {
-            nil
+            stdinTask = nil
         }
         let terminationTask = Task<Int32, Error> {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Int32, Error>) in
