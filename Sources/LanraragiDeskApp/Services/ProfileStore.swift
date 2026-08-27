@@ -51,7 +51,14 @@ final class ProfileStore: ObservableObject {
             try? FileManager.default.copyItem(at: fileURL, to: backupURL)
             NSLog("ProfileStore: failed to decode profiles.json (%@); backed up to %@", String(describing: error), backupURL.path)
             profiles = []
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            profiles = []
         } catch {
+            NSLog(
+                "ProfileStore: failed to read profiles.json at %@: %@",
+                fileURL.path,
+                String(describing: error)
+            )
             profiles = []
         }
 
