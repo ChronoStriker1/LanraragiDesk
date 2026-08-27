@@ -919,14 +919,34 @@ public final class LANraragiClient: Sendable {
         return .decoding(error)
     }
 
-    private func makeURL(path: String) throws -> URL {
-        // Avoid surprising behavior if baseURL includes a trailing slash.
-        var base = config.baseURL
-        if base.path != "/" && base.path.hasSuffix("/") {
-            base.deleteLastPathComponent()
+    func makeURL(path: String) throws -> URL {
+        guard
+            var baseComponents = URLComponents(
+                url: config.baseURL,
+                resolvingAgainstBaseURL: false
+            ),
+            let pathComponents = URLComponents(string: path)
+        else {
+            throw LANraragiError.invalidBaseURL
         }
 
-        guard let url = URL(string: path, relativeTo: base) else {
+        var basePath = baseComponents.percentEncodedPath
+        while basePath.count > 1 && basePath.hasSuffix("/") {
+            basePath.removeLast()
+        }
+
+        let pathSuffix = String(pathComponents.percentEncodedPath.drop(while: { $0 == "/" }))
+        if basePath.isEmpty || basePath == "/" {
+            baseComponents.percentEncodedPath = "/" + pathSuffix
+        } else if pathSuffix.isEmpty {
+            baseComponents.percentEncodedPath = basePath + "/"
+        } else {
+            baseComponents.percentEncodedPath = basePath + "/" + pathSuffix
+        }
+        baseComponents.percentEncodedQuery = pathComponents.percentEncodedQuery
+        baseComponents.percentEncodedFragment = pathComponents.percentEncodedFragment
+
+        guard let url = baseComponents.url else {
             throw LANraragiError.invalidBaseURL
         }
         return url
