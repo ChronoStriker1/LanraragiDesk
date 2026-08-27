@@ -46,16 +46,52 @@ final class ReaderNavigationTests: XCTestCase {
         )
     }
 
-    func testEveryForwardInputUsesTheSameAdvanceDecision() {
-        let toolbar = ReaderNavigation.advance(from: 2, pageCount: 4, twoPageSpread: true)
-        let keyboard = ReaderNavigation.advance(from: 2, pageCount: 4, twoPageSpread: true)
-        let clickZone = ReaderNavigation.advance(from: 2, pageCount: 4, twoPageSpread: true)
-        let autoAdvance = ReaderNavigation.advance(from: 2, pageCount: 4, twoPageSpread: true)
+    func testEveryForwardInputUsesTheSameSpreadDecision() {
+        let inputs: [ReaderNavigationInput] = [
+            .toolbarRight,
+            .keyboardRight,
+            .moveRight,
+            .clickRight,
+            .space(shifted: false),
+            .autoAdvance,
+        ]
 
-        XCTAssertEqual(toolbar, .endOfArchive)
-        XCTAssertEqual(keyboard, toolbar)
-        XCTAssertEqual(clickZone, toolbar)
-        XCTAssertEqual(autoAdvance, toolbar)
+        for input in inputs {
+            XCTAssertEqual(
+                ReaderNavigation.decision(
+                    for: input,
+                    from: 2,
+                    pageCount: 4,
+                    twoPageSpread: true,
+                    rightToLeft: false
+                ),
+                .endOfArchive,
+                "Unexpected decision for \(input)"
+            )
+        }
+    }
+
+    func testPhysicalInputsReverseInRightToLeftMode() {
+        XCTAssertEqual(
+            ReaderNavigation.decision(
+                for: .toolbarLeft,
+                from: 0,
+                pageCount: 4,
+                twoPageSpread: true,
+                rightToLeft: true
+            ),
+            .page(2)
+        )
+        XCTAssertEqual(
+            ReaderNavigation.decision(
+                for: .clickRight,
+                from: 2,
+                pageCount: 4,
+                twoPageSpread: true,
+                rightToLeft: true
+            ),
+            .page(0)
+        )
     }
 
     func testSidebarSelectionNormalizesOnlyInSpreadMode() {
@@ -124,6 +160,17 @@ final class ReaderNavigationTests: XCTestCase {
         )
         XCTAssertEqual(
             ReaderNavigation.retreat(from: 3, pageCount: 6, twoPageSpread: true),
+            .page(0)
+        )
+    }
+
+    func testNonAlignedFinalIndexForEvenCountUsesAlignedBoundaries() {
+        XCTAssertEqual(
+            ReaderNavigation.advance(from: 3, pageCount: 4, twoPageSpread: true),
+            .endOfArchive
+        )
+        XCTAssertEqual(
+            ReaderNavigation.retreat(from: 3, pageCount: 4, twoPageSpread: true),
             .page(0)
         )
     }

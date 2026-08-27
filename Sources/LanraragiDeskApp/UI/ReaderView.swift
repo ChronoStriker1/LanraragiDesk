@@ -166,17 +166,9 @@ struct ReaderView: View {
         .onMoveCommand { dir in
             switch dir {
             case .left:
-                if readingDirection == .rtl {
-                    goNext(userInitiated: true)
-                } else {
-                    goPrev(userInitiated: true)
-                }
+                performNavigation(.moveLeft, userInitiated: true)
             case .right:
-                if readingDirection == .rtl {
-                    goPrev(userInitiated: true)
-                } else {
-                    goNext(userInitiated: true)
-                }
+                performNavigation(.moveRight, userInitiated: true)
             default:
                 break
             }
@@ -210,8 +202,11 @@ struct ReaderView: View {
                 twoPageSpread: enabled
             )
             if normalized != pageIndex {
+                // The pageIndex observer owns the reload and timer restart when
+                // normalization changes the selection.
                 pageIndex = normalized
             } else {
+                // No pageIndex notification will fire, so update in place.
                 loadCurrentPage()
                 restartAutoAdvance()
             }
@@ -344,11 +339,7 @@ struct ReaderView: View {
     private var pageNavigationToolbarControl: some View {
         HStack(spacing: 10) {
             Button {
-                if readingDirection == .rtl {
-                    goNext(userInitiated: true)
-                } else {
-                    goPrev(userInitiated: true)
-                }
+                performNavigation(.toolbarLeft, userInitiated: true)
             } label: {
                 Image(systemName: "chevron.left")
                     .imageScale(.medium)
@@ -363,11 +354,7 @@ struct ReaderView: View {
                 .frame(width: 58, alignment: .center)
 
             Button {
-                if readingDirection == .rtl {
-                    goPrev(userInitiated: true)
-                } else {
-                    goNext(userInitiated: true)
-                }
+                performNavigation(.toolbarRight, userInitiated: true)
             } label: {
                 Image(systemName: "chevron.right")
                     .imageScale(.medium)
@@ -426,22 +413,13 @@ struct ReaderView: View {
             Color.clear
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    // The side that advances depends on direction.
-                    if readingDirection == .rtl {
-                        goNext(userInitiated: true)
-                    } else {
-                        goPrev(userInitiated: true)
-                    }
+                    performNavigation(.clickLeft, userInitiated: true)
                 }
 
             Color.clear
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    if readingDirection == .rtl {
-                        goPrev(userInitiated: true)
-                    } else {
-                        goNext(userInitiated: true)
-                    }
+                    performNavigation(.clickRight, userInitiated: true)
                 }
         }
         // In add-stamp mode clicks must reach the page image, not turn pages.
@@ -746,21 +724,26 @@ struct ReaderView: View {
                 return
             }
 
-            goNext(userInitiated: false)
+            performNavigation(.autoAdvance, userInitiated: false)
         }
     }
 
-    private func goNext(userInitiated: Bool) {
+    private func performNavigation(
+        _ input: ReaderNavigationInput,
+        userInitiated: Bool
+    ) {
         if userInitiated {
             restartAutoAdvance()
         }
-        switch ReaderNavigation.advance(
+        switch ReaderNavigation.decision(
+            for: input,
             from: pageIndex,
             pageCount: pages.count,
-            twoPageSpread: twoPageSpread
+            twoPageSpread: twoPageSpread,
+            rightToLeft: readingDirection == .rtl
         ) {
-        case .page(let next):
-            pageIndex = next
+        case .page(let destination):
+            pageIndex = destination
         case .endOfArchive:
             if autoAdvanceEnabled {
                 autoAdvanceEnabled = false
@@ -768,20 +751,7 @@ struct ReaderView: View {
         case .startOfArchive:
             break
         }
-    }
-
-    private func goPrev(userInitiated: Bool) {
-        if userInitiated {
-            restartAutoAdvance()
-        }
-        switch ReaderNavigation.retreat(
-            from: pageIndex,
-            pageCount: pages.count,
-            twoPageSpread: twoPageSpread
-        ) {
-        case .page(let previous):
-            pageIndex = previous
-        case .startOfArchive, .endOfArchive:
+        case .startOfArchive:
             break
         }
     }
@@ -791,23 +761,14 @@ struct ReaderView: View {
         // Esc: close.
         switch event.keyCode {
         case 123: // left arrow
-            if readingDirection == .rtl {
-                goNext(userInitiated: true)
-            } else {
-                goPrev(userInitiated: true)
-            }
+            performNavigation(.keyboardLeft, userInitiated: true)
         case 124: // right arrow
-            if readingDirection == .rtl {
-                goPrev(userInitiated: true)
-            } else {
-                goNext(userInitiated: true)
-            }
+            performNavigation(.keyboardRight, userInitiated: true)
         case 49: // space
-            if event.modifierFlags.contains(.shift) {
-                goPrev(userInitiated: true)
-            } else {
-                goNext(userInitiated: true)
-            }
+            performNavigation(
+                .space(shifted: event.modifierFlags.contains(.shift)),
+                userInitiated: true
+            )
         case 53: // escape
             dismiss()
         case 24, 69: // + on some keyboards, numpad +

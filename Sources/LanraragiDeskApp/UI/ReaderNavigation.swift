@@ -8,6 +8,24 @@ enum ReaderNavigationDecision: Equatable {
     case endOfArchive
 }
 
+enum ReaderNavigationInput: Equatable {
+    case toolbarLeft
+    case toolbarRight
+    case clickLeft
+    case clickRight
+    case keyboardLeft
+    case keyboardRight
+    case moveLeft
+    case moveRight
+    case space(shifted: Bool)
+    case autoAdvance
+}
+
+enum ReaderNavigationAction: Equatable {
+    case advance
+    case retreat
+}
+
 enum ReaderNavigation {
     static func normalizedIndex(
         _ requestedIndex: Int,
@@ -57,5 +75,44 @@ enum ReaderNavigation {
         )
         guard current > 0 else { return .startOfArchive }
         return .page(max(0, current - (twoPageSpread ? 2 : 1)))
+    }
+
+    static func action(
+        for input: ReaderNavigationInput,
+        rightToLeft: Bool
+    ) -> ReaderNavigationAction {
+        switch input {
+        case .autoAdvance:
+            return .advance
+        case .space(let shifted):
+            return shifted ? .retreat : .advance
+        case .toolbarLeft, .clickLeft, .keyboardLeft, .moveLeft:
+            return rightToLeft ? .advance : .retreat
+        case .toolbarRight, .clickRight, .keyboardRight, .moveRight:
+            return rightToLeft ? .retreat : .advance
+        }
+    }
+
+    static func decision(
+        for input: ReaderNavigationInput,
+        from currentIndex: Int,
+        pageCount: Int,
+        twoPageSpread: Bool,
+        rightToLeft: Bool
+    ) -> ReaderNavigationDecision {
+        switch action(for: input, rightToLeft: rightToLeft) {
+        case .advance:
+            return advance(
+                from: currentIndex,
+                pageCount: pageCount,
+                twoPageSpread: twoPageSpread
+            )
+        case .retreat:
+            return retreat(
+                from: currentIndex,
+                pageCount: pageCount,
+                twoPageSpread: twoPageSpread
+            )
+        }
     }
 }
