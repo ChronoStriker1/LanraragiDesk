@@ -17,6 +17,14 @@ enum ErrorPresenter {
     }
 
     static func short(_ error: Error) -> String {
+        if let e = error as? APIKeyCredential.CredentialError, e == .missing {
+            return "API key missing"
+        }
+
+        if let e = error as? KeychainService.KeychainError {
+            return "Keychain unavailable (\(e.status))"
+        }
+
         if let e = error as? LANraragiError {
             switch e {
             case .unauthorized:

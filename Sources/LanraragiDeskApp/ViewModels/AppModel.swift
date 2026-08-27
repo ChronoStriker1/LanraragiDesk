@@ -87,18 +87,14 @@ final class AppModel: ObservableObject {
         guard let profile = selectedProfile else { return }
         connectionStatus = .testing
 
-        let account = "apiKey.\(profile.id.uuidString)"
-        let apiKeyString = (try? KeychainService.getString(account: account)) ?? nil
-        let apiKey = apiKeyString.map { LANraragiAPIKey($0) }
-
-        let client = LANraragiClient(configuration: .init(
-            baseURL: profile.baseURL,
-            apiKey: apiKey,
-            acceptLanguage: profile.language,
-            maxConnectionsPerHost: AppSettings.maxConnectionsPerHost(defaultValue: 8)
-        ))
-
         do {
+            let apiKey = try APIKeyCredential.load(profileID: profile.id)
+            let client = LANraragiClient(configuration: .init(
+                baseURL: profile.baseURL,
+                apiKey: apiKey,
+                acceptLanguage: profile.language,
+                maxConnectionsPerHost: AppSettings.maxConnectionsPerHost(defaultValue: 8)
+            ))
             let info = try await client.getServerInfo()
             connectionStatus = .ok(info)
         } catch LANraragiError.unauthorized {
