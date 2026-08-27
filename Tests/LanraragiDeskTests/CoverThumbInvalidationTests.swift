@@ -1,4 +1,5 @@
 import CoreGraphics
+import Combine
 import Foundation
 import XCTest
 @testable import LanraragiDesk
@@ -39,18 +40,35 @@ final class CoverThumbInvalidationTests: XCTestCase {
         XCTAssertNotEqual(base.cacheKey, updated.cacheKey)
     }
 
-    func testInvalidationOnlyAdvancesRequestedProfileAndArchive() {
+    func testInvalidationOnlyPublishesToMatchingProfileAndArchive() {
         let store = CoverThumbInvalidationStore()
         let profileA = UUID()
         let profileB = UUID()
+        let identityA = CoverThumbIdentity(profileID: profileA, arcid: "a")
+        let identityB = CoverThumbIdentity(profileID: profileB, arcid: "a")
+        let identityOtherArchive = CoverThumbIdentity(profileID: profileA, arcid: "b")
+        var receivedA = 0
+        var receivedB = 0
+        var receivedOtherArchive = 0
+        var cancellables: Set<AnyCancellable> = []
 
-        XCTAssertEqual(store.revision(profileID: profileA, arcid: "a"), 0)
-        XCTAssertEqual(store.invalidate(profileID: profileA, arcid: "a"), 1)
-        XCTAssertEqual(store.revision(profileID: profileA, arcid: "a"), 1)
-        XCTAssertEqual(store.revision(profileID: profileA, arcid: "b"), 0)
-        XCTAssertEqual(store.revision(profileID: profileB, arcid: "a"), 0)
+        store.publisher(for: identityA)
+            .sink { receivedA += 1 }
+            .store(in: &cancellables)
+        store.publisher(for: identityB)
+            .sink { receivedB += 1 }
+            .store(in: &cancellables)
+        store.publisher(for: identityOtherArchive)
+            .sink { receivedOtherArchive += 1 }
+            .store(in: &cancellables)
 
-        XCTAssertEqual(store.invalidate(profileID: profileA, arcid: "a"), 2)
-        XCTAssertEqual(store.revision(profileID: profileA, arcid: "a"), 2)
+        store.invalidate(profileID: profileA, arcid: "a")
+
+        XCTAssertEqual(receivedA, 1)
+        XCTAssertEqual(receivedB, 0)
+        XCTAssertEqual(receivedOtherArchive, 0)
+
+        store.invalidate(profileID: profileA, arcid: "a")
+        XCTAssertEqual(receivedA, 2)
     }
 }

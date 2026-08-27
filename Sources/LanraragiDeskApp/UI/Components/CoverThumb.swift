@@ -137,22 +137,22 @@ private enum CoverThumbCache {
 }
 
 @MainActor
-final class CoverThumbInvalidationStore: ObservableObject {
+final class CoverThumbInvalidationStore {
     static let shared = CoverThumbInvalidationStore()
 
-    @Published private var revisions: [CoverThumbIdentity: UInt64] = [:]
+    private let invalidations = PassthroughSubject<CoverThumbIdentity, Never>()
 
-    func revision(profileID: Profile.ID, arcid: String) -> UInt64 {
-        revisions[CoverThumbIdentity(profileID: profileID, arcid: arcid), default: 0]
+    func publisher(for identity: CoverThumbIdentity) -> AnyPublisher<Void, Never> {
+        invalidations
+            .filter { $0 == identity }
+            .map { _ in () }
+            .eraseToAnyPublisher()
     }
 
-    @discardableResult
-    func invalidate(profileID: Profile.ID, arcid: String) -> UInt64 {
+    func invalidate(profileID: Profile.ID, arcid: String) {
         let identity = CoverThumbIdentity(profileID: profileID, arcid: arcid)
-        let nextRevision = revisions[identity, default: 0] &+ 1
         CoverThumbCache.invalidate(identity)
-        revisions[identity] = nextRevision
-        return nextRevision
+        invalidations.send(identity)
     }
 }
 
@@ -165,11 +165,12 @@ struct CoverThumb: View {
     let showsBorder: Bool
     let reloadToken: Int
 
-    @ObservedObject private var invalidations = CoverThumbInvalidationStore.shared
+    private let invalidations = CoverThumbInvalidationStore.shared
     @State private var image: NSImage?
     @State private var errorText: String?
     @State private var activeRequest: CoverThumbRequestKey?
     @State private var task: Task<Void, Never>?
+    @State private var revision: UInt64 = 0
 
     @AppStorage("thumbs.cropToFill") private var cropToFill: Bool = false
 
@@ -193,7 +194,7 @@ struct CoverThumb: View {
 
     var body: some View {
         let clipShape = RoundedRectangle(cornerRadius: 10, style: .continuous)
-        let revision = invalidations.revision(profileID: profile.id, arcid: arcid)
+        let identity = CoverThumbIdentity(profileID: profile.id, arcid: arcid)
         let request = CoverThumbRequestKey(
             profileID: profile.id,
             arcid: arcid,
@@ -282,6 +283,9 @@ struct CoverThumb: View {
             activeRequest = nil
             task?.cancel()
             task = nil
+        }
+        .onReceive(invalidations.publisher(for: identity)) {
+            revision &+= 1
         }
     }
 }
