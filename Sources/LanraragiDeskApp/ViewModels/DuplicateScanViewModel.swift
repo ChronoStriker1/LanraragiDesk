@@ -230,21 +230,6 @@ final class DuplicateScanViewModel: ObservableObject {
         log(.action, "Cleared Not a match pairs", detail: "\(previousCount) pairs")
     }
 
-    func loadNotDuplicatePairs(profile: Profile) async {
-        do {
-            let store = try IndexStore(configuration: .init(url: AppPaths.indexDBURL()))
-            let set = try store.loadNotDuplicatePairs(profileID: profile.id)
-            notMatches = set.sorted { a, b in
-                if a.createdAt != b.createdAt { return a.createdAt > b.createdAt }
-                if a.arcidA != b.arcidA { return a.arcidA < b.arcidA }
-                return a.arcidB < b.arcidB
-            }
-        } catch {
-            notMatchRefreshError = "Failed to load exclusions: \(ErrorPresenter.short(error))"
-            log(.error, "Failed to load Not a match pairs", detail: String(describing: error))
-        }
-    }
-
     func loadAndPruneNotDuplicatePairs(profile: Profile) async {
         if isRefreshingNotMatches { return }
         isRefreshingNotMatches = true

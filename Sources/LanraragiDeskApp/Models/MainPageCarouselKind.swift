@@ -24,15 +24,6 @@ enum MainPageCarouselKind: String, CaseIterable, Identifiable {
         }
     }
 
-    var searchDescription: String {
-        switch self {
-        case .newArchives:
-            return "Show only new archives."
-        case .untaggedArchives:
-            return "Show only untagged archives."
-        }
-    }
-
     var isNewOnly: Bool {
         self == .newArchives
     }

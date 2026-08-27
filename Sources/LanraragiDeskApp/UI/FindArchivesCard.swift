@@ -369,11 +369,6 @@ private struct ConditionRowView: View {
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
-                .onChange(of: condition.categoryID) { _, newID in
-                    if let cat = categories.first(where: { $0.id == newID }) {
-                        condition.categoryName = cat.name
-                    }
-                }
             }
 
             Spacer()

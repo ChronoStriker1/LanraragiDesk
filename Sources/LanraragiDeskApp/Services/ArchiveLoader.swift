@@ -14,9 +14,6 @@ actor ArchiveLoader {
     private var metaCache: [String: ArchiveMetadata] = [:]
     private var metaInflight: [String: Task<ArchiveMetadata, Error>] = [:]
 
-    private var metaRawCache: [String: String] = [:]
-    private var metaRawInflight: [String: Task<String, Error>] = [:]
-
     private var pagesCache: [String: [URL]] = [:]
     private var pagesInflight: [String: Task<[URL], Error>] = [:]
 
@@ -74,7 +71,6 @@ actor ArchiveLoader {
             // Transient server errors (5xx, etc.) must propagate so callers don't
             // prune user data based on a hiccup.
             metaCache[arcid] = nil
-            metaRawCache[arcid] = nil
             pagesCache[arcid] = nil
             return false
         }
@@ -94,8 +90,6 @@ actor ArchiveLoader {
 
         // Refresh caches for this archive.
         metaCache[arcid] = nil
-        metaRawCache[arcid] = nil
-
         let updated = try await metadata(profile: profile, arcid: arcid, forceRefresh: true)
         return updated
     }
@@ -139,45 +133,12 @@ actor ArchiveLoader {
 
         // Drop cached references for the deleted archive.
         metaCache[arcid] = nil
-        metaRawCache[arcid] = nil
         pagesCache[arcid] = nil
         metaInflight[arcid]?.cancel()
-        metaRawInflight[arcid]?.cancel()
         pagesInflight[arcid]?.cancel()
         metaInflight[arcid] = nil
-        metaRawInflight[arcid] = nil
         pagesInflight[arcid] = nil
     }
-
-    func metadataPrettyJSON(profile: Profile, arcid: String) async throws -> String {
-        if let s = metaRawCache[arcid] { return s }
-        if let t = metaRawInflight[arcid] { return try await t.value }
-
-        let client = try makeClient(profile: profile)
-        let task = Task<String, Error> {
-            try await limiter.withPermit {
-                let data = try await client.getArchiveMetadataRaw(arcid: arcid)
-
-                guard
-                    let obj = try? JSONSerialization.jsonObject(with: data),
-                    let pretty = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]),
-                    let str = String(data: pretty, encoding: .utf8)
-                else {
-                    return String(decoding: data, as: UTF8.self)
-                }
-
-                return str
-            }
-        }
-
-        metaRawInflight[arcid] = task
-        defer { metaRawInflight[arcid] = nil }
-
-        let s = try await task.value
-        metaRawCache[arcid] = s
-        return s
-    }
-
     func pageURLs(profile: Profile, arcid: String) async throws -> [URL] {
         if let p = pagesCache[arcid], p.count > 1 { return p }
         if let t = pagesInflight[arcid] { return try await t.value }
@@ -314,13 +275,6 @@ actor ArchiveLoader {
         metaCache[tankID] = nil
     }
 
-    func archiveTankoubons(profile: Profile, arcid: String) async throws -> [String] {
-        let client = try makeClient(profile: profile)
-        return try await limiter.withPermit {
-            try await client.getArchiveTankoubons(arcid: arcid)
-        }
-    }
-
     // MARK: - Stamps
 
     func stampedPages(profile: Profile, arcid: String) async throws -> [Int] {
@@ -365,7 +319,6 @@ actor ArchiveLoader {
         apiKeyByProfileID[profileID] = nil
         clientByProfileID[profileID] = nil
         metaCache.removeAll()
-        metaRawCache.removeAll()
         pagesCache.removeAll()
         bytesCache.removeAllObjects()
     }

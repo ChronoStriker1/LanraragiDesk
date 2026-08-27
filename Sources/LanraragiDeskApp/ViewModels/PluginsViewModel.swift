@@ -20,15 +20,6 @@ final class PluginsViewModel: ObservableObject {
                 }
             }
 
-            var label: String {
-                switch self {
-                case .queued: return "Queued"
-                case .running: return "Running"
-                case .finished: return "Finished"
-                case .failed: return "Failed"
-                case .unknown: return "Unknown"
-                }
-            }
         }
 
         var id: Int { jobID }
@@ -46,23 +37,6 @@ final class PluginsViewModel: ObservableObject {
     @Published private(set) var statusText: String?
     @Published private(set) var isLoading: Bool = false
     @Published private(set) var jobs: [TrackedPluginJob] = []
-    @Published private(set) var isPollingJobs: Bool = false
-
-    var runningCount: Int {
-        jobs.filter { !$0.state.isTerminal }.count
-    }
-
-    var finishedCount: Int {
-        jobs.filter { $0.state == .finished }.count
-    }
-
-    var failedCount: Int {
-        jobs.filter { $0.state == .failed }.count
-    }
-
-    var hasTerminalJobs: Bool {
-        jobs.contains { $0.state.isTerminal }
-    }
 
     private var pollTask: Task<Void, Never>?
     private var jobsProfileID: Profile.ID?
@@ -113,17 +87,6 @@ final class PluginsViewModel: ObservableObject {
         ensurePolling()
     }
 
-    func refreshJobStatuses(profile: Profile) async {
-        setActiveJobsProfileIfNeeded(profile)
-        guard !jobs.isEmpty else { return }
-        do {
-            let client = try makeClient(profile: profile)
-            await pollJobsOnce(client: client)
-        } catch {
-            statusText = "Failed to refresh jobs: \(ErrorPresenter.short(error))"
-        }
-    }
-
     func waitForJobCompletion(
         profile: Profile,
         jobID: Int,
@@ -167,10 +130,6 @@ final class PluginsViewModel: ObservableObject {
         return .unknown
     }
 
-    func clearTerminalJobs() {
-        jobs.removeAll { $0.state.isTerminal }
-    }
-
     private func setActiveJobsProfileIfNeeded(_ profile: Profile) {
         if jobsProfileID == profile.id {
             jobsProfile = profile
@@ -178,7 +137,6 @@ final class PluginsViewModel: ObservableObject {
         }
         pollTask?.cancel()
         pollTask = nil
-        isPollingJobs = false
         jobs.removeAll()
         jobsProfileID = profile.id
         jobsProfile = profile
@@ -192,9 +150,7 @@ final class PluginsViewModel: ObservableObject {
     }
 
     private func pollLoop() async {
-        isPollingJobs = true
         defer {
-            isPollingJobs = false
             pollTask = nil
         }
 
