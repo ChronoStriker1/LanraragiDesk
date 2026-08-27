@@ -27,6 +27,7 @@ struct LibraryView: View {
     // Used by list/table view to avoid refetching metadata per-cell.
     @State private var metaByArcid: [String: ArchiveMetadata] = [:]
     @State private var metadataEpoch: Int = 0
+    @State private var listRowsCache = LibraryListRowsCache()
     @State private var listSortOrder: [KeyPathComparator<LibraryListRow>] = [
         .init(\.dateAddedSortKey, order: .reverse)
     ]
@@ -81,7 +82,7 @@ struct LibraryView: View {
                 initialMeta: nil,
                 archives: appModel.archives,
                 onSaved: { updated in
-                    metaByArcid[updated.arcid] = updated
+                    storeListMetadata(updated, for: route.arcid)
                     metadataEpoch &+= 1
                 },
                 onDelete: { arcid in
@@ -90,7 +91,8 @@ struct LibraryView: View {
                         await appModel.thumbnails.invalidate(profile: profile, arcid: arcid)
                         appModel.selection.remove(arcid)
                         metaByArcid[arcid] = nil
-                        refreshLibrary()
+                        listRowsCache.removeRow(for: arcid)
+                        refreshLibrary(excluding: arcid)
                         appModel.activity.add(.init(kind: .action, title: "Deleted archive", detail: arcid))
                     } catch {
                         appModel.activity.add(.init(kind: .error, title: "Delete archive failed", detail: "\(arcid)\n\(error)"))
@@ -144,6 +146,13 @@ struct LibraryView: View {
         }
         .onChange(of: vm.groupTanks) { _, _ in
             refreshLibrary()
+        }
+        .onChange(of: vm.arcids, initial: true) { _, arcids in
+            listRowsCache.rebuild(
+                arcids: arcids,
+                metadata: metaByArcid,
+                sortOrder: listSortOrder
+            )
         }
         .onReceive(appModel.$librarySearchRequest) { request in
             guard let request else { return }
@@ -456,9 +465,20 @@ struct LibraryView: View {
         refreshLibrary()
     }
 
-    private func refreshLibrary() {
+    private func refreshLibrary(excluding excludedArcid: String? = nil) {
         metadataEpoch &+= 1
         metaByArcid.removeAll()
+        let visibleArcids: [String]
+        if let excludedArcid {
+            visibleArcids = vm.arcids.filter { $0 != excludedArcid }
+        } else {
+            visibleArcids = vm.arcids
+        }
+        listRowsCache.rebuild(
+            arcids: visibleArcids,
+            metadata: metaByArcid,
+            sortOrder: listSortOrder
+        )
         vm.refresh(profile: profile)
     }
 
@@ -570,19 +590,18 @@ struct LibraryView: View {
         }
     }
 
-    private var listRows: [LibraryListRow] {
-        vm.arcids.map { arcid in
-            let meta = metaByArcid[arcid]
-            return LibraryListRow(arcid: arcid, meta: meta)
-        }
-    }
-
-    private var sortedListRows: [LibraryListRow] {
-        listRows.sorted(using: listSortOrder)
+    private var listSortBinding: Binding<[KeyPathComparator<LibraryListRow>]> {
+        Binding(
+            get: { listSortOrder },
+            set: { newSortOrder in
+                listSortOrder = newSortOrder
+                listRowsCache.sort(using: newSortOrder)
+            }
+        )
     }
 
     private var libraryTable: some View {
-        Table(sortedListRows, sortOrder: $listSortOrder) {
+        Table(listRowsCache.rows, sortOrder: listSortBinding) {
             TableColumn("Select") { row in
                 if LANraragiID.isTankoubon(row.arcid) {
                     Image(systemName: "rectangle.stack")
@@ -618,7 +637,9 @@ struct LibraryView: View {
                     if metaByArcid[row.arcid] != nil { return }
                     do {
                         let meta = try await appModel.archives.metadata(profile: profile, arcid: row.arcid)
-                        await MainActor.run { metaByArcid[row.arcid] = meta }
+                        await MainActor.run {
+                            storeListMetadata(meta, for: row.arcid)
+                        }
                     } catch {
                         // Leave as-is; cover/title still show.
                     }
@@ -708,6 +729,15 @@ struct LibraryView: View {
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .background(.thinMaterial)
         .debugFrameNumber(2)
+    }
+
+    private func storeListMetadata(_ metadata: ArchiveMetadata, for arcid: String) {
+        metaByArcid[arcid] = metadata
+        listRowsCache.updateMetadata(
+            metadata,
+            for: arcid,
+            sortOrder: listSortOrder
+        )
     }
 
     private func refreshSuggestions() async {
@@ -851,8 +881,10 @@ struct LibraryView: View {
     }
 }
 
-private struct LibraryListRow: Identifiable, Hashable {
+// App-internal so the cache behavior can be covered through @testable import.
+struct LibraryListRow: Identifiable, Hashable {
     let arcid: String
+    let sourceIndex: Int
 
     let isNew: Bool
     let dateAdded: Date?
@@ -879,8 +911,9 @@ private struct LibraryListRow: Identifiable, Hashable {
         return f
     }()
 
-    init(arcid: String, meta: ArchiveMetadata?) {
+    init(arcid: String, sourceIndex: Int, meta: ArchiveMetadata?) {
         self.arcid = arcid
+        self.sourceIndex = sourceIndex
 
         let t = meta?.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         self.title = t.isEmpty ? "Untitled" : t
