@@ -18,7 +18,8 @@ final class ProcessRunnerTests: XCTestCase {
                 throwing: ProcessRunner.RunnerError.timedOut("test")
             )
         )
-        XCTAssertEqual(try await waiter.value, 17)
+        let status = try await waiter.value
+        XCTAssertEqual(status, 17)
     }
 
     func testInputRoundTripsThroughStandardInput() async throws {
