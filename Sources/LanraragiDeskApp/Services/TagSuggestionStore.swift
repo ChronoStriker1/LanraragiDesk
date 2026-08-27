@@ -158,7 +158,7 @@ actor TagSuggestionStore {
                 // The initiating caller may have been a forced refresh without a
                 // stale fallback. Preserve the joining caller's fallback policy.
                 if let staleDisk {
-                    cacheByBaseURL[baseKey] = makeCacheEntry(from: staleDisk)
+                    installStaleFallback(staleDisk, baseKey: baseKey)
                 }
                 throw error
             }
@@ -175,7 +175,7 @@ actor TagSuggestionStore {
             } catch {
                 // Keep stale suggestions useful while still surfacing the refresh failure.
                 if let staleDisk {
-                    cacheByBaseURL[baseKey] = makeCacheEntry(from: staleDisk)
+                    installStaleFallback(staleDisk, baseKey: baseKey)
                 }
                 lastErrorByBaseURL[baseKey] = ErrorPresenter.short(error)
                 throw error
@@ -188,6 +188,13 @@ actor TagSuggestionStore {
             }
         }
         return try await task.value
+    }
+
+    private func installStaleFallback(_ disk: CacheFile, baseKey: String) {
+        if let cached = cacheByBaseURL[baseKey], cached.fetchedAt >= disk.fetchedAt {
+            return
+        }
+        cacheByBaseURL[baseKey] = makeCacheEntry(from: disk)
     }
 
     private func fetchFromServer(profile: Profile, settings: Settings) async throws -> CacheEntry {

@@ -423,7 +423,7 @@ extension BatchView {
         pluginCurrentArchive = checkpoint.lastCurrentArchive ?? pluginCurrentArchive
         pluginLiveEvents = checkpoint.lastLiveEvents ?? pluginLiveEvents
         liveEvents = (checkpoint.lastLiveEvents ?? []).map { event in
-            guard let timestampEnd = event.firstIndex(of: "]") else {
+            guard event.hasPrefix("["), let timestampEnd = event.firstIndex(of: "]") else {
                 return "[PLUGIN] \(event)"
             }
             return "\(event[...timestampEnd]) [PLUGIN]\(event[event.index(after: timestampEnd)...])"
