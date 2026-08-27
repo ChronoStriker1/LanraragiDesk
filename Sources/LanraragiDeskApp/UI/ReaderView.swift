@@ -751,9 +751,6 @@ struct ReaderView: View {
         case .startOfArchive:
             break
         }
-        case .startOfArchive:
-            break
-        }
     }
 
     private func handleKeyDown(_ event: NSEvent) {
