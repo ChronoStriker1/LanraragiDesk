@@ -640,14 +640,14 @@ struct ReaderView: View {
                     maxPixelSize: 2400,
                     metadata: .pixelSize
                 )
-                guard pageLoadOwnership.performIfCurrent(load) {
+                guard pageLoadOwnership.performIfCurrent(load, {
                     if let imageA = decodedA.image {
                         self.image = imageA
                         self.imagePixelSize = decodedA.pixelSize
                     } else {
                         self.errorText = "Decode failed"
                     }
-                } else { return }
+                }) else { return }
 
                 if let urlB {
                     let bytesB = try await appModel.archives.bytes(profile: profile, url: urlB)
@@ -656,10 +656,10 @@ struct ReaderView: View {
                         maxPixelSize: 2400,
                         metadata: .pixelSize
                     )
-                    guard pageLoadOwnership.performIfCurrent(load) {
+                    guard pageLoadOwnership.performIfCurrent(load, {
                         self.imageB = decodedB.image
                         self.imageBPixelSize = decodedB.pixelSize
-                    } else { return }
+                    }) else { return }
                 }
 
                 guard pageLoadOwnership.performIfCurrent(load, {
