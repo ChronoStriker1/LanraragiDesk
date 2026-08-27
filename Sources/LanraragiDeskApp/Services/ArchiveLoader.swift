@@ -46,6 +46,7 @@ struct ArchiveLoaderFetchOverrides: Sendable {
     let metadata: @Sendable (String) async throws -> ArchiveMetadata
     let archiveFiles: @Sendable (String, Bool) async throws -> ArchiveFilesResponse
     let absoluteURL: @Sendable (String) throws -> URL
+    let bytes: @Sendable (URL) async throws -> Data
 }
 
 actor ArchiveLoader {
@@ -275,10 +276,20 @@ actor ArchiveLoader {
             return try await operation.task.value
         }
 
-        let client = try makeClient(profile: profile)
+        let fetchBytes: @Sendable () async throws -> Data
+        if let bytesOverride = fetchOverrides?.bytes {
+            fetchBytes = {
+                try await bytesOverride(url)
+            }
+        } else {
+            let client = try makeClient(profile: profile)
+            fetchBytes = {
+                try await client.fetchBytes(url: url)
+            }
+        }
         let task = Task<Data, Error> {
             try await limiter.withPermit {
-                return try await client.fetchBytes(url: url)
+                try await fetchBytes()
             }
         }
 

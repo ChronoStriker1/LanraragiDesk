@@ -84,13 +84,43 @@ final class ArchiveLoaderBehaviorTests: XCTestCase {
         XCTAssertEqual(callCount, 2)
     }
 
+    func testPageBytesCoalesceInFlightThenUseCache() async throws {
+        let byteProbe = ByteFetchProbe()
+        let loader = ArchiveLoader(fetchOverrides: makeFetchOverrides(
+            metadata: { arcid in ArchiveMetadata(arcid: arcid) },
+            archiveFiles: { _, _ in ArchiveFilesResponse(pages: []) },
+            bytes: { url in
+                await byteProbe.fetch(url: url)
+            }
+        ))
+        let profile = makeProfile()
+        let pageURL = URL(string: "https://example.test/page.jpg")!
+
+        async let first = loader.bytes(profile: profile, url: pageURL)
+        await byteProbe.waitUntilStarted()
+        async let coalesced = loader.bytes(profile: profile, url: pageURL)
+        await byteProbe.complete()
+
+        let expected = Data([0x01, 0x02, 0x03])
+        let firstResult = try await first
+        let coalescedResult = try await coalesced
+        XCTAssertEqual(firstResult, expected)
+        XCTAssertEqual(coalescedResult, expected)
+
+        let cachedResult = try await loader.bytes(profile: profile, url: pageURL)
+        XCTAssertEqual(cachedResult, expected)
+        let callCount = await byteProbe.callCount
+        XCTAssertEqual(callCount, 1)
+    }
+
     private func makeProfile() -> Profile {
         Profile(name: "Test", baseURL: URL(string: "https://example.test")!)
     }
 
     private func makeFetchOverrides(
         metadata: @escaping @Sendable (String) async throws -> ArchiveMetadata,
-        archiveFiles: @escaping @Sendable (String, Bool) async throws -> ArchiveFilesResponse
+        archiveFiles: @escaping @Sendable (String, Bool) async throws -> ArchiveFilesResponse,
+        bytes: @escaping @Sendable (URL) async throws -> Data = { _ in Data() }
     ) -> ArchiveLoaderFetchOverrides {
         ArchiveLoaderFetchOverrides(
             metadata: metadata,
@@ -100,7 +130,8 @@ final class ArchiveLoaderBehaviorTests: XCTestCase {
                     throw TestError.invalidURL(rawURL)
                 }
                 return url
-            }
+            },
+            bytes: bytes
         )
     }
 }
@@ -133,6 +164,41 @@ private actor KnownGoodMetadataProbe {
             return ArchiveMetadata(arcid: arcid, title: "cached")
         }
         throw TestError.refreshFailed
+    }
+}
+
+private actor ByteFetchProbe {
+    private var completions: [CheckedContinuation<Void, Never>] = []
+    private var startedWaiters: [CheckedContinuation<Void, Never>] = []
+    private(set) var callCount = 0
+
+    func fetch(url _: URL) async -> Data {
+        callCount += 1
+        let waiters = startedWaiters
+        startedWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+
+        await withCheckedContinuation { continuation in
+            completions.append(continuation)
+        }
+        return Data([0x01, 0x02, 0x03])
+    }
+
+    func waitUntilStarted() async {
+        guard callCount == 0 else { return }
+        await withCheckedContinuation { continuation in
+            startedWaiters.append(continuation)
+        }
+    }
+
+    func complete() {
+        let pending = completions
+        completions.removeAll()
+        for continuation in pending {
+            continuation.resume()
+        }
     }
 }
 
