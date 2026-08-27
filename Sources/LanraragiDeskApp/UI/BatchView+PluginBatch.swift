@@ -422,7 +422,12 @@ extension BatchView {
         pluginRunStatus = checkpoint.lastRunStatus ?? pluginRunStatus
         pluginCurrentArchive = checkpoint.lastCurrentArchive ?? pluginCurrentArchive
         pluginLiveEvents = checkpoint.lastLiveEvents ?? pluginLiveEvents
-        liveEvents = (checkpoint.lastLiveEvents ?? []).map { "[PLUGIN] \($0)" } + liveEvents
+        liveEvents = (checkpoint.lastLiveEvents ?? []).map { event in
+            guard let timestampEnd = event.firstIndex(of: "]") else {
+                return "[PLUGIN] \(event)"
+            }
+            return "\(event[...timestampEnd]) [PLUGIN]\(event[event.index(after: timestampEnd)...])"
+        } + liveEvents
         restoredPluginCheckpointUI = true
     }
     func pluginCheckpointBannerText(_ checkpoint: PluginBatchCheckpoint) -> String {
