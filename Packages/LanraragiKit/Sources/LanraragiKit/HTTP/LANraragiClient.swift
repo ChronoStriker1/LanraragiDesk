@@ -1,6 +1,12 @@
 import Foundation
 
 public final class LANraragiClient: Sendable {
+    enum ThumbnailJobPollDecision: Equatable {
+        case completed
+        case failed(state: String)
+        case pending(state: String)
+    }
+
     public struct Configuration: Sendable {
         public var baseURL: URL
         public var apiKey: LANraragiAPIKey?
@@ -715,25 +721,69 @@ public final class LANraragiClient: Sendable {
         case .bytes(let data):
             return data
         case .job(let job):
-            var polls = 0
-            while polls < maxPolls {
-                try Task.checkCancellation()
-                try await Task.sleep(for: pollInterval)
-                let st = try await getMinionStatus(job: job.job)
-                let state = st.state ?? st.data?.state
-                if state == nil || state == "finished" {
-                    break
+            return try await Self.waitForThumbnailJob(
+                jobID: job.job,
+                pollInterval: pollInterval,
+                maxPolls: maxPolls,
+                status: { [self] in
+                    let st = try await getMinionStatus(job: job.job)
+                    return st.state ?? st.data?.state
+                },
+                fetchThumbnail: { [self] in
+                    try await getArchiveThumbnail(arcid: arcid, noFallback: noFallback, page: nil)
                 }
-                polls += 1
-            }
+            )
+        }
+    }
 
-            // Retry after the job completes.
-            switch try await getArchiveThumbnail(arcid: arcid, noFallback: noFallback, page: nil) {
-            case .bytes(let data):
-                return data
-            case .job:
-                throw LANraragiError.invalidResponse
+    static func waitForThumbnailJob(
+        jobID: Int,
+        pollInterval: Duration,
+        maxPolls: Int,
+        status: @Sendable () async throws -> String?,
+        fetchThumbnail: @Sendable () async throws -> ThumbnailResponse
+    ) async throws -> Data {
+        let pollLimit = max(0, maxPolls)
+        for _ in 0..<pollLimit {
+            try Task.checkCancellation()
+            try await Task.sleep(for: pollInterval)
+            switch thumbnailJobPollDecision(state: try await status()) {
+            case .completed:
+                // Retry only after the job reports completion.
+                switch try await fetchThumbnail() {
+                case .bytes(let data):
+                    return data
+                case .job:
+                    throw LANraragiError.invalidResponse
+                }
+            case .failed(let state):
+                let message = "Thumbnail generation job \(jobID) failed (state: \(state))."
+                throw LANraragiError.httpStatus(500, body: Data(message.utf8))
+            case .pending:
+                continue
             }
+        }
+
+        // A nonterminal job may still be running. Fetching again here is premature and
+        // can queue or return another job, so report the polling timeout directly.
+        let message = "Thumbnail generation job \(jobID) did not finish after \(pollLimit) polls."
+        throw LANraragiError.httpStatus(504, body: Data(message.utf8))
+    }
+
+    static func thumbnailJobPollDecision(state: String?) -> ThumbnailJobPollDecision {
+        guard let state else {
+            // Some LANraragi variants omit state once a job is complete.
+            return .completed
+        }
+
+        let normalizedState = state.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalizedState {
+        case "finished":
+            return .completed
+        case "failed":
+            return .failed(state: normalizedState)
+        default:
+            return .pending(state: normalizedState)
         }
     }
 
