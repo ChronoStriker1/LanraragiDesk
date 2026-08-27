@@ -5,6 +5,41 @@ import XCTest
 
 @MainActor
 final class ClientGenerationInvalidationTests: XCTestCase {
+    func testLateCompletionAfterInvalidationWithoutReplacementIsNotCached() async throws {
+        let probe = ControlledFetchProbe<ArchiveMetadata>()
+        let loader = ArchiveLoader(fetchOverrides: makeArchiveOverrides(
+            metadata: { arcid in await probe.fetch(valueID: arcid) }
+        ))
+        let profile = makeProfile()
+
+        let oldRequest = Task {
+            try await loader.metadata(profile: profile, arcid: "shared")
+        }
+        await probe.waitUntilStarted(callCount: 1)
+        await loader.invalidateClient(profileID: profile.id)
+
+        await probe.complete(
+            call: 1,
+            with: ArchiveMetadata(arcid: "shared", title: "old credentials")
+        )
+        let oldResult = try await oldRequest.value
+        XCTAssertEqual(oldResult.title, "old credentials")
+
+        let freshRequest = Task {
+            try await loader.metadata(profile: profile, arcid: "shared")
+        }
+        await probe.waitUntilStarted(callCount: 2)
+        await probe.complete(
+            call: 2,
+            with: ArchiveMetadata(arcid: "shared", title: "fresh credentials")
+        )
+
+        let freshResult = try await freshRequest.value
+        XCTAssertEqual(freshResult.title, "fresh credentials")
+        let callCount = await probe.callCount
+        XCTAssertEqual(callCount, 2)
+    }
+
     func testLateMetadataCompletionCannotReplaceNewGenerationCache() async throws {
         let probe = ControlledFetchProbe<ArchiveMetadata>()
         let loader = ArchiveLoader(fetchOverrides: makeArchiveOverrides(
