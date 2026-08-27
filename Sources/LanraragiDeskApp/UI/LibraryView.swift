@@ -13,6 +13,7 @@ struct LibraryView: View {
 
     @StateObject private var vm = LibraryViewModel()
     @State private var filtersExpanded: Bool = false
+    @State private var requestTimingsExpanded: Bool = false
     @State private var queryDraft: String = ""
     @State private var tagSuggestions: [TagSuggestionStore.Suggestion] = []
     @State private var tagSuggestionStatusText: String?
@@ -98,6 +99,9 @@ struct LibraryView: View {
                         appModel.activity.add(.init(kind: .error, title: "Delete archive failed", detail: "\(arcid)\n\(error)"))
                         throw error
                     }
+                },
+                onRequestTiming: { operation, duration, outcome in
+                    vm.recordTiming(operation: operation, duration: duration, outcome: outcome)
                 }
             )
             .environmentObject(appModel)
@@ -322,12 +326,75 @@ struct LibraryView: View {
                     .padding(.top, 4)
                 }
             }
+
+            DisclosureGroup(isExpanded: $requestTimingsExpanded) {
+                requestTimingDetails
+                    .padding(.top, 4)
+            } label: {
+                HStack(spacing: 8) {
+                    Text("Request timings")
+                        .font(.callout.weight(.semibold))
+                    if let latest = vm.requestTimingHistory.entries.first {
+                        Text("Latest: \(latest.operation.title) · \(LibraryRequestTimingFormatter.duration(latest.duration))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
         }
         .padding(18)
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .frame(maxWidth: .infinity, alignment: .center)
         .debugFrameNumber(1)
+    }
+
+    @ViewBuilder
+    private var requestTimingDetails: some View {
+        if vm.requestTimingHistory.entries.isEmpty {
+            Text("Timings appear after Library searches, page fetches, and metadata refreshes or updates.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } else {
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(vm.requestTimingHistory.entries) { timing in
+                    HStack(spacing: 8) {
+                        Image(systemName: timingOutcomeSymbol(timing.outcome))
+                            .foregroundStyle(timingOutcomeColor(timing.outcome))
+                            .frame(width: 14)
+                        Text(timing.operation.title)
+                            .frame(minWidth: 118, alignment: .leading)
+                        Text(LibraryRequestTimingFormatter.duration(timing.duration))
+                            .monospacedDigit()
+                            .frame(minWidth: 62, alignment: .trailing)
+                        Text(timing.outcome.title)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(timing.completedAt, style: .time)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .font(.caption)
+                }
+            }
+            .accessibilityElement(children: .contain)
+        }
+    }
+
+    private func timingOutcomeSymbol(_ outcome: LibraryRequestTimingOutcome) -> String {
+        switch outcome {
+        case .succeeded: return "checkmark.circle.fill"
+        case .failed: return "exclamationmark.triangle.fill"
+        case .cancelled: return "xmark.circle"
+        }
+    }
+
+    private func timingOutcomeColor(_ outcome: LibraryRequestTimingOutcome) -> Color {
+        switch outcome {
+        case .succeeded: return .green
+        case .failed: return .red
+        case .cancelled: return .secondary
+        }
     }
 
     private var tagSuggestionList: some View {

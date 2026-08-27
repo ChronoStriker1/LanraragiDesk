@@ -10,6 +10,11 @@ struct ArchiveMetadataEditorView: View {
     let onSaved: @MainActor (ArchiveMetadata) -> Void
     let onDelete: @MainActor (String) async throws -> Void
     let onCancel: (@MainActor () -> Void)?
+    let onRequestTiming: (@MainActor (
+        LibraryRequestTimingOperation,
+        Duration,
+        LibraryRequestTimingOutcome
+    ) -> Void)?
     let isEmbedded: Bool
 
     @EnvironmentObject private var appModel: AppModel
@@ -49,6 +54,11 @@ struct ArchiveMetadataEditorView: View {
         onSaved: @escaping @MainActor (ArchiveMetadata) -> Void,
         onDelete: @escaping @MainActor (String) async throws -> Void,
         onCancel: (@MainActor () -> Void)? = nil,
+        onRequestTiming: (@MainActor (
+            LibraryRequestTimingOperation,
+            Duration,
+            LibraryRequestTimingOutcome
+        ) -> Void)? = nil,
         isEmbedded: Bool = false
     ) {
         self.profile = profile
@@ -58,6 +68,7 @@ struct ArchiveMetadataEditorView: View {
         self.onSaved = onSaved
         self.onDelete = onDelete
         self.onCancel = onCancel
+        self.onRequestTiming = onRequestTiming
         self.isEmbedded = isEmbedded
     }
 
@@ -386,10 +397,24 @@ struct ArchiveMetadataEditorView: View {
         } else {
             isLoading = true
             defer { isLoading = false }
+            let clock = ContinuousClock()
+            let startedAt = clock.now
             do {
                 let m = try await archives.metadata(profile: profile, arcid: arcid)
+                reportTiming(
+                    .metadataRefresh,
+                    startedAt: startedAt,
+                    clock: clock,
+                    outcome: .succeeded
+                )
                 apply(meta: m)
             } catch {
+                reportTiming(
+                    .metadataRefresh,
+                    startedAt: startedAt,
+                    clock: clock,
+                    outcome: timingOutcome(for: error)
+                )
                 if Task.isCancelled { return }
                 errorText = ErrorPresenter.short(error)
             }
@@ -436,7 +461,26 @@ struct ArchiveMetadataEditorView: View {
         do {
             // Preserve untouched fields from the latest metadata response so the API always receives
             // a full metadata payload (title/tags/summary), even when opened with partial initial data.
-            let latest = try? await archives.metadata(profile: profile, arcid: arcid)
+            let refreshClock = ContinuousClock()
+            let refreshStartedAt = refreshClock.now
+            let latest: ArchiveMetadata?
+            do {
+                latest = try await archives.metadata(profile: profile, arcid: arcid)
+                reportTiming(
+                    .metadataRefresh,
+                    startedAt: refreshStartedAt,
+                    clock: refreshClock,
+                    outcome: .succeeded
+                )
+            } catch {
+                latest = nil
+                reportTiming(
+                    .metadataRefresh,
+                    startedAt: refreshStartedAt,
+                    clock: refreshClock,
+                    outcome: timingOutcome(for: error)
+                )
+            }
             let latestTitle = (latest?.title ?? loadedTitle).trimmingCharacters(in: .whitespacesAndNewlines)
             let latestTags = MetadataTagFormatter.normalizedCSV(from: latest?.tags ?? loadedTags)
             let latestSummary = (latest?.summary ?? loadedSummary).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -445,13 +489,32 @@ struct ArchiveMetadataEditorView: View {
             let tagsToSend = (editedTags != loadedTags) ? editedTags : latestTags
             let summaryToSend = (editedSummary != loadedSummary) ? editedSummary : latestSummary
 
-            let updated = try await archives.updateMetadata(
-                profile: profile,
-                arcid: arcid,
-                title: titleToSend,
-                tags: tagsToSend,
-                summary: summaryToSend
-            )
+            let updateClock = ContinuousClock()
+            let updateStartedAt = updateClock.now
+            let updated: ArchiveMetadata
+            do {
+                updated = try await archives.updateMetadata(
+                    profile: profile,
+                    arcid: arcid,
+                    title: titleToSend,
+                    tags: tagsToSend,
+                    summary: summaryToSend
+                )
+                reportTiming(
+                    .metadataUpdate,
+                    startedAt: updateStartedAt,
+                    clock: updateClock,
+                    outcome: .succeeded
+                )
+            } catch {
+                reportTiming(
+                    .metadataUpdate,
+                    startedAt: updateStartedAt,
+                    clock: updateClock,
+                    outcome: timingOutcome(for: error)
+                )
+                throw error
+            }
             onSaved(updated)
             appModel.activity.add(.init(kind: .action, title: "Updated metadata", detail: arcid))
             closeEditor()
@@ -460,6 +523,22 @@ struct ArchiveMetadataEditorView: View {
             errorText = ErrorPresenter.short(error)
             appModel.activity.add(.init(kind: .error, title: "Metadata update failed", detail: "\(arcid)\n\(error)"))
         }
+    }
+
+    private func timingOutcome(for error: Error) -> LibraryRequestTimingOutcome {
+        if Task.isCancelled || error is CancellationError {
+            return .cancelled
+        }
+        return .failed
+    }
+
+    private func reportTiming(
+        _ operation: LibraryRequestTimingOperation,
+        startedAt: ContinuousClock.Instant,
+        clock: ContinuousClock,
+        outcome: LibraryRequestTimingOutcome
+    ) {
+        onRequestTiming?(operation, startedAt.duration(to: clock.now), outcome)
     }
 
     private func addTagFromQuery() {
