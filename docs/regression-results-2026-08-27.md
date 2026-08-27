@@ -1,6 +1,6 @@
 # Regression Results — 2026-08-27
 
-Release-candidate commit: `74b899afb917a18b0157fb0dd67595797fe7b8b0`
+Release-candidate commit: `81b6afaf7b440739fddc6fe78ee347105a550d98`
 
 Checklist source: [`REGRESSION_CHECKLIST.md`](REGRESSION_CHECKLIST.md)
 
@@ -34,17 +34,29 @@ below. Every blocked row is linked to [#77][blocker-77], which is the remaining
 release-readiness gate. Closing the checklist-recording issue does not imply
 that #77 or the release gate is complete.
 
+The #77 follow-up pass re-ran the safe environment checks against the Batch 7
+candidate and attempted the remaining local-only UI checks. It did not promote
+any blocked row: the app's saved window was outside the sole active display,
+and the user's frontmost app repeatedly reclaimed focus during bounded
+automation. Moving the window onscreen temporarily did not make scripted
+SwiftUI search submission reliable. The window position, empty search draft,
+profile file, and running state were restored, and focus was left with the
+user's current app; no server write,
+Unraid access, scan, batch, plugin, or duplicate-decision mutation was made.
+
 ## Environment and evidence
 
 - MacBook Pro (`MacBook-Pro`), macOS 26.6.2, Apple Silicon (`arm64`), Xcode
   26.6 (build 17F113).
 - Installed candidate: `/Applications/LanraragiDesk.app`, version 1.1 (build
   2). `codesign --verify --deep --strict` passed. The bundle's recorded
-  modification time was `2026-08-27T17:38:17-0400`.
-- The candidate launched with `open -a /Applications/LanraragiDesk.app`,
-  remained running, exposed its main accessibility window after activation,
-  and populated Library with 30 archive images from the saved HTTP profile.
-  The app was returned to its prior not-running state after verification.
+  modification time was `2026-08-27T18:20:48-0400`.
+- The Batch 6 baseline launched with
+  `open -a /Applications/LanraragiDesk.app`, remained running, exposed its main
+  accessibility window after activation, and populated Library with 30 archive
+  images from the saved HTTP profile. The #77 follow-up launched the Batch 7
+  candidate and exposed 25 current Library images before restoring the app's
+  prior not-running state.
 - The installed app's `Test Connection` completed against the saved,
   authenticated HTTP profile and displayed `OK • v0.9.81`. A separate
   read-only `/api/info` request identified the server software as LANraragi
@@ -67,11 +79,11 @@ that #77 or the release gate is complete.
   `1787868147638330555`; the newest persisted event became
   `Refreshed tag suggestions` at `2026-08-27T22:02:26.512805Z`. The count
   remained 2,000 because the store intentionally caps retained events. Batch
-  6's 111 passing app tests also include `ActivityStoreTests` persistence and
+  7's 135 passing app tests also include `ActivityStoreTests` persistence and
   termination-flush coverage.
 - Batch integration evidence supplied by the batch coordinator for this exact
-  commit and fresh Mac tree `/tmp/LanraragiDesk-batch6.33IfGi`:
-  - native macOS arm64 app tests: 111 passed, 0 failed, 0 skipped;
+  Batch 7 candidate:
+  - native macOS arm64 app tests: 135 passed, 0 failed, 0 skipped;
   - `LanraragiKit`: 53 XCTest tests plus 1 Swift Testing example passed, with
     0 failures;
   - clean app build with `SWIFT_TREAT_WARNINGS_AS_ERRORS=YES` and
@@ -79,6 +91,16 @@ that #77 or the release gate is complete.
   - installed bundle passed strict deep signature verification.
   - Xcode also emitted an out-of-date CoreSimulator/iOS-device diagnostic; it
     did not affect the native macOS destination or result.
+- During the #77 follow-up, CoreGraphics reported one active display with
+  bounds `(0, 0, 1800, 1169)`, while the app's persisted window was at
+  `(-1310, 40)` with size `(1350, 1129)`. The window was temporarily moved
+  onscreen for a bounded attempt, then restored exactly. Hermes and later cmux
+  reclaimed frontmost status; scripted edits did not submit a Library query or
+  alter the 25 visible-result image count. Coordinate/focus-sensitive testing
+  was stopped rather than treating this as product evidence.
+- The saved profile file's SHA-256 remained
+  `dd08160f4e6e93b78b2796ee6bd1d228734a9e65314ca5036d74d99a1d7a29b2`.
+  The app was quit after the attempt, matching its initial not-running state.
 
 Representative commands used for verification (the UI commands run on the
 approved Mac with the relevant app section already selected):
@@ -206,13 +228,13 @@ test "$after" -gt "$before"
 |---|---|---|
 | Confirm severity icons/chips appear on new entries. | **Blocked ([#77][blocker-77])** | Requires generating known entries and visually checking icon/chip rendering. |
 | Confirm filtering/search works for title, detail, and metadata. | **Blocked ([#77][blocker-77])** | Requires interactive entry queries with known expected matches in the installed UI. |
-| Export filtered entries to JSON and CSV and verify files are created. | **Blocked ([#77][blocker-77])** | Temporary `/tmp` exports were authorized, but remote focus moved back to the user's frontmost app before Activity/Save-panel automation could be completed reliably. Needs a bounded hands-on Save-panel pass and validation of both output formats. |
+| Export filtered entries to JSON and CSV and verify files are created. | **Blocked ([#77][blocker-77])** | Temporary `/tmp` exports were authorized, but the app window was outside the sole active display and Hermes/cmux repeatedly reclaimed focus. The bounded onscreen attempt was restored without entering Activity or a Save panel. Needs a hands-on Save-panel pass and validation of both output formats. |
 
 ## Final Sanity
 
 | Check | Status | Evidence or blocker |
 |---|---|---|
-| Build succeeds. | **Pass** | Exact-commit Batch 6 clean native macOS build exited 0 with Swift and Clang warnings treated as errors. App and package test suites also passed. |
+| Build succeeds. | **Pass** | Exact-commit Batch 7 clean native macOS build exited 0 with Swift and Clang warnings treated as errors. All 135 app tests, 53 package XCTest tests, and 1 Swift Testing example passed. |
 | README roadmap reflects current state of implemented/unimplemented work. | **Pass** | README marks checkpoint restoration and diagnostic-bundle work complete; matching implementations are present in `BatchView+TagBatch.swift`, `BatchView+PluginBatch.swift`, and `ActivityView.swift`. No unchecked roadmap entry is presented as implemented. |
 
 ## Evidence needed to clear blockers
@@ -222,9 +244,9 @@ test "$after" -gt "$before"
    stored key. The saved authenticated HTTP profile already passed.
 2. A disposable archive/pair set and permission to perform reversible metadata,
    cover, plugin, batch, scan, and `Not a match` mutations.
-3. An interactive Mac operator pass for hover behavior, keyboard shortcuts,
-   narrow-window controls, context menus, browser opening, clipboard checks, and
-   Save-panel exports.
+3. An interactive Mac operator pass with the window on an active display for
+   hover behavior, keyboard shortcuts, narrow-window controls, context menus,
+   browser opening, clipboard checks, and Save-panel exports.
 4. For “no duplicate metadata write,” request-level evidence such as a controlled
    proxy trace or server log showing the number of metadata update requests.
 
