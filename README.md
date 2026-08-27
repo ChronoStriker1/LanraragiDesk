@@ -33,6 +33,7 @@ macOS (Apple Silicon-first) LANraragi desktop client for managing a LANraragi se
   - Open in browser opens LANraragi reader URLs (`/reader?id=<arcid>`)
   - Adaptive grid layout that fits constrained panel widths
   - Library page state persists while switching sidebar sections
+  - A collapsed **Request timings** disclosure shows recent search, archive-page, and metadata request durations and outcomes without including search text or credentials; only the first page of a non-empty text query is labeled Search, while empty-query loads and later pages are Archive page requests
 - **Duplicates**
   - Local cover fingerprint index (rebuilt at the start of every scan)
   - Finds **exact** and **similar** cover matches

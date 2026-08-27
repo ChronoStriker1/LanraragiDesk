@@ -42,6 +42,7 @@ final class LibraryViewModel: ObservableObject {
     @Published private(set) var isLoadingAll: Bool = false
     @Published private(set) var errorText: String?
     @Published private(set) var bannerText: String?
+    @Published private(set) var requestTimingHistory: LibraryRequestTimingHistory
 
     struct SearchRequest: Equatable, Sendable {
         let start: Int
@@ -103,10 +104,12 @@ final class LibraryViewModel: ObservableObject {
 
     init(
         clientProvider: LANraragiClientProvider = .shared,
-        pageLoader: PageLoader? = nil
+        pageLoader: PageLoader? = nil,
+        requestTimingCapacity: Int = 12
     ) {
         self.clientProvider = clientProvider
         self.pageLoader = pageLoader
+        self.requestTimingHistory = LibraryRequestTimingHistory(capacity: requestTimingCapacity)
     }
 
     func refresh(profile: Profile) {
@@ -185,11 +188,33 @@ final class LibraryViewModel: ObservableObject {
             }
         }
 
+        let clock = ContinuousClock()
+        let startedAt = clock.now
         do {
             let result = try await loadPage(profile: profile, request: request)
+            guard !Task.isCancelled else {
+                recordPageTiming(
+                    request: request,
+                    duration: startedAt.duration(to: clock.now),
+                    outcome: .cancelled
+                )
+                return .cancelledOrStale
+            }
             guard loadGeneration?.id == generationID,
-                  activeLoadGenerationID == generationID,
-                  !Task.isCancelled else { return .cancelledOrStale }
+                  activeLoadGenerationID == generationID else {
+                recordPageTiming(
+                    request: request,
+                    duration: startedAt.duration(to: clock.now),
+                    outcome: .superseded
+                )
+                return .cancelledOrStale
+            }
+
+            recordPageTiming(
+                request: request,
+                duration: startedAt.duration(to: clock.now),
+                outcome: .succeeded
+            )
 
             if let dateAddedSortSupport = result.dateAddedSortSupport {
                 supportsDateAddedSort = dateAddedSortSupport
@@ -203,13 +228,17 @@ final class LibraryViewModel: ObservableObject {
             apply(resp: result.response)
             return reachedEnd ? .reachedEnd : .loaded
         } catch {
+            let duration = startedAt.duration(to: clock.now)
+            guard !Task.isCancelled, !(error is CancellationError) else {
+                recordPageTiming(request: request, duration: duration, outcome: .cancelled)
+                return .cancelledOrStale
+            }
             guard loadGeneration?.id == generationID,
                   activeLoadGenerationID == generationID else {
+                recordPageTiming(request: request, duration: duration, outcome: .superseded)
                 return .cancelledOrStale
             }
-            guard !Task.isCancelled, !(error is CancellationError) else {
-                return .cancelledOrStale
-            }
+            recordPageTiming(request: request, duration: duration, outcome: .failed)
             errorText = ErrorPresenter.short(error)
             return .failed
         }
@@ -255,6 +284,32 @@ final class LibraryViewModel: ObservableObject {
         if arcids.count >= totalFiltered || new.isEmpty {
             reachedEnd = true
         }
+    }
+
+    func recordTiming(
+        operation: LibraryRequestTimingOperation,
+        duration: Duration,
+        outcome: LibraryRequestTimingOutcome
+    ) {
+        var updatedHistory = requestTimingHistory
+        updatedHistory.record(.init(
+            operation: operation,
+            duration: duration,
+            outcome: outcome
+        ))
+        requestTimingHistory = updatedHistory
+    }
+
+    private func recordPageTiming(
+        request: SearchRequest,
+        duration: Duration,
+        outcome: LibraryRequestTimingOutcome
+    ) {
+        recordTiming(
+            operation: .pageLoad(start: request.start, query: request.query),
+            duration: duration,
+            outcome: outcome
+        )
     }
 
     private func loadPage(profile: Profile, request: SearchRequest) async throws -> PageLoadResult {
