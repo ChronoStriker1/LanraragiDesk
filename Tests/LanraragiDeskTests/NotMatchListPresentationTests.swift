@@ -35,6 +35,32 @@ final class NotMatchListPresentationTests: XCTestCase {
         XCTAssertEqual(results(query: isoDate), [pair])
     }
 
+    func testFullFieldMatchTakesPrecedenceOverTokensAcrossUnrelatedFields() {
+        let target = pairs[0]
+        let query = NotMatchListPresentation.createdText(for: target)
+        let queryTokens = query
+            .lowercased()
+            .split(whereSeparator: { $0.isWhitespace || $0 == "," })
+            .map(String.init)
+        let decoy = IndexStore.NotDuplicatePair(
+            arcidA: queryTokens.enumerated()
+                .filter { $0.offset.isMultiple(of: 2) }
+                .map(\.element)
+                .joined(separator: "-"),
+            arcidB: queryTokens.enumerated()
+                .filter { !$0.offset.isMultiple(of: 2) }
+                .map(\.element)
+                .joined(separator: "-"),
+            createdAt: target.createdAt + 86_400_000
+        )
+
+        XCTAssertEqual(
+            results(in: [target, decoy], query: query),
+            [target],
+            "A pasted display value must not match a row that only contains its tokens across other fields"
+        )
+    }
+
     func testSortsCreatedInEitherDirectionWithDeterministicTies() {
         XCTAssertEqual(
             results(sortColumn: .created, ascending: false).map(\.arcidA),
@@ -66,6 +92,20 @@ final class NotMatchListPresentationTests: XCTestCase {
     }
 
     private func results(
+        query: String = "",
+        sortColumn: NotMatchSortColumn = .created,
+        ascending: Bool = false
+    ) -> [IndexStore.NotDuplicatePair] {
+        results(
+            in: pairs,
+            query: query,
+            sortColumn: sortColumn,
+            ascending: ascending
+        )
+    }
+
+    private func results(
+        in pairs: [IndexStore.NotDuplicatePair],
         query: String = "",
         sortColumn: NotMatchSortColumn = .created,
         ascending: Bool = false

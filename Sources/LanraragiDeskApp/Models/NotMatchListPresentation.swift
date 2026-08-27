@@ -57,25 +57,32 @@ enum NotMatchListPresentation {
         sortColumn: NotMatchSortColumn,
         ascending: Bool
     ) -> [IndexStore.NotDuplicatePair] {
-        let tokens = query
+        let normalizedQuery = query
+            .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
+        let tokens = normalizedQuery
             .split(whereSeparator: { $0.isWhitespace || $0 == "," })
             .map(String.init)
 
-        let filtered = tokens.isEmpty ? pairs : pairs.filter { pair in
-            let date = createdDate(for: pair)
-            let searchableText = [
-                pair.arcidA,
-                pair.arcidB,
-                String(pair.createdAt),
-                createdFormatter.string(from: date),
-                searchableDateFormatter.string(from: date),
-                isoFormatter.string(from: date)
-            ]
-            .joined(separator: " ")
-            .lowercased()
+        let filtered: [IndexStore.NotDuplicatePair]
+        if tokens.isEmpty {
+            filtered = pairs
+        } else {
+            let fieldsByPair = pairs.map { pair in
+                (pair, searchableFields(for: pair))
+            }
+            let fullQueryMatches = fieldsByPair.filter { _, fields in
+                fields.contains(where: { $0.contains(normalizedQuery) })
+            }
 
-            return tokens.allSatisfy(searchableText.contains)
+            if fullQueryMatches.isEmpty {
+                filtered = fieldsByPair.compactMap { pair, fields in
+                    let searchableText = fields.joined(separator: " ")
+                    return tokens.allSatisfy(searchableText.contains) ? pair : nil
+                }
+            } else {
+                filtered = fullQueryMatches.map(\.0)
+            }
         }
 
         return filtered.sorted { lhs, rhs in
@@ -98,6 +105,21 @@ enum NotMatchListPresentation {
             if lhs.arcidB != rhs.arcidB { return lhs.arcidB < rhs.arcidB }
             return lhs.createdAt > rhs.createdAt
         }
+    }
+
+    private static func searchableFields(
+        for pair: IndexStore.NotDuplicatePair
+    ) -> [String] {
+        let date = createdDate(for: pair)
+        return [
+            pair.arcidA,
+            pair.arcidB,
+            String(pair.createdAt),
+            createdFormatter.string(from: date),
+            searchableDateFormatter.string(from: date),
+            isoFormatter.string(from: date)
+        ]
+        .map { $0.lowercased() }
     }
 
     private static func compare<T: Comparable>(_ lhs: T, _ rhs: T) -> ComparisonResult {
