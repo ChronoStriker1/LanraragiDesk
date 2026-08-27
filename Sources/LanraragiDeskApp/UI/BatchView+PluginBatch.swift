@@ -426,7 +426,8 @@ extension BatchView {
             guard event.hasPrefix("["), let timestampEnd = event.firstIndex(of: "]") else {
                 return "[PLUGIN] \(event)"
             }
-            return "\(event[...timestampEnd]) [PLUGIN]\(event[event.index(after: timestampEnd)...])"
+            let message = event[event.index(after: timestampEnd)...].drop(while: { $0.isWhitespace })
+            return "\(event[...timestampEnd]) [PLUGIN] \(message)"
         } + liveEvents
         restoredPluginCheckpointUI = true
     }

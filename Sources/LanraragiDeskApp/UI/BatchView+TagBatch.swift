@@ -444,8 +444,8 @@ extension BatchView {
                 return "[TAG] \(event)"
             }
             let timestamp = event[...closingBracket]
-            let messageStart = event.index(after: closingBracket)
-            return "\(timestamp) [TAG]\(event[messageStart...])"
+            let message = event[event.index(after: closingBracket)...].drop(while: { $0.isWhitespace })
+            return "\(timestamp) [TAG] \(message)"
         } + liveEvents
         restoredTagCheckpointUI = true
     }
