@@ -93,6 +93,7 @@ extension BatchView {
         pluginTask = Task {
             var ok = 0
             var fail = 0
+            var indeterminate = 0
             for index in startIndex..<arcids.count {
                 let arcid = arcids[index]
                 if await MainActor.run(body: { pluginCancelRequested || pluginPauseRequested }) { break }
@@ -125,22 +126,23 @@ extension BatchView {
 
                     if job.job > 0 {
                         let state = await pluginsVM.waitForJobCompletion(profile: profile, jobID: job.job)
-                        if state == .failed {
+                        switch state {
+                        case .failed:
                             fail += 1
                             appModel.activity.add(.init(kind: .warning, title: "Plugin job failed", detail: "\(pluginID) • \(arcid) • job \(job.job)"))
                             await MainActor.run {
                                 appendPluginLiveEvent("Job \(job.job) failed for \(displayName(for: arcid))")
                             }
-                        } else {
+                        case .finished:
+                            // The queued plugin already ran. Minion status has no output payload,
+                            // so only refresh metadata here; calling `run` would execute it again.
                             let changed = await refreshMetadataAfterPluginBatch(profile: profile, arcid: arcid, previousSignature: preSignature)
                             if !changed {
-                                _ = await applyMetadataFromPluginOutputBatch(
-                                    profile: profile,
-                                    pluginID: pluginID,
-                                    arcid: arcid,
-                                    previousSignature: preSignature,
-                                    applyMode: pluginApplyMode
-                                )
+                                appModel.activity.add(.init(
+                                    kind: .action,
+                                    title: "Plugin completed with no metadata changes",
+                                    detail: "\(pluginID) • \(arcid) • queued job output unavailable"
+                                ))
                             }
                             if let before = prePluginMeta {
                                 let latest = try? await appModel.archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
@@ -163,17 +165,30 @@ extension BatchView {
                             await MainActor.run {
                                 appendPluginLiveEvent("Finished \(displayName(for: arcid))")
                             }
+                        case .queued, .running, .unknown:
+                            indeterminate += 1
+                            _ = await refreshMetadataAfterPluginBatch(
+                                profile: profile,
+                                arcid: arcid,
+                                previousSignature: preSignature
+                            )
+                            appModel.activity.add(.init(
+                                kind: .warning,
+                                title: "Plugin job outcome indeterminate",
+                                detail: "\(pluginID) • \(arcid) • job \(job.job) • \(state.rawValue)"
+                            ))
+                            await MainActor.run {
+                                appendPluginLiveEvent("Job \(job.job) outcome unknown for \(displayName(for: arcid)); not counted as success")
+                            }
                         }
                     } else {
                         let changed = await refreshMetadataAfterPluginBatch(profile: profile, arcid: arcid, previousSignature: preSignature)
                         if !changed {
-                            _ = await applyMetadataFromPluginOutputBatch(
-                                profile: profile,
-                                pluginID: pluginID,
-                                arcid: arcid,
-                                previousSignature: preSignature,
-                                applyMode: pluginApplyMode
-                            )
+                            appModel.activity.add(.init(
+                                kind: .action,
+                                title: "Plugin completed with no metadata changes",
+                                detail: "\(pluginID) • \(arcid) • no trackable job output"
+                            ))
                         }
                         if let before = prePluginMeta {
                             let latest = try? await appModel.archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
@@ -205,7 +220,7 @@ extension BatchView {
                     }
                 }
                 await MainActor.run {
-                    pluginRunStatus = "Processed \(index + 1)/\(arcids.count) • Success \(ok) • Failed \(fail)…"
+                    pluginRunStatus = "Processed \(index + 1)/\(arcids.count) • Success \(ok) • Failed \(fail) • Indeterminate \(indeterminate)…"
                 }
                 persistPluginCheckpointIndexAndUI(pluginID: pluginID, nextIndex: index, ok: ok, fail: fail, total: arcids.count)
 
@@ -229,7 +244,14 @@ extension BatchView {
                 }
 
                 if index + 1 < arcids.count && delaySeconds > 0 {
-                    if await pauseBetweenPluginRuns(seconds: delaySeconds, done: index + 1, total: arcids.count, ok: ok, fail: fail) {
+                    if await pauseBetweenPluginRuns(
+                        seconds: delaySeconds,
+                        done: index + 1,
+                        total: arcids.count,
+                        ok: ok,
+                        fail: fail,
+                        indeterminate: indeterminate
+                    ) {
                         break
                     }
                 }
@@ -242,12 +264,12 @@ extension BatchView {
                 pluginRunning = false
                 pluginCurrentArchive = nil
                 if pausedByRequest {
-                    pluginRunStatus = "Paused. Success \(ok), failed \(fail)."
+                    pluginRunStatus = "Paused. Success \(ok), failed \(fail), indeterminate \(indeterminate)."
                     pluginPaused = true
                 } else if cancelledByRequest {
-                    pluginRunStatus = "Cancelled. Success \(ok), failed \(fail)."
+                    pluginRunStatus = "Cancelled. Success \(ok), failed \(fail), indeterminate \(indeterminate)."
                 } else {
-                    pluginRunStatus = "Done. Success \(ok), failed \(fail)."
+                    pluginRunStatus = "Done. Success \(ok), failed \(fail), indeterminate \(indeterminate)."
                 }
                 pluginCancelRequested = false
                 pluginPauseRequested = false
@@ -476,63 +498,6 @@ extension BatchView {
         }
     }
 
-    func applyMetadataFromPluginOutputBatch(
-        profile: Profile,
-        pluginID: String,
-        arcid: String,
-        previousSignature: String?,
-        applyMode: PluginApplyMode
-    ) async -> Bool {
-        do {
-            let raw = try await pluginsVM.run(profile: profile, pluginID: pluginID, arcid: arcid, arg: pluginArgText)
-            guard let patch = PluginMetadataSupport.parsePatch(from: raw) else {
-                // Some plugins apply metadata directly during /use and return no structured patch payload.
-                let changed = await refreshMetadataAfterPluginBatch(
-                    profile: profile,
-                    arcid: arcid,
-                    previousSignature: previousSignature
-                )
-                if changed {
-                    appModel.activity.add(.init(kind: .action, title: "Plugin metadata refreshed", detail: "\(pluginID) • \(arcid)"))
-                }
-                return changed
-            }
-
-            let current = try await appModel.archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
-            let currentTitle = (current.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let currentSummary = (current.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let currentTagsRaw = current.tags ?? ""
-
-            let applied = applyPluginPatch(
-                patch,
-                currentTitle: currentTitle,
-                currentTags: currentTagsRaw,
-                currentSummary: currentSummary,
-                mode: applyMode
-            )
-            let titleToSave = applied.title
-            let summaryToSave = applied.summary
-            let tagsToSave = applied.tags
-
-            let beforeSignature = previousSignature ?? PluginMetadataSupport.signature(title: currentTitle, tags: currentTagsRaw, summary: currentSummary)
-            let nextSignature = PluginMetadataSupport.signature(title: titleToSave, tags: tagsToSave, summary: summaryToSave)
-            guard beforeSignature != nextSignature else { return false }
-
-            _ = try await appModel.archives.updateMetadata(
-                profile: profile,
-                arcid: arcid,
-                title: titleToSave,
-                tags: tagsToSave,
-                summary: summaryToSave
-            )
-            appModel.activity.add(.init(kind: .action, title: "Plugin output applied", detail: "\(pluginID) • \(arcid)"))
-            return true
-        } catch {
-            appModel.activity.add(.init(kind: .warning, title: "Plugin output apply failed", detail: "\(pluginID) • \(arcid)\n\(error)"))
-            return false
-        }
-    }
-
     func mergeTagCSV(base: String, additions: String) -> String {
         var items = parseTags(base)
         var seen = Set(items.map { $0.lowercased() })
@@ -549,7 +514,8 @@ extension BatchView {
         done: Int,
         total: Int,
         ok: Int,
-        fail: Int
+        fail: Int,
+        indeterminate: Int
     ) async -> Bool {
         guard seconds > 0 else { return false }
         let sliceNanos: UInt64 = 200_000_000
@@ -570,7 +536,7 @@ extension BatchView {
             let elapsedSeconds = Double(elapsedNanos) / 1_000_000_000
             let remainingSeconds = max(0, seconds - elapsedSeconds)
             await MainActor.run {
-                pluginRunStatus = "Processed \(done)/\(total) • Success \(ok) • Failed \(fail) • Waiting \(delayDisplay(remainingSeconds))s…"
+                pluginRunStatus = "Processed \(done)/\(total) • Success \(ok) • Failed \(fail) • Indeterminate \(indeterminate) • Waiting \(delayDisplay(remainingSeconds))s…"
             }
         }
 

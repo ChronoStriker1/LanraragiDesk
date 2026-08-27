@@ -91,19 +91,26 @@ final class PluginsViewModel: ObservableObject {
         profile: Profile,
         jobID: Int,
         maxPolls: Int = 180,
-        pollInterval: Duration = .seconds(1)
+        pollInterval: Duration = .seconds(1),
+        maxConsecutiveStatusErrors: Int = 4
     ) async -> TrackedPluginJob.State {
         guard jobID > 0 else { return .finished }
 
         do {
             let client = try makeClient(profile: profile)
-            for _ in 0..<maxPolls {
+            let pollLimit = max(1, maxPolls)
+            let statusErrorLimit = max(1, maxConsecutiveStatusErrors)
+            var consecutiveStatusErrors = 0
+
+            for pollIndex in 0..<pollLimit {
                 if Task.isCancelled { return .unknown }
+                var nextPollDelay = pollInterval
                 do {
                     let status = try await client.getMinionStatus(job: jobID)
                     let raw = status.state ?? status.data?.state
                     let normalized = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                     let mapped = mapJobState(normalized: normalized)
+                    consecutiveStatusErrors = 0
                     update(jobID: jobID, state: mapped, rawState: raw, lastError: nil)
                     if mapped.isTerminal {
                         return mapped
@@ -114,20 +121,58 @@ final class PluginsViewModel: ObservableObject {
                         update(jobID: jobID, state: .finished, rawState: "finished", lastError: nil)
                         return .finished
                     default:
+                        consecutiveStatusErrors += 1
                         update(jobID: jobID, state: .unknown, rawState: nil, lastError: ErrorPresenter.short(lrrError))
-                        return .unknown
+                        if consecutiveStatusErrors >= statusErrorLimit {
+                            return .unknown
+                        }
+                        nextPollDelay = Self.statusErrorRetryDelay(
+                            base: pollInterval,
+                            consecutiveFailure: consecutiveStatusErrors
+                        )
                     }
                 } catch {
+                    consecutiveStatusErrors += 1
                     update(jobID: jobID, state: .unknown, rawState: nil, lastError: ErrorPresenter.short(error))
-                    return .unknown
+                    if consecutiveStatusErrors >= statusErrorLimit {
+                        return .unknown
+                    }
+                    nextPollDelay = Self.statusErrorRetryDelay(
+                        base: pollInterval,
+                        consecutiveFailure: consecutiveStatusErrors
+                    )
                 }
-                try? await Task.sleep(for: pollInterval)
+                if pollIndex + 1 < pollLimit {
+                    do {
+                        try await Task.sleep(for: nextPollDelay)
+                    } catch {
+                        return .unknown
+                    }
+                }
             }
+            update(
+                jobID: jobID,
+                state: .unknown,
+                rawState: nil,
+                lastError: "Timed out waiting for plugin job completion."
+            )
         } catch {
             statusText = "Failed to wait for job: \(ErrorPresenter.short(error))"
         }
 
         return .unknown
+    }
+
+    nonisolated static func statusErrorRetryDelay(
+        base: Duration,
+        consecutiveFailure: Int
+    ) -> Duration {
+        let exponent = min(max(0, consecutiveFailure - 1), 3)
+        var delay = base
+        for _ in 0..<exponent {
+            delay = delay + delay
+        }
+        return delay
     }
 
     private func setActiveJobsProfileIfNeeded(_ profile: Profile) {
