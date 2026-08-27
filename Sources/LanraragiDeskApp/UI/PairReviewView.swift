@@ -1543,6 +1543,8 @@ private struct PageThumbTile: View {
     @State private var errorText: String?
     @State private var hovering: Bool = false
     @State private var resolutionText: String?
+    @State private var tileLoadOwnership = ImageLoadOwnership()
+    @State private var previewLoadOwnership = ImageLoadOwnership()
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -1630,6 +1632,8 @@ private struct PageThumbTile: View {
             }
         }
         .task(id: url) {
+            let load = tileLoadOwnership.begin()
+            previewLoadOwnership.invalidate()
             image = nil
             fullImage = nil
             errorText = nil
@@ -1637,29 +1641,43 @@ private struct PageThumbTile: View {
             guard let url else { return }
             do {
                 let bytes = try await archives.bytes(profile: profile, url: url)
-                let res = ImageDownsampler.resolutionText(from: bytes)
-                let img = ImageDownsampler.thumbnail(from: bytes, maxPixelSize: 540)
-                if let img {
-                    image = img
-                    resolutionText = res
-                } else {
-                    errorText = "Decode failed"
+                let decoded = try await AsyncImageDownsampler.decode(
+                    bytes,
+                    maxPixelSize: 540,
+                    metadata: .resolutionText
+                )
+                tileLoadOwnership.performIfCurrent(load) {
+                    if let decodedImage = decoded.image {
+                        image = decodedImage
+                        resolutionText = decoded.resolutionText
+                    } else {
+                        errorText = "Decode failed"
+                    }
                 }
             } catch {
                 if Task.isCancelled || ErrorPresenter.isCancellationLike(error) {
                     return
                 }
-                errorText = ErrorPresenter.short(error)
+                tileLoadOwnership.performIfCurrent(load) {
+                    errorText = ErrorPresenter.short(error)
+                }
             }
+        }
+        .onDisappear {
+            tileLoadOwnership.invalidate()
+            previewLoadOwnership.invalidate()
         }
     }
 
     private func loadFullPreview() async {
         guard fullImage == nil, let url else { return }
+        let load = previewLoadOwnership.begin()
         do {
             let bytes = try await archives.bytes(profile: profile, url: url)
-            let img = ImageDownsampler.thumbnail(from: bytes, maxPixelSize: 1600)
-            await MainActor.run { fullImage = img }
+            let decoded = try await AsyncImageDownsampler.decode(bytes, maxPixelSize: 1600)
+            previewLoadOwnership.performIfCurrent(load) {
+                fullImage = decoded.image
+            }
         } catch {
             // Ignore preview failures; tiles still work.
         }
