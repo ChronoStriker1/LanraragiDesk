@@ -24,6 +24,49 @@ final class BatchPreviewWorkflowTests: XCTestCase {
         XCTAssertEqual(resume.title(pluginRunning: true), "Resume")
     }
 
+    func testPluginBatchResumePlanAppliesEditedDelayWithoutChangingCheckpointProgress() {
+        let checkpoint = pluginCheckpoint(
+            nextIndex: 2,
+            delayText: "4",
+            ok: 1,
+            fail: 1,
+            indeterminate: 0
+        )
+
+        let resumed = PluginBatchResumePlan(
+            checkpoint: checkpoint,
+            editedDelayText: "0.75"
+        ).checkpoint
+
+        XCTAssertEqual(resumed.pluginDelayText, "0.75")
+        XCTAssertEqual(resumed.nextIndex, 2)
+        XCTAssertEqual(resumed.arcids, checkpoint.arcids)
+        XCTAssertEqual(resumed.selectedPluginID, checkpoint.selectedPluginID)
+        XCTAssertEqual(resumed.pluginArgText, checkpoint.pluginArgText)
+        XCTAssertEqual(resumed.pluginApplyModeRaw, checkpoint.pluginApplyModeRaw)
+        XCTAssertEqual(resumed.inProgress, checkpoint.inProgress)
+        XCTAssertEqual(resumed.paused, checkpoint.paused)
+        XCTAssertEqual(resumed.interrupted, checkpoint.interrupted)
+        XCTAssertEqual(resumed.okCount, 1)
+        XCTAssertEqual(resumed.failCount, 1)
+        XCTAssertEqual(resumed.indeterminateCount, 0)
+    }
+
+    func testPluginBatchDelayStatusUsesSanitizedEditedValue() {
+        XCTAssertEqual(
+            PluginBatchDelayPresentation.resumeText(delayText: " 1.25 "),
+            "Resume will use a 1.25s delay between runs."
+        )
+        XCTAssertEqual(
+            PluginBatchDelayPresentation.activeText(delayText: "-3"),
+            "Active delay: 0s between runs."
+        )
+        XCTAssertEqual(
+            PluginBatchDelayPresentation.activeText(delayText: "not a number"),
+            "Active delay: 0s between runs."
+        )
+    }
+
     func testSuccessfulPreviewThenQueueQueuesExactlyOnce() throws {
         var workflow = BatchPreviewWorkflow()
         let run = try startedRun(workflow.begin(intent: .previewThenQueue, id: UUID()))
@@ -153,6 +196,35 @@ final class BatchPreviewWorkflowTests: XCTestCase {
             pluginArgText,
             pluginDelayText,
             pluginApplyMode
+        )
+    }
+
+    private func pluginCheckpoint(
+        nextIndex: Int,
+        delayText: String,
+        ok: Int,
+        fail: Int,
+        indeterminate: Int
+    ) -> PluginBatchCheckpoint {
+        PluginBatchCheckpoint(
+            profileID: UUID(),
+            profileBaseURL: "https://example.test",
+            arcids: ["a", "b", "c", "d"],
+            nextIndex: nextIndex,
+            selectedPluginID: "plugin",
+            pluginArgText: "argument",
+            pluginDelayText: delayText,
+            pluginApplyModeRaw: PluginApplyMode.mergeWithExisting.rawValue,
+            inProgress: true,
+            paused: true,
+            interrupted: false,
+            okCount: ok,
+            failCount: fail,
+            indeterminateCount: indeterminate,
+            lastRunStatus: "Paused",
+            lastCurrentArchive: "b",
+            lastLiveEvents: ["Processed b"],
+            lastUpdatedAt: Date(timeIntervalSince1970: 1_000)
         )
     }
 

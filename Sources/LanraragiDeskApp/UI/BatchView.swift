@@ -316,6 +316,16 @@ struct BatchView: View {
                         Spacer()
                     }
 
+                    if pluginRunning {
+                        Text(PluginBatchDelayPresentation.activeText(delayText: pluginDelayText))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if pluginPaused {
+                        Text(PluginBatchDelayPresentation.resumeText(delayText: pluginDelayText))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
                     if let pluginRunStatus {
                         Text(pluginRunStatus)
                             .font(.callout)
@@ -717,6 +727,7 @@ struct BatchView: View {
     }
 
     func applyDefaultPluginDelayFromSelection() {
+        guard !pluginPaused && !pluginRunning else { return }
         let seconds = defaultPluginDelaySeconds(for: selectedPlugin)
         pluginDelayText = delayDisplay(seconds)
     }
@@ -741,16 +752,11 @@ struct BatchView: View {
     }
 
     func sanitizedDelaySeconds(from raw: String) -> Double {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let parsed = Double(trimmed), parsed.isFinite else { return 0 }
-        return max(0, parsed)
+        PluginBatchDelayPresentation.seconds(from: raw)
     }
 
     func delayDisplay(_ seconds: Double) -> String {
-        if seconds.rounded() == seconds {
-            return String(Int(seconds))
-        }
-        return String(format: "%.2f", seconds)
+        PluginBatchDelayPresentation.display(seconds)
     }
     func summarizeMetadataChanges(
         beforeTitle: String,
