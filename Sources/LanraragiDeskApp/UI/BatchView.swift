@@ -316,11 +316,7 @@ struct BatchView: View {
                         Spacer()
                     }
 
-                    if pluginRunning {
-                        Text(PluginBatchDelayPresentation.activeText(delayText: pluginDelayText))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else if pluginPaused {
+                    if pluginPaused {
                         Text(PluginBatchDelayPresentation.resumeText(delayText: pluginDelayText))
                             .font(.caption)
                             .foregroundStyle(.secondary)

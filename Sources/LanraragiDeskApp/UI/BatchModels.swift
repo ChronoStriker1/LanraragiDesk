@@ -49,9 +49,20 @@ struct PluginBatchCheckpoint: Codable {
 struct PluginBatchResumePlan {
     let checkpoint: PluginBatchCheckpoint
 
-    init(checkpoint: PluginBatchCheckpoint, editedDelayText: String) {
+    init(
+        checkpoint: PluginBatchCheckpoint,
+        editedDelayText: String,
+        resumedAt: Date = Date()
+    ) {
         var updated = checkpoint
         updated.pluginDelayText = editedDelayText
+        updated.inProgress = true
+        updated.paused = false
+        updated.interrupted = false
+        let delaySeconds = PluginBatchDelayPresentation.seconds(from: editedDelayText)
+        let delayDisplay = PluginBatchDelayPresentation.display(delaySeconds)
+        updated.lastRunStatus = "Resuming • Active delay \(delayDisplay)s."
+        updated.lastUpdatedAt = resumedAt
         self.checkpoint = updated
     }
 }
@@ -72,10 +83,6 @@ enum PluginBatchDelayPresentation {
 
     static func resumeText(delayText: String) -> String {
         "Resume will use a \(display(seconds(from: delayText)))s delay between runs."
-    }
-
-    static func activeText(delayText: String) -> String {
-        "Active delay: \(display(seconds(from: delayText)))s between runs."
     }
 }
 

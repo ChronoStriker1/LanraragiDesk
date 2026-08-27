@@ -32,10 +32,12 @@ final class BatchPreviewWorkflowTests: XCTestCase {
             fail: 1,
             indeterminate: 0
         )
+        let resumedAt = Date(timeIntervalSince1970: 2_000)
 
         let resumed = PluginBatchResumePlan(
             checkpoint: checkpoint,
-            editedDelayText: "0.75"
+            editedDelayText: "0.75",
+            resumedAt: resumedAt
         ).checkpoint
 
         XCTAssertEqual(resumed.pluginDelayText, "0.75")
@@ -44,12 +46,14 @@ final class BatchPreviewWorkflowTests: XCTestCase {
         XCTAssertEqual(resumed.selectedPluginID, checkpoint.selectedPluginID)
         XCTAssertEqual(resumed.pluginArgText, checkpoint.pluginArgText)
         XCTAssertEqual(resumed.pluginApplyModeRaw, checkpoint.pluginApplyModeRaw)
-        XCTAssertEqual(resumed.inProgress, checkpoint.inProgress)
-        XCTAssertEqual(resumed.paused, checkpoint.paused)
-        XCTAssertEqual(resumed.interrupted, checkpoint.interrupted)
+        XCTAssertEqual(resumed.inProgress, true)
+        XCTAssertEqual(resumed.paused, false)
+        XCTAssertEqual(resumed.interrupted, false)
         XCTAssertEqual(resumed.okCount, 1)
         XCTAssertEqual(resumed.failCount, 1)
         XCTAssertEqual(resumed.indeterminateCount, 0)
+        XCTAssertEqual(resumed.lastRunStatus, "Resuming • Active delay 0.75s.")
+        XCTAssertEqual(resumed.lastUpdatedAt, resumedAt)
     }
 
     func testPluginBatchDelayStatusUsesSanitizedEditedValue() {
@@ -57,14 +61,8 @@ final class BatchPreviewWorkflowTests: XCTestCase {
             PluginBatchDelayPresentation.resumeText(delayText: " 1.25 "),
             "Resume will use a 1.25s delay between runs."
         )
-        XCTAssertEqual(
-            PluginBatchDelayPresentation.activeText(delayText: "-3"),
-            "Active delay: 0s between runs."
-        )
-        XCTAssertEqual(
-            PluginBatchDelayPresentation.activeText(delayText: "not a number"),
-            "Active delay: 0s between runs."
-        )
+        XCTAssertEqual(PluginBatchDelayPresentation.seconds(from: "-3"), 0)
+        XCTAssertEqual(PluginBatchDelayPresentation.seconds(from: "not a number"), 0)
     }
 
     func testSuccessfulPreviewThenQueueQueuesExactlyOnce() throws {
