@@ -99,6 +99,63 @@ final class CoverThumbInvalidationTests: XCTestCase {
         )
     }
 
+    func testCommitGateOnlyInvokesMutationForCurrentUncancelledLoad() {
+        let request = CoverThumbRequestKey(
+            profileID: UUID(),
+            arcid: "archive-a",
+            size: CGSize(width: 56, height: 72),
+            contentInset: 4,
+            reloadToken: 0,
+            revision: 0
+        )
+        let stale = CoverThumbLoadToken(
+            request: request,
+            generation: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        )
+        let replacement = CoverThumbLoadToken(
+            request: request,
+            generation: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        )
+        var mutationCount = 0
+        let recordImageAndCacheMutation = { mutationCount += 1 }
+
+        XCTAssertFalse(
+            CoverThumbLoadOwnership.commitIfCurrent(
+                active: replacement,
+                candidate: stale,
+                isCancelled: false,
+                mutation: recordImageAndCacheMutation
+            )
+        )
+        XCTAssertFalse(
+            CoverThumbLoadOwnership.commitIfCurrent(
+                active: replacement,
+                candidate: replacement,
+                isCancelled: true,
+                mutation: recordImageAndCacheMutation
+            )
+        )
+        XCTAssertFalse(
+            CoverThumbLoadOwnership.commitIfCurrent(
+                active: nil,
+                candidate: replacement,
+                isCancelled: false,
+                mutation: recordImageAndCacheMutation
+            )
+        )
+        XCTAssertEqual(mutationCount, 0)
+
+        XCTAssertTrue(
+            CoverThumbLoadOwnership.commitIfCurrent(
+                active: replacement,
+                candidate: replacement,
+                isCancelled: false,
+                mutation: recordImageAndCacheMutation
+            )
+        )
+        XCTAssertEqual(mutationCount, 1)
+    }
+
     func testRequestKeysIsolateProfilesAndRevisions() {
         let profileA = UUID()
         let profileB = UUID()

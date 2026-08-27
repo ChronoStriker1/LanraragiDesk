@@ -54,6 +54,23 @@ enum CoverThumbLoadOwnership {
     ) -> Bool {
         !isCancelled && active == candidate
     }
+
+    @MainActor
+    @discardableResult
+    static func commitIfCurrent(
+        active: CoverThumbLoadToken?,
+        candidate: CoverThumbLoadToken,
+        isCancelled: Bool,
+        mutation: () -> Void
+    ) -> Bool {
+        guard permitsWrite(
+            active: active,
+            candidate: candidate,
+            isCancelled: isCancelled
+        ) else { return false }
+        mutation()
+        return true
+    }
 }
 
 private final class CoverThumbCacheEntry: NSObject {
@@ -297,14 +314,15 @@ struct CoverThumb: View {
                     let decodedImage = ImageDownsampler.thumbnail(from: bytes, maxPixelSize: maxPixelSize)
                     try Task.checkCancellation()
                     await MainActor.run {
-                        guard CoverThumbLoadOwnership.permitsWrite(
+                        CoverThumbLoadOwnership.commitIfCurrent(
                             active: activeLoad,
                             candidate: loadToken,
                             isCancelled: Task.isCancelled
-                        ) else { return }
-                        image = decodedImage
-                        if let decodedImage {
-                            CoverThumbCache.insert(decodedImage, for: request)
+                        ) {
+                            image = decodedImage
+                            if let decodedImage {
+                                CoverThumbCache.insert(decodedImage, for: request)
+                            }
                         }
                     }
                 } catch {
@@ -312,13 +330,14 @@ struct CoverThumb: View {
                         return
                     }
                     await MainActor.run {
-                        guard CoverThumbLoadOwnership.permitsWrite(
+                        CoverThumbLoadOwnership.commitIfCurrent(
                             active: activeLoad,
                             candidate: loadToken,
                             isCancelled: Task.isCancelled
-                        ) else { return }
-                        image = nil
-                        errorText = ErrorPresenter.short(error)
+                        ) {
+                            image = nil
+                            errorText = ErrorPresenter.short(error)
+                        }
                     }
                 }
             }
