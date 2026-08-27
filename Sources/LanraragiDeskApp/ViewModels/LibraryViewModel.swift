@@ -10,7 +10,7 @@ final class LibraryViewModel: ObservableObject {
         var id: String { rawValue }
     }
 
-    enum Sort: String, CaseIterable, Identifiable {
+    enum Sort: String, CaseIterable, Identifiable, Sendable {
         case newestAdded
         case title
 
@@ -43,25 +43,67 @@ final class LibraryViewModel: ObservableObject {
     @Published private(set) var errorText: String?
     @Published private(set) var bannerText: String?
 
+    struct SearchRequest: Equatable, Sendable {
+        let start: Int
+        let query: String
+        let categoryID: String
+        let newOnly: Bool
+        let untaggedOnly: Bool
+        let sort: Sort
+        let groupTanks: Bool
+        let knownDateAddedSortSupport: Bool?
+    }
+
+    struct PageLoadResult: Sendable {
+        let response: ArchiveSearch
+        let dateAddedSortSupport: Bool?
+        let fellBackToTitle: Bool
+
+        init(
+            response: ArchiveSearch,
+            dateAddedSortSupport: Bool? = nil,
+            fellBackToTitle: Bool = false
+        ) {
+            self.response = response
+            self.dateAddedSortSupport = dateAddedSortSupport
+            self.fellBackToTitle = fellBackToTitle
+        }
+    }
+
+    typealias PageLoader = @MainActor (Profile, SearchRequest) async throws -> PageLoadResult
+
+    private struct LoadGeneration {
+        let id: UUID
+        let profileID: Profile.ID
+        let query: String
+        let categoryID: String
+        let newOnly: Bool
+        let untaggedOnly: Bool
+        var sort: Sort
+        let groupTanks: Bool
+    }
+
     private var start: Int = 0
     private var totalFiltered: Int = 0
     private let pageSize: Int = 100
     private var reachedEnd: Bool = false
     private var supportsDateAddedSort: Bool?
     private let clientProvider: LANraragiClientProvider
+    private let pageLoader: PageLoader?
+    private var loadGeneration: LoadGeneration?
+    private var activeLoadGenerationID: UUID?
 
-    init(clientProvider: LANraragiClientProvider = .shared) {
+    init(
+        clientProvider: LANraragiClientProvider = .shared,
+        pageLoader: PageLoader? = nil
+    ) {
         self.clientProvider = clientProvider
+        self.pageLoader = pageLoader
     }
 
     func refresh(profile: Profile) {
-        start = 0
-        totalFiltered = 0
-        reachedEnd = false
-        arcids = []
-        bannerText = nil
-        errorText = nil
-        Task { await loadMore(profile: profile) }
+        let generation = beginGeneration(profile: profile)
+        Task { await loadMore(profile: profile, generationID: generation.id) }
     }
 
     func loadCategories(profile: Profile) async {
@@ -95,30 +137,61 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func loadMore(profile: Profile) async {
-        guard !isLoading else { return }
+        let generation: LoadGeneration
+        if let existing = loadGeneration, existing.profileID == profile.id {
+            generation = existing
+        } else {
+            generation = beginGeneration(profile: profile)
+        }
+        await loadMore(profile: profile, generationID: generation.id)
+    }
+
+    private func loadMore(profile: Profile, generationID: UUID) async {
+        guard let generation = loadGeneration, generation.id == generationID else { return }
+        guard activeLoadGenerationID != generationID else { return }
         guard !reachedEnd else { return }
 
+        let request = SearchRequest(
+            start: start,
+            query: generation.query,
+            categoryID: generation.categoryID,
+            newOnly: generation.newOnly,
+            untaggedOnly: generation.untaggedOnly,
+            sort: generation.sort,
+            groupTanks: generation.groupTanks,
+            knownDateAddedSortSupport: supportsDateAddedSort
+        )
+
+        activeLoadGenerationID = generationID
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            if activeLoadGenerationID == generationID {
+                activeLoadGenerationID = nil
+                if loadGeneration?.id == generationID {
+                    isLoading = false
+                }
+            }
+        }
 
         do {
-            let client = try await clientProvider.client(for: profile)
-            let reqSort = sort
-            let effectiveSort = await effectiveSortForServer(client: client, requested: reqSort)
+            let result = try await loadPage(profile: profile, request: request)
+            guard loadGeneration?.id == generationID,
+                  activeLoadGenerationID == generationID else { return }
 
-            do {
-                let resp = try await fetchSearch(client: client, start: start, sort: effectiveSort)
-                apply(resp: resp)
-            } catch let LANraragiError.httpStatus(code, _) where reqSort == .newestAdded && (code == 400 || code == 422) {
-                // Server reported no date_added support even after capability probe. Fall back safely.
-                supportsDateAddedSort = false
+            if let dateAddedSortSupport = result.dateAddedSortSupport {
+                supportsDateAddedSort = dateAddedSortSupport
+            }
+            if result.fellBackToTitle {
+                // Keep subsequent pages in this generation on the same fallback sort.
+                loadGeneration?.sort = .title
                 sort = .title
                 bannerText = "Server doesn’t support sorting by date added; using Title instead."
-                let resp = try await fetchSearch(client: client, start: start, sort: .title)
-                apply(resp: resp)
             }
+            apply(resp: result.response)
         } catch {
-            if Task.isCancelled { return }
+            guard loadGeneration?.id == generationID,
+                  activeLoadGenerationID == generationID,
+                  !Task.isCancelled else { return }
             errorText = ErrorPresenter.short(error)
         }
     }
@@ -146,31 +219,44 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    private func effectiveSortForServer(client: LANraragiClient, requested: Sort) async -> Sort {
-        guard requested == .newestAdded else { return requested }
-
-        if let supportsDateAddedSort {
-            if !supportsDateAddedSort {
-                sort = .title
-                bannerText = "Server doesn’t support sorting by date added; using Title instead."
-                return .title
-            }
-            return .newestAdded
+    private func loadPage(profile: Profile, request: SearchRequest) async throws -> PageLoadResult {
+        if let pageLoader {
+            return try await pageLoader(profile, request)
         }
 
-        guard let capability = await detectDateAddedSortSupport(client: client) else {
-            // Unknown capability (network/transient issue): keep requested sort and let normal
-            // request handling surface any real error to the user.
-            return requested
+        let client = try await clientProvider.client(for: profile)
+        guard request.sort == .newestAdded else {
+            return PageLoadResult(response: try await fetchSearch(client: client, request: request, sort: .title))
         }
 
-        supportsDateAddedSort = capability
-        if !capability {
-            sort = .title
-            bannerText = "Server doesn’t support sorting by date added; using Title instead."
-            return .title
+        let capability: Bool?
+        if let knownDateAddedSortSupport = request.knownDateAddedSortSupport {
+            capability = knownDateAddedSortSupport
+        } else {
+            capability = await detectDateAddedSortSupport(client: client)
         }
-        return requested
+
+        if capability == false {
+            return PageLoadResult(
+                response: try await fetchSearch(client: client, request: request, sort: .title),
+                dateAddedSortSupport: false,
+                fellBackToTitle: true
+            )
+        }
+
+        do {
+            return PageLoadResult(
+                response: try await fetchSearch(client: client, request: request, sort: .newestAdded),
+                dateAddedSortSupport: capability
+            )
+        } catch let LANraragiError.httpStatus(code, _) where code == 400 || code == 422 {
+            // Server reported no date_added support even after capability probing. Fall back safely.
+            return PageLoadResult(
+                response: try await fetchSearch(client: client, request: request, sort: .title),
+                dateAddedSortSupport: false,
+                fellBackToTitle: true
+            )
+        }
     }
 
     private func detectDateAddedSortSupport(client: LANraragiClient) async -> Bool? {
@@ -192,7 +278,11 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    private func fetchSearch(client: LANraragiClient, start: Int, sort: Sort) async throws -> ArchiveSearch {
+    private func fetchSearch(
+        client: LANraragiClient,
+        request: SearchRequest,
+        sort: Sort
+    ) async throws -> ArchiveSearch {
         let (sortBy, order): (String, String) = {
             switch sort {
             case .newestAdded:
@@ -203,15 +293,46 @@ final class LibraryViewModel: ObservableObject {
         }()
 
         return try await client.search(
-            start: start,
-            filter: query,
-            category: categoryID,
-            newOnly: newOnly,
-            untaggedOnly: untaggedOnly,
+            start: request.start,
+            filter: request.query,
+            category: request.categoryID,
+            newOnly: request.newOnly,
+            untaggedOnly: request.untaggedOnly,
             sortBy: sortBy,
             order: order,
-            groupByTanks: groupTanks
+            groupByTanks: request.groupTanks
         )
+    }
+
+    private func makeGeneration(profile: Profile) -> LoadGeneration {
+        LoadGeneration(
+            id: UUID(),
+            profileID: profile.id,
+            query: query,
+            categoryID: categoryID,
+            newOnly: newOnly,
+            untaggedOnly: untaggedOnly,
+            sort: sort,
+            groupTanks: groupTanks
+        )
+    }
+
+    private func beginGeneration(profile: Profile) -> LoadGeneration {
+        let profileChanged = loadGeneration?.profileID != profile.id
+        let generation = makeGeneration(profile: profile)
+        loadGeneration = generation
+        activeLoadGenerationID = nil
+        start = 0
+        totalFiltered = 0
+        reachedEnd = false
+        arcids = []
+        isLoading = false
+        bannerText = nil
+        errorText = nil
+        if profileChanged {
+            supportsDateAddedSort = nil
+        }
+        return generation
     }
 
     private func makeClient(profile: Profile) throws -> LANraragiClient {
