@@ -1,6 +1,54 @@
 import Foundation
 import LanraragiKit
 
+struct ArchiveLoaderInFlightOperation<Value: Sendable>: Sendable {
+    let id: UUID
+    let task: Task<Value, Error>
+}
+
+struct ArchiveLoaderInFlightRegistry<Key: Hashable, Value: Sendable> {
+    private var operations: [Key: ArchiveLoaderInFlightOperation<Value>] = [:]
+
+    subscript(key: Key) -> ArchiveLoaderInFlightOperation<Value>? {
+        operations[key]
+    }
+
+    @discardableResult
+    mutating func insert(
+        _ task: Task<Value, Error>,
+        for key: Key
+    ) -> ArchiveLoaderInFlightOperation<Value> {
+        let operation = ArchiveLoaderInFlightOperation(id: UUID(), task: task)
+        operations[key] = operation
+        return operation
+    }
+
+    @discardableResult
+    mutating func removeValue(for key: Key, ownedBy id: UUID) -> Bool {
+        guard operations[key]?.id == id else { return false }
+        operations[key] = nil
+        return true
+    }
+
+    mutating func cancelAndRemoveValue(for key: Key) {
+        operations.removeValue(forKey: key)?.task.cancel()
+    }
+
+    mutating func cancelAndRemoveAll() {
+        for operation in operations.values {
+            operation.task.cancel()
+        }
+        operations.removeAll()
+    }
+}
+
+struct ArchiveLoaderFetchOverrides: Sendable {
+    let metadata: @Sendable (String) async throws -> ArchiveMetadata
+    let archiveFiles: @Sendable (String, Bool) async throws -> ArchiveFilesResponse
+    let absoluteURL: @Sendable (String) throws -> URL
+    let bytes: @Sendable (URL) async throws -> Data
+}
+
 actor ArchiveLoader {
     enum ArchiveLoaderError: Error {
         case missingAPIKey
@@ -12,32 +60,38 @@ actor ArchiveLoader {
     private var clientByProfileID: [UUID: LANraragiClient] = [:]
 
     private var metaCache: [String: ArchiveMetadata] = [:]
-    private var metaInflight: [String: Task<ArchiveMetadata, Error>] = [:]
+    private var metaInflight = ArchiveLoaderInFlightRegistry<String, ArchiveMetadata>()
 
     private var pagesCache: [String: [URL]] = [:]
-    private var pagesInflight: [String: Task<[URL], Error>] = [:]
+    private var pagesInflight = ArchiveLoaderInFlightRegistry<String, [URL]>()
 
     private let bytesCache = NSCache<NSString, NSData>()
-    private var bytesInflight: [String: Task<Data, Error>] = [:]
+    private var bytesInflight = ArchiveLoaderInFlightRegistry<String, Data>()
 
     private let maxCachedBytes = 8 * 1024 * 1024
+    private let fetchOverrides: ArchiveLoaderFetchOverrides?
 
-    init() {
+    init(fetchOverrides: ArchiveLoaderFetchOverrides? = nil) {
+        self.fetchOverrides = fetchOverrides
         bytesCache.totalCostLimit = 512 * 1024 * 1024 // ~512MB
     }
 
     func metadata(profile: Profile, arcid: String, forceRefresh: Bool = false) async throws -> ArchiveMetadata {
-        if forceRefresh {
-            metaCache[arcid] = nil
-            metaInflight[arcid]?.cancel()
-            metaInflight[arcid] = nil
+        if !forceRefresh {
+            if let metadata = metaCache[arcid] { return metadata }
+            if let operation = metaInflight[arcid] {
+                return try await operation.task.value
+            }
         }
-        if let m = metaCache[arcid] { return m }
-        if let t = metaInflight[arcid] { return try await t.value }
 
-        let client = try makeClient(profile: profile)
-        let task = Task<ArchiveMetadata, Error> {
-            try await limiter.withPermit {
+        let fetchMetadata: @Sendable () async throws -> ArchiveMetadata
+        if let metadataOverride = fetchOverrides?.metadata {
+            fetchMetadata = {
+                try await metadataOverride(arcid)
+            }
+        } else {
+            let client = try makeClient(profile: profile)
+            fetchMetadata = {
                 // Tankoubons have no /api/archives metadata; synthesize it from the tank object.
                 if LANraragiID.isTankoubon(arcid) {
                     let tank = try await client.getTankoubon(id: arcid)
@@ -53,13 +107,28 @@ actor ArchiveLoader {
                 return try await client.getArchiveMetadata(arcid: arcid)
             }
         }
+        let task = Task<ArchiveMetadata, Error> {
+            try await limiter.withPermit {
+                try await fetchMetadata()
+            }
+        }
 
-        metaInflight[arcid] = task
-        defer { metaInflight[arcid] = nil }
+        // A forced refresh replaces the shared slot without cancelling the old
+        // operation. Existing waiters can still receive its result, but only the
+        // replacement is allowed to publish into the cache. The last known-good
+        // cached value remains available until that replacement succeeds.
+        let operation = metaInflight.insert(task, for: arcid)
 
-        let m = try await task.value
-        metaCache[arcid] = m
-        return m
+        do {
+            let metadata = try await task.value
+            if metaInflight.removeValue(for: arcid, ownedBy: operation.id) {
+                metaCache[arcid] = metadata
+            }
+            return metadata
+        } catch {
+            metaInflight.removeValue(for: arcid, ownedBy: operation.id)
+            throw error
+        }
     }
 
     func archiveExists(profile: Profile, arcid: String) async throws -> Bool {
@@ -70,8 +139,7 @@ actor ArchiveLoader {
             // Only a definitive "gone" answer means the archive doesn't exist.
             // Transient server errors (5xx, etc.) must propagate so callers don't
             // prune user data based on a hiccup.
-            metaCache[arcid] = nil
-            pagesCache[arcid] = nil
+            invalidateArchiveCaches(arcid: arcid)
             return false
         }
     }
@@ -89,7 +157,7 @@ actor ArchiveLoader {
         }
 
         // Refresh caches for this archive.
-        metaCache[arcid] = nil
+        invalidateMetadataCache(arcid: arcid)
         let updated = try await metadata(profile: profile, arcid: arcid, forceRefresh: true)
         return updated
     }
@@ -132,49 +200,69 @@ actor ArchiveLoader {
         }
 
         // Drop cached references for the deleted archive.
-        metaCache[arcid] = nil
-        pagesCache[arcid] = nil
-        metaInflight[arcid]?.cancel()
-        pagesInflight[arcid]?.cancel()
-        metaInflight[arcid] = nil
-        pagesInflight[arcid] = nil
+        invalidateArchiveCaches(arcid: arcid)
     }
     func pageURLs(profile: Profile, arcid: String) async throws -> [URL] {
-        if let p = pagesCache[arcid], p.count > 1 { return p }
-        if let t = pagesInflight[arcid] { return try await t.value }
+        if let pages = pagesCache[arcid] { return pages }
+        if let operation = pagesInflight[arcid] {
+            return try await operation.task.value
+        }
 
-        let client = try makeClient(profile: profile)
+        let fetchArchiveFiles: @Sendable (Bool) async throws -> ArchiveFilesResponse
+        let makeAbsoluteURL: @Sendable (String) throws -> URL
+        if let fetchOverrides {
+            fetchArchiveFiles = { force in
+                try await fetchOverrides.archiveFiles(arcid, force)
+            }
+            makeAbsoluteURL = fetchOverrides.absoluteURL
+        } else {
+            let client = try makeClient(profile: profile)
+            fetchArchiveFiles = { force in
+                try await client.getArchiveFiles(arcid: arcid, force: force)
+            }
+            makeAbsoluteURL = { rawURL in
+                try client.makeAbsoluteURL(from: rawURL)
+            }
+        }
         let task = Task<[URL], Error> {
             try await limiter.withPermit {
                 let resp: ArchiveFilesResponse
                 do {
-                    let initial = try await client.getArchiveFiles(arcid: arcid, force: false)
+                    let initial = try await fetchArchiveFiles(false)
                     if initial.pages.count <= 1 {
                         // Some servers return only the first extracted page unless forced.
-                        let forced = try await client.getArchiveFiles(arcid: arcid, force: true)
+                        let forced = try await fetchArchiveFiles(true)
                         resp = forced.pages.count > initial.pages.count ? forced : initial
                     } else {
                         resp = initial
                     }
                 } catch let LANraragiError.httpStatus(code, _) where code == 400 {
                     // Some LANraragi setups return 400 unless file listing is forced (e.g. stale extraction state).
-                    resp = try await client.getArchiveFiles(arcid: arcid, force: true)
+                    resp = try await fetchArchiveFiles(true)
                 }
                 var out: [URL] = []
                 out.reserveCapacity(resp.pages.count)
                 for s in resp.pages {
-                    out.append(try client.makeAbsoluteURL(from: s))
+                    out.append(try makeAbsoluteURL(s))
                 }
                 return out
             }
         }
 
-        pagesInflight[arcid] = task
-        defer { pagesInflight[arcid] = nil }
+        let operation = pagesInflight.insert(task, for: arcid)
 
-        let pages = try await task.value
-        pagesCache[arcid] = pages
-        return pages
+        do {
+            let pages = try await task.value
+            if pagesInflight.removeValue(for: arcid, ownedBy: operation.id) {
+                // Even a single-page result is verified here: the request task has
+                // already completed the initial + forced listing path above.
+                pagesCache[arcid] = pages
+            }
+            return pages
+        } catch {
+            pagesInflight.removeValue(for: arcid, ownedBy: operation.id)
+            throw error
+        }
     }
 
     func bytes(profile: Profile, url: URL) async throws -> Data {
@@ -184,23 +272,40 @@ actor ArchiveLoader {
         }
 
         let inflightKey = String(key)
-        if let t = bytesInflight[inflightKey] { return try await t.value }
+        if let operation = bytesInflight[inflightKey] {
+            return try await operation.task.value
+        }
 
-        let client = try makeClient(profile: profile)
+        let fetchBytes: @Sendable () async throws -> Data
+        if let bytesOverride = fetchOverrides?.bytes {
+            fetchBytes = {
+                try await bytesOverride(url)
+            }
+        } else {
+            let client = try makeClient(profile: profile)
+            fetchBytes = {
+                try await client.fetchBytes(url: url)
+            }
+        }
         let task = Task<Data, Error> {
             try await limiter.withPermit {
-                return try await client.fetchBytes(url: url)
+                try await fetchBytes()
             }
         }
 
-        bytesInflight[inflightKey] = task
-        defer { bytesInflight[inflightKey] = nil }
+        let operation = bytesInflight.insert(task, for: inflightKey)
 
-        let data = try await task.value
-        if data.count <= maxCachedBytes {
-            bytesCache.setObject(data as NSData, forKey: key, cost: data.count)
+        do {
+            let data = try await task.value
+            if bytesInflight.removeValue(for: inflightKey, ownedBy: operation.id),
+               data.count <= maxCachedBytes {
+                bytesCache.setObject(data as NSData, forKey: key, cost: data.count)
+            }
+            return data
+        } catch {
+            bytesInflight.removeValue(for: inflightKey, ownedBy: operation.id)
+            throw error
         }
-        return data
     }
 
     // MARK: - Tankoubons
@@ -219,7 +324,7 @@ actor ArchiveLoader {
         let id = try await limiter.withPermit {
             try await client.createTankoubon(name: name, tankID: tankID)
         }
-        metaCache[id] = nil
+        invalidateMetadataCache(arcid: id)
         return id
     }
 
@@ -248,7 +353,7 @@ actor ArchiveLoader {
                 tags: tags
             )
         }
-        metaCache[tankID] = nil
+        invalidateMetadataCache(arcid: tankID)
     }
 
     func deleteTankoubon(profile: Profile, tankID: String) async throws {
@@ -256,7 +361,7 @@ actor ArchiveLoader {
         try await limiter.withPermit {
             try await client.deleteTankoubon(id: tankID)
         }
-        metaCache[tankID] = nil
+        invalidateMetadataCache(arcid: tankID)
     }
 
     func addArchiveToTankoubon(profile: Profile, tankID: String, arcid: String) async throws {
@@ -264,7 +369,7 @@ actor ArchiveLoader {
         try await limiter.withPermit {
             try await client.addArchiveToTankoubon(tankID: tankID, arcid: arcid)
         }
-        metaCache[tankID] = nil
+        invalidateMetadataCache(arcid: tankID)
     }
 
     func removeArchiveFromTankoubon(profile: Profile, tankID: String, arcid: String) async throws {
@@ -272,7 +377,7 @@ actor ArchiveLoader {
         try await limiter.withPermit {
             try await client.removeArchiveFromTankoubon(tankID: tankID, arcid: arcid)
         }
-        metaCache[tankID] = nil
+        invalidateMetadataCache(arcid: tankID)
     }
 
     // MARK: - Stamps
@@ -321,6 +426,20 @@ actor ArchiveLoader {
         metaCache.removeAll()
         pagesCache.removeAll()
         bytesCache.removeAllObjects()
+        metaInflight.cancelAndRemoveAll()
+        pagesInflight.cancelAndRemoveAll()
+        bytesInflight.cancelAndRemoveAll()
+    }
+
+    private func invalidateArchiveCaches(arcid: String) {
+        invalidateMetadataCache(arcid: arcid)
+        pagesCache[arcid] = nil
+        pagesInflight.cancelAndRemoveValue(for: arcid)
+    }
+
+    private func invalidateMetadataCache(arcid: String) {
+        metaCache[arcid] = nil
+        metaInflight.cancelAndRemoveValue(for: arcid)
     }
 
     private func makeClient(profile: Profile) throws -> LANraragiClient {
