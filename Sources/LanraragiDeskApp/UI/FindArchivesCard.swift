@@ -38,6 +38,11 @@ struct FindArchivesCard: View {
                     )
                 }
 
+                Text("Namespace checks match any value in that namespace. Exact checks match one complete namespace:value tag. Multiple conditions are combined with AND.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 HStack(spacing: 8) {
                     Text("Main page searches")
                         .font(.caption.weight(.semibold))
@@ -71,7 +76,7 @@ struct FindArchivesCard: View {
                         searchTask = Task { await runSearch() }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(conditions.isEmpty)
+                    .disabled(BatchQueryCompiler.compile(conditions).isEmpty)
                 }
 
                 if let categoriesError {
@@ -109,7 +114,7 @@ struct FindArchivesCard: View {
                         saveNameDraft = ""
                         showSaveSheet = true
                     }
-                    .disabled(conditions.isEmpty)
+                    .disabled(BatchQueryCompiler.compile(conditions).isEmpty)
 
                     Button("Delete", role: .destructive) {
                         if let id = selectedSavedQueryID {
@@ -385,9 +390,9 @@ private struct ConditionRowView: View {
             }
 
             if condition.type.needsValue {
-                Text("=")
+                Text(":")
                     .foregroundStyle(.secondary)
-                TextField("value", text: $condition.value)
+                TextField("exact value", text: $condition.value)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 120)
             }

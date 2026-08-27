@@ -18,10 +18,10 @@ struct BatchQueryCondition: Codable, Identifiable, Equatable {
 
         var label: String {
             switch self {
-            case .tagPresent: return "Tag is present"
-            case .tagAbsent: return "Tag is absent"
-            case .tagEquals: return "Tag equals"
-            case .tagNotEquals: return "Tag not equals"
+            case .tagPresent: return "Namespace has any tag"
+            case .tagAbsent: return "Namespace has no tags"
+            case .tagEquals: return "Exact tag is present"
+            case .tagNotEquals: return "Exact tag is absent"
             case .serverCategory: return "LNR Category"
             case .newOnly: return "New only"
             case .untaggedOnly: return "Untagged only"
@@ -69,25 +69,28 @@ enum BatchQueryCompiler {
         var untaggedOnly = false
 
         for condition in conditions {
+            let namespace = condition.namespace.trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = condition.value.trimmingCharacters(in: .whitespacesAndNewlines)
+
             switch condition.type {
             case .tagPresent:
-                if !condition.namespace.isEmpty {
-                    filterParts.append("\(condition.namespace):")
+                if !namespace.isEmpty {
+                    filterParts.append("\(namespace):")
                 }
             case .tagAbsent:
-                if !condition.namespace.isEmpty {
-                    filterParts.append("-\(condition.namespace):")
+                if !namespace.isEmpty {
+                    filterParts.append("-\(namespace):")
                 }
             case .tagEquals:
-                if !condition.namespace.isEmpty {
-                    filterParts.append("\(condition.namespace):\(condition.value)")
+                if !namespace.isEmpty && !value.isEmpty {
+                    filterParts.append("\(namespace):\(value)$")
                 }
             case .tagNotEquals:
-                if !condition.namespace.isEmpty {
-                    filterParts.append("-\(condition.namespace):\(condition.value)")
+                if !namespace.isEmpty && !value.isEmpty {
+                    filterParts.append("-\(namespace):\(value)$")
                 }
             case .serverCategory:
-                categoryID = condition.categoryID
+                categoryID = condition.categoryID.trimmingCharacters(in: .whitespacesAndNewlines)
             case .newOnly:
                 newOnly = true
             case .untaggedOnly:
@@ -96,7 +99,8 @@ enum BatchQueryCompiler {
         }
 
         return CompiledQuery(
-            filter: filterParts.joined(separator: " "),
+            // LANraragi's search parser uses commas, not whitespace, to delimit predicates.
+            filter: filterParts.joined(separator: ", "),
             categoryID: categoryID,
             newOnly: newOnly,
             untaggedOnly: untaggedOnly
