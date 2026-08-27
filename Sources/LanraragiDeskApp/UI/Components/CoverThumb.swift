@@ -36,6 +36,43 @@ struct CoverThumbRequestKey: Hashable, Sendable {
     }
 }
 
+struct CoverThumbLoadToken: Hashable, Sendable {
+    let request: CoverThumbRequestKey
+    let generation: UUID
+
+    init(request: CoverThumbRequestKey, generation: UUID = UUID()) {
+        self.request = request
+        self.generation = generation
+    }
+}
+
+enum CoverThumbLoadOwnership {
+    static func permitsWrite(
+        active: CoverThumbLoadToken?,
+        candidate: CoverThumbLoadToken,
+        isCancelled: Bool
+    ) -> Bool {
+        !isCancelled && active == candidate
+    }
+
+    @MainActor
+    @discardableResult
+    static func commitIfCurrent(
+        active: CoverThumbLoadToken?,
+        candidate: CoverThumbLoadToken,
+        isCancelled: Bool,
+        mutation: () -> Void
+    ) -> Bool {
+        guard permitsWrite(
+            active: active,
+            candidate: candidate,
+            isCancelled: isCancelled
+        ) else { return false }
+        mutation()
+        return true
+    }
+}
+
 private final class CoverThumbCacheEntry: NSObject {
     let token = UUID()
     let key: String
@@ -179,7 +216,7 @@ struct CoverThumb: View {
     private let invalidationPublisher: AnyPublisher<Void, Never>
     @State private var image: NSImage?
     @State private var errorText: String?
-    @State private var activeRequest: CoverThumbRequestKey?
+    @State private var activeLoad: CoverThumbLoadToken?
     @State private var task: Task<Void, Never>?
     @State private var revision: UInt64 = 0
 
@@ -257,7 +294,8 @@ struct CoverThumb: View {
         }
         .task(id: request) {
             // Profile, archive, dimensions, caller reloads, and cover updates all identify the load.
-            activeRequest = request
+            let loadToken = CoverThumbLoadToken(request: request)
+            activeLoad = loadToken
             task?.cancel()
             task = nil
             if let cached = CoverThumbCache.image(for: request) {
@@ -269,17 +307,22 @@ struct CoverThumb: View {
             image = nil
             errorText = nil
             let maxPixelSize = Int(max(size.width, size.height) * 2.5)
-            task = Task.detached(priority: .userInitiated) { [profile, arcid, thumbnails, request] in
+            task = Task.detached(priority: .userInitiated) { [profile, arcid, thumbnails, request, loadToken] in
                 do {
                     let bytes = try await thumbnails.thumbnailBytes(profile: profile, arcid: arcid)
                     try Task.checkCancellation()
                     let decodedImage = ImageDownsampler.thumbnail(from: bytes, maxPixelSize: maxPixelSize)
                     try Task.checkCancellation()
                     await MainActor.run {
-                        guard activeRequest == request else { return }
-                        image = decodedImage
-                        if let decodedImage {
-                            CoverThumbCache.insert(decodedImage, for: request)
+                        CoverThumbLoadOwnership.commitIfCurrent(
+                            active: activeLoad,
+                            candidate: loadToken,
+                            isCancelled: Task.isCancelled
+                        ) {
+                            image = decodedImage
+                            if let decodedImage {
+                                CoverThumbCache.insert(decodedImage, for: request)
+                            }
                         }
                     }
                 } catch {
@@ -287,14 +330,20 @@ struct CoverThumb: View {
                         return
                     }
                     await MainActor.run {
-                        guard activeRequest == request else { return }
-                        errorText = ErrorPresenter.short(error)
+                        CoverThumbLoadOwnership.commitIfCurrent(
+                            active: activeLoad,
+                            candidate: loadToken,
+                            isCancelled: Task.isCancelled
+                        ) {
+                            image = nil
+                            errorText = ErrorPresenter.short(error)
+                        }
                     }
                 }
             }
         }
         .onDisappear {
-            activeRequest = nil
+            activeLoad = nil
             task?.cancel()
             task = nil
         }
