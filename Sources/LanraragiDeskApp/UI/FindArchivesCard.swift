@@ -11,6 +11,7 @@ struct FindArchivesCard: View {
     @AppStorage("batch.findArchives.expanded") private var expanded: Bool = false
     @State private var conditions: [BatchQueryCondition] = []
     @State private var categories: [LanraragiKit.Category] = []
+    @State private var categoriesError: String?
     @State private var searchStatus: SearchStatus = .idle
     @State private var selectedResultIDs: Set<String> = []
     @State private var showSaveSheet: Bool = false
@@ -70,6 +71,12 @@ struct FindArchivesCard: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(conditions.isEmpty)
+                }
+
+                if let categoriesError {
+                    Text("Categories unavailable: \(categoriesError)")
+                        .font(.caption)
+                        .foregroundStyle(.red)
                 }
 
                 Divider()
@@ -256,18 +263,9 @@ struct FindArchivesCard: View {
     }
 
     private func loadCategories() async {
-        let account = "apiKey.\(profile.id.uuidString)"
-        let apiKeyString = (try? KeychainService.getString(account: account)) ?? nil
-        let apiKey = apiKeyString.map { LANraragiAPIKey($0) }
-
-        let client = LANraragiClient(configuration: .init(
-            baseURL: profile.baseURL,
-            apiKey: apiKey,
-            acceptLanguage: profile.language,
-            maxConnectionsPerHost: AppSettings.maxConnectionsPerHost(defaultValue: 8)
-        ))
-
         do {
+            categoriesError = nil
+            let client = try makeClient()
             let resp = try await client.listCategories()
             if Task.isCancelled { return }
             let cleaned = resp
@@ -282,27 +280,18 @@ struct FindArchivesCard: View {
         } catch {
             if Task.isCancelled { return }
             categories = []
+            categoriesError = ErrorPresenter.short(error)
         }
     }
 
     private func runSearch() async {
         let compiled = BatchQueryCompiler.compile(conditions)
 
-        let account = "apiKey.\(profile.id.uuidString)"
-        let apiKeyString = (try? KeychainService.getString(account: account)) ?? nil
-        let apiKey = apiKeyString.map { LANraragiAPIKey($0) }
-
-        let client = LANraragiClient(configuration: .init(
-            baseURL: profile.baseURL,
-            apiKey: apiKey,
-            acceptLanguage: profile.language,
-            maxConnectionsPerHost: AppSettings.maxConnectionsPerHost(defaultValue: 8)
-        ))
-
         var allIDs: [String] = []
         var start = 0
 
         do {
+            let client = try makeClient()
             while true {
                 if Task.isCancelled { return }
                 let resp = try await client.search(
@@ -327,6 +316,16 @@ struct FindArchivesCard: View {
             if Task.isCancelled { return }
             searchStatus = .failed(ErrorPresenter.short(error))
         }
+    }
+
+    private func makeClient() throws -> LANraragiClient {
+        let apiKey = try APIKeyCredential.load(profileID: profile.id)
+        return LANraragiClient(configuration: .init(
+            baseURL: profile.baseURL,
+            apiKey: apiKey,
+            acceptLanguage: profile.language,
+            maxConnectionsPerHost: AppSettings.maxConnectionsPerHost(defaultValue: 8)
+        ))
     }
 }
 
