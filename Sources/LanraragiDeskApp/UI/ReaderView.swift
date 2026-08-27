@@ -77,7 +77,7 @@ struct ReaderView: View {
                         stampedPages: showStamps ? stampedPages : [],
                         onJump: { idx in
                             pageIndex = idx
-                            restartAutoAdvance(reason: .userInteraction)
+                            restartAutoAdvance()
                         },
                         onSetCover: { setPageAsCover(pageNumber: $0) }
                     )
@@ -186,7 +186,7 @@ struct ReaderView: View {
         .onChange(of: pageIndex) { _, _ in
             loadCurrentPage()
             reloadStamps()
-            restartAutoAdvance(reason: .pageChanged)
+            restartAutoAdvance()
         }
         .sheet(item: $stampEditor) { route in
             StampEditorSheet(
@@ -201,16 +201,16 @@ struct ReaderView: View {
         }
         .onChange(of: twoPageSpread) { _, _ in
             loadCurrentPage()
-            restartAutoAdvance(reason: .settingsChanged)
+            restartAutoAdvance()
         }
         .onChange(of: fitModeRaw) { _, _ in
-            restartAutoAdvance(reason: .settingsChanged)
+            restartAutoAdvance()
         }
         .onChange(of: zoomPercent) { _, _ in
-            restartAutoAdvance(reason: .settingsChanged)
+            restartAutoAdvance()
         }
         .onChange(of: autoAdvanceEnabled) { _, _ in
-            restartAutoAdvance(reason: .settingsChanged)
+            restartAutoAdvance()
         }
         .onChange(of: autoAdvanceSeconds) { _, newValue in
             let clamped = min(Self.autoAdvanceMaxSeconds, max(Self.autoAdvanceMinSeconds, newValue))
@@ -218,10 +218,10 @@ struct ReaderView: View {
                 autoAdvanceSeconds = clamped
                 return
             }
-            restartAutoAdvance(reason: .settingsChanged)
+            restartAutoAdvance()
         }
         .onChange(of: readingDirectionRaw) { _, _ in
-            restartAutoAdvance(reason: .settingsChanged)
+            restartAutoAdvance()
         }
         .onDisappear {
             timerTask?.cancel()
@@ -527,7 +527,7 @@ struct ReaderView: View {
             pageIndex = 0
             loadCurrentPage()
             reloadStamps()
-            restartAutoAdvance(reason: .pageChanged)
+            restartAutoAdvance()
         } catch {
             if Task.isCancelled { return }
             errorText = ErrorPresenter.short(error)
@@ -683,19 +683,11 @@ struct ReaderView: View {
         }
     }
 
-    private enum AutoAdvanceRestartReason {
-        case pageChanged
-        case settingsChanged
-        case userInteraction
-    }
-
-    private func restartAutoAdvance(reason: AutoAdvanceRestartReason) {
-        // Manual navigation / interactions should reset the countdown.
-        if reason == .userInteraction || reason == .pageChanged || reason == .settingsChanged {
-            timerTask?.cancel()
-            timerTask = nil
-            countdownRemaining = nil
-        }
+    private func restartAutoAdvance() {
+        // Any restart resets the current countdown before scheduling a new one.
+        timerTask?.cancel()
+        timerTask = nil
+        countdownRemaining = nil
 
         guard autoAdvanceEnabled else { return }
         guard pages.count > 1 else { return }
@@ -731,7 +723,7 @@ struct ReaderView: View {
 
     private func goNext(userInitiated: Bool) {
         if userInitiated {
-            restartAutoAdvance(reason: .userInteraction)
+            restartAutoAdvance()
         }
         guard !pages.isEmpty else { return }
 
@@ -747,7 +739,7 @@ struct ReaderView: View {
 
     private func goPrev(userInitiated: Bool) {
         if userInitiated {
-            restartAutoAdvance(reason: .userInteraction)
+            restartAutoAdvance()
         }
         guard pageIndex > 0 else { return }
         pageIndex = max(0, pageIndex - step)

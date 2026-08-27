@@ -36,7 +36,6 @@
 		6FACD0CFFB200075847A6B9C /* AppPaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99CBA245A79722298EB8ADD5 /* AppPaths.swift */; };
 		7065DE50731D88BE5A3F6C36 /* ReaderRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0B4C016BE5ACCF114FD7456 /* ReaderRoute.swift */; };
 		71C163C8EB9AEB1594999BD2 /* FlowLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8741E8F65D0D99E9D8C191C5 /* FlowLayout.swift */; };
-		7542369653C2D01A55CA1E70 /* IndexingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93C3DC7516031BE8557B0B91 /* IndexingViewModel.swift */; };
 		761D1B8EA5AA5B4393BF2DEC /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EB1A7A3D3F4CAEBC2BDFB69 /* AppSettings.swift */; };
 		7E613CA1B3641F9B7D503358 /* StatisticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E21E702AD8E780D4140E265F /* StatisticsView.swift */; };
 		81121218A63AD524889E730E /* ProfileEditorMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = D02DE20BBA0EE2C6AF4692AB /* ProfileEditorMode.swift */; };
@@ -46,7 +45,6 @@
 		8A444FAD703989BB9F2AF384 /* OpenAITranslationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAAC758F0873DA44E0C627AC /* OpenAITranslationService.swift */; };
 		8AF2D2ECDE384C052C773137 /* TitleNormalizationRunService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3108E7A7F83E6B951B322E7A /* TitleNormalizationRunService.swift */; };
 		8ECBF476E3DACD7FD2406ED8 /* TagParsing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0718791009A902A4E9D12201 /* TagParsing.swift */; };
-		90FB6505F5E662992751636C /* PluginsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AEFB9CCF40215DA9778ED91 /* PluginsView.swift */; };
 		969C5A238935EE3AC7799BA0 /* BatchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40493C363CC7F009DAFF416E /* BatchView.swift */; };
 		96D5A2C599CC0A85C3973D9C /* ConnectionHeaderCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BFCDFAA8ABFDE74C7D3EC0D /* ConnectionHeaderCard.swift */; };
 		9789B431AA03054EAF70EF31 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8590743AAA05E109BCF48A6E /* LibraryView.swift */; };
@@ -89,7 +87,6 @@
 		54B3E61F93FAE6A29E18E911 /* DuplicateScanViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuplicateScanViewModel.swift; sourceTree = "<group>"; };
 		55DB22001120CA1D977F2D22 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		58F7CF159983299EE64C06C5 /* ActivityEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityEvent.swift; sourceTree = "<group>"; };
-		5AEFB9CCF40215DA9778ED91 /* PluginsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginsView.swift; sourceTree = "<group>"; };
 		6032C435F51A77975C1008D7 /* ImageDownsampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageDownsampler.swift; sourceTree = "<group>"; };
 		64DB4339053B57ED7A535ED8 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		72C4199C56747CD950398BF5 /* CoverThumb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoverThumb.swift; sourceTree = "<group>"; };
@@ -100,7 +97,6 @@
 		8741E8F65D0D99E9D8C191C5 /* FlowLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowLayout.swift; sourceTree = "<group>"; };
 		8BFCDFAA8ABFDE74C7D3EC0D /* ConnectionHeaderCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionHeaderCard.swift; sourceTree = "<group>"; };
 		92B6686EDCF99DFFC6D32B78 /* ArchiveLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArchiveLoader.swift; sourceTree = "<group>"; };
-		93C3DC7516031BE8557B0B91 /* IndexingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IndexingViewModel.swift; sourceTree = "<group>"; };
 		93E25149182F74702F91FEA0 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		987B754D600AC3052BE852B2 /* BatchModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchModels.swift; sourceTree = "<group>"; };
 		99C7CE21E9CCBADBAD7844A7 /* NotMatchesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotMatchesView.swift; sourceTree = "<group>"; };
@@ -157,7 +153,6 @@
 			children = (
 				64DB4339053B57ED7A535ED8 /* AppModel.swift */,
 				54B3E61F93FAE6A29E18E911 /* DuplicateScanViewModel.swift */,
-				93C3DC7516031BE8557B0B91 /* IndexingViewModel.swift */,
 				F1F2885B0666E3F9BE5689F9 /* LibraryViewModel.swift */,
 				FFD900A7362E768EBA9F7DB7 /* PluginsViewModel.swift */,
 				085B815307B1D671DBC3ABFF /* SelectionModel.swift */,
@@ -230,7 +225,6 @@
 				AAD5500E07326DBDA5C32E76 /* MainPageCarouselsView.swift */,
 				99C7CE21E9CCBADBAD7844A7 /* NotMatchesView.swift */,
 				76DFDA70F6C8EF04285A3BAE /* PairReviewView.swift */,
-				5AEFB9CCF40215DA9778ED91 /* PluginsView.swift */,
 				53E76144EA3A608FC23C8A94 /* ProfileEditorView.swift */,
 				DD459C22BE11F681F28C2F38 /* ReaderView.swift */,
 				358F4E9A6F34DDEB4C2966B1 /* RootView.swift */,
@@ -380,7 +374,6 @@
 				BD78F9407FD4CA00EF912F2B /* FindArchivesCard.swift in Sources */,
 				71C163C8EB9AEB1594999BD2 /* FlowLayout.swift in Sources */,
 				9DDDA0347F89382A644FB753 /* ImageDownsampler.swift in Sources */,
-				7542369653C2D01A55CA1E70 /* IndexingViewModel.swift in Sources */,
 				DDDB37F2CDB1F904FAFF1F3C /* KeychainService.swift in Sources */,
 				357E6825CEFEFA8EA5B45966 /* LanraragiDeskApp.swift in Sources */,
 				9789B431AA03054EAF70EF31 /* LibraryView.swift in Sources */,
@@ -390,7 +383,6 @@
 				4CF1B22A3D290E0F65F546D7 /* NotMatchesView.swift in Sources */,
 				8A444FAD703989BB9F2AF384 /* OpenAITranslationService.swift in Sources */,
 				B276D2843F10809C7F019FCD /* PairReviewView.swift in Sources */,
-				90FB6505F5E662992751636C /* PluginsView.swift in Sources */,
 				3698660AF1E0714F3D6AD2D1 /* PluginsViewModel.swift in Sources */,
 				0C08E467F7D7B634D7226213 /* ProcessRunner.swift in Sources */,
 				E53EB607E67003100933762A /* Profile.swift in Sources */,

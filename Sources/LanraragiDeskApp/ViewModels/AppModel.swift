@@ -19,7 +19,6 @@ final class AppModel: ObservableObject {
     @Published var activeReaderRoute: ReaderRoute?
 
     @Published var connectionStatus: ConnectionStatus = .idle
-    @Published var indexing: IndexingViewModel
     @Published var duplicates: DuplicateScanViewModel
     let archives: ArchiveLoader
     let thumbnails: ThumbnailLoader
@@ -37,23 +36,18 @@ final class AppModel: ObservableObject {
         self.activity = ActivityStore()
         self.tagSuggestions = TagSuggestionStore()
         self.selection = SelectionModel()
-        self.indexing = IndexingViewModel()
         self.duplicates = DuplicateScanViewModel(thumbnails: thumbnails, archives: archives)
         self.duplicates.activitySink = { [weak self] event in
             self?.activity.add(event)
         }
 
         // SwiftUI doesn't automatically observe nested ObservableObjects through a parent EnvironmentObject.
-        // Forward child changes so views reading `appModel.profileStore...` / `appModel.indexing...` update.
+        // Forward child changes so views reading nested observable objects update.
         profileStore.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
 
         savedQueryStore.objectWillChange
-            .sink { [weak self] _ in self?.objectWillChange.send() }
-            .store(in: &cancellables)
-
-        indexing.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
 

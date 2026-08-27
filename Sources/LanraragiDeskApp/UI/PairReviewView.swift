@@ -752,116 +752,6 @@ private struct ArchiveComparePanel: View {
     }
 }
 
-private struct TagGroupsView: View {
-    let tags: String?
-
-    var body: some View {
-        let groups = TagGrouper.grouped(tags: tags)
-        if groups.isEmpty {
-            return AnyView(EmptyView())
-        }
-
-        return AnyView(
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(groups) { g in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(g.title)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 6)], alignment: .leading, spacing: 6) {
-                            ForEach(g.displayTags, id: \.self) { t in
-                                Text(t)
-                                    .font(.caption2)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 5)
-                                    .background(.quaternary.opacity(0.55))
-                                    .clipShape(Capsule())
-                            }
-                            if g.hiddenCount > 0 {
-                                Text("+\(g.hiddenCount) more")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .padding(10)
-                    .background(.thinMaterial.opacity(0.18))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
-            }
-        )
-    }
-}
-
-private enum TagGrouper {
-    struct Group: Identifiable {
-        var id: String { key }
-        let key: String
-        let title: String
-        let tags: [String]
-        let displayLimit: Int
-
-        var displayTags: [String] { Array(tags.prefix(displayLimit)) }
-        var hiddenCount: Int { max(0, tags.count - displayLimit) }
-    }
-
-    static func grouped(tags: String?, perGroupLimit: Int = 14) -> [Group] {
-        let raw = TagParsing.tokens(tags)
-
-        if raw.isEmpty { return [] }
-
-        var buckets: [String: [String]] = [:]
-        for t in raw {
-            let parts = t.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
-            if parts.count == 2 {
-                let key = String(parts[0]).lowercased()
-                let value = String(parts[1])
-                buckets[key, default: []].append(value)
-            } else {
-                buckets["other", default: []].append(t)
-            }
-        }
-
-        func titleFor(_ key: String) -> String {
-            switch key {
-            case "language": return "Language"
-            case "artist": return "Artist"
-            case "female": return "Female"
-            case "male": return "Male"
-            case "parody": return "Parody"
-            case "character": return "Character"
-            case "group": return "Group"
-            case "tag": return "Tags"
-            case "uploader": return "Uploader"
-            case "other": return "Other"
-            default:
-                return key.prefix(1).uppercased() + key.dropFirst()
-            }
-        }
-
-        let priority: [String] = ["language", "artist", "parody", "character", "group", "female", "male", "tag", "other"]
-
-        var groups: [Group] = []
-        groups.reserveCapacity(buckets.count)
-
-        for (k, v) in buckets {
-            let uniq = Array(Set(v)).sorted()
-            groups.append(.init(key: k, title: titleFor(k), tags: uniq, displayLimit: perGroupLimit))
-        }
-
-        groups.sort { a, b in
-            let ia = priority.firstIndex(of: a.key) ?? Int.max
-            let ib = priority.firstIndex(of: b.key) ?? Int.max
-            if ia != ib { return ia < ib }
-            if a.tags.count != b.tags.count { return a.tags.count > b.tags.count }
-            return a.title < b.title
-        }
-
-        return groups
-    }
-}
-
 private struct ArchiveSideHeader: View {
     let profile: Profile
     let arcid: String
@@ -1278,7 +1168,7 @@ private struct SyncedPagesGridView: View {
         isSettingCoverA: Bool,
         isSettingCoverB: Bool,
         onSetCoverFromPage: @escaping (String, Int) async -> Void,
-        scrollMinY: Binding<CGFloat> = .constant(0)
+        scrollMinY: Binding<CGFloat>
     ) {
         self.profile = profile
         self.arcidA = arcidA

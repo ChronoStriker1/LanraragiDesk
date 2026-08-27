@@ -6,7 +6,6 @@ struct BatchQueryCondition: Codable, Identifiable, Equatable {
     var namespace: String = ""
     var value: String = ""
     var categoryID: String = ""
-    var categoryName: String = ""
 
     enum ConditionType: String, Codable, CaseIterable {
         case tagPresent
@@ -52,7 +51,6 @@ struct SavedBatchQuery: Codable, Identifiable, Equatable {
     var name: String
     var profileID: UUID
     var conditions: [BatchQueryCondition]
-    var createdAt: Date = Date()
 }
 
 enum BatchQueryCompiler {
