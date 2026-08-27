@@ -5,8 +5,19 @@ final class ActivityStore: ObservableObject {
     @Published private(set) var events: [ActivityEvent] = []
 
     private let maxEvents = 2000
+    private let fileURL: URL
+    private let persistence: ActivityLogPersistence
+    private var revision: UInt64 = 0
 
-    init() {
+    init(
+        fileURL: URL = AppPaths.activityLogURL(),
+        debounceDelay: Duration = .seconds(1)
+    ) {
+        self.fileURL = fileURL
+        self.persistence = ActivityLogPersistence(
+            fileURL: fileURL,
+            debounceDelay: debounceDelay
+        )
         load()
     }
 
@@ -15,17 +26,32 @@ final class ActivityStore: ObservableObject {
         if events.count > maxEvents {
             events.removeLast(events.count - maxEvents)
         }
-        save()
+        revision &+= 1
+        scheduleSave()
     }
 
-    func clear() {
+    func clear() async {
         events = []
-        save()
+        revision &+= 1
+        await flush()
+    }
+
+    func flush() async {
+        let snapshot = events
+        let snapshotRevision = revision
+        do {
+            try await persistence.flush(events: snapshot, revision: snapshotRevision)
+        } catch {
+            logPersistenceError(error)
+        }
+    }
+
+    func flushForTermination() {
+        persistence.flushSynchronously(events: events, revision: revision)
     }
 
     private func load() {
-        let url = AppPaths.activityLogURL()
-        guard let data = try? Data(contentsOf: url) else {
+        guard let data = try? Data(contentsOf: fileURL) else {
             events = []
             return
         }
@@ -36,14 +62,20 @@ final class ActivityStore: ObservableObject {
         }
     }
 
-    private func save() {
-        let url = AppPaths.activityLogURL()
-        do {
-            let data = try JSONEncoder().encode(events)
-            try data.write(to: url, options: [.atomic])
-        } catch {
-            // Best-effort; the Activity view is not critical-path.
+    private func scheduleSave() {
+        let snapshot = events
+        let snapshotRevision = revision
+        Task { [persistence] in
+            await persistence.schedule(events: snapshot, revision: snapshotRevision)
         }
+    }
+
+    private func logPersistenceError(_ error: Error) {
+        NSLog(
+            "ActivityStore: failed to persist activity log at %@: %@",
+            fileURL.path,
+            String(describing: error)
+        )
     }
 
     private func enriched(_ event: ActivityEvent) -> ActivityEvent {

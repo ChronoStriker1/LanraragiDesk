@@ -62,8 +62,8 @@ private struct ConnectionStatusPill: View {
                 pill(text: "OK\(info.version.map { " • v\($0)" } ?? "")", color: .green)
             case .unauthorized:
                 pill(text: "Unauthorized", color: .orange)
-            case .failed:
-                pill(text: "Failed", color: .red)
+            case .failed(let message):
+                pill(text: message, color: .red)
             }
         }
         .font(.caption)
@@ -77,4 +77,3 @@ private struct ConnectionStatusPill: View {
             .clipShape(Capsule())
     }
 }
-
