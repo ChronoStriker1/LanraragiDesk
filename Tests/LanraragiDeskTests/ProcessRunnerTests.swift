@@ -79,6 +79,19 @@ final class ProcessRunnerTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(start), 5)
     }
 
+    func testImmediateSuccessfulExitWinsOverUnreadInputFailure() async throws {
+        let input = String(repeating: "x", count: 4 * 1_024 * 1_024)
+
+        let result = try await ProcessRunner.run(
+            executableURL: URL(fileURLWithPath: "/usr/bin/true"),
+            arguments: [],
+            stdin: input,
+            timeout: 2
+        )
+
+        XCTAssertEqual(result.terminationStatus, 0)
+    }
+
     func testInputWriteFailureStopsLongRunningChildPromptly() async throws {
         let input = String(repeating: "x", count: 4 * 1_024 * 1_024)
         let start = Date()

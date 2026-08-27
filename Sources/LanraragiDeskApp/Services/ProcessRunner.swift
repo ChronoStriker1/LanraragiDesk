@@ -185,7 +185,6 @@ struct ProcessRunner {
                         return try await terminationTask.value
                     }
                     await terminateIfNeeded(process)
-                    try? stdinPipe?.fileHandleForWriting.close()
                     throw error
                 }
                 if let stdinTask {
@@ -193,6 +192,16 @@ struct ProcessRunner {
                         do {
                             try await stdinTask.value
                         } catch {
+                            // A fast successful child can close its read end before
+                            // Foundation publishes termination. Give that callback a
+                            // brief chance to claim the result before treating EPIPE
+                            // as an independent failure from a still-running child.
+                            if process.isRunning {
+                                try? await Task.sleep(nanoseconds: 50_000_000)
+                            }
+                            guard process.isRunning else {
+                                return try await terminationTask.value
+                            }
                             guard completionBox.resume(throwing: error) else {
                                 return try await terminationTask.value
                             }
@@ -218,7 +227,6 @@ struct ProcessRunner {
             let stderr = String(decoding: try await stderrTask.value, as: UTF8.self)
             return .init(terminationStatus: status, stdout: stdout, stderr: stderr)
         } catch {
-            try? stdinPipe?.fileHandleForWriting.close()
             _ = try? await stdinTask?.value
             _ = try? await stdoutTask.value
             _ = try? await stderrTask.value
@@ -244,7 +252,7 @@ struct ProcessRunner {
             DispatchQueue.global(qos: .utility).async {
                 do {
                     let data = try handle.readToEnd() ?? Data()
-                    try handle.close()
+                    try? handle.close()
                     continuation.resume(returning: data)
                 } catch {
                     try? handle.close()
@@ -258,8 +266,12 @@ struct ProcessRunner {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
                 do {
+                    let descriptor = handle.fileDescriptor
+                    guard Darwin.fcntl(descriptor, F_SETNOSIGPIPE, 1) != -1 else {
+                        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                    }
                     try handle.write(contentsOf: data)
-                    try handle.close()
+                    try? handle.close()
                     continuation.resume()
                 } catch {
                     try? handle.close()
