@@ -76,12 +76,15 @@ struct ProcessRunner {
 
     enum RunnerError: LocalizedError {
         case launchFailed(String)
+        case inputWriteFailed(String)
         case timedOut(String)
 
         var errorDescription: String? {
             switch self {
             case .launchFailed(let description):
                 "Failed to launch process: \(description)"
+            case .inputWriteFailed(let description):
+                "Failed to write process input: \(description)"
             case .timedOut(let description):
                 "\(description) timed out."
             }
@@ -99,7 +102,7 @@ struct ProcessRunner {
         let process = Process()
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
-        let stdinPipe = Pipe()
+        let stdinPipe = stdin == nil ? nil : Pipe()
         let completionBox = CompletionBox()
 
         process.executableURL = executableURL
@@ -109,7 +112,7 @@ struct ProcessRunner {
         }
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
-        if stdin != nil {
+        if let stdinPipe {
             process.standardInput = stdinPipe
         }
         if let currentDirectoryURL {
@@ -119,30 +122,51 @@ struct ProcessRunner {
             completionBox.resume(returning: process.terminationStatus)
         }
 
-        let stdoutTask = Task.detached(priority: nil) {
-            stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        do {
+            try process.run()
+        } catch {
+            closeAfterLaunchFailure(
+                stdoutPipe: stdoutPipe,
+                stderrPipe: stderrPipe,
+                stdinPipe: stdinPipe
+            )
+            throw RunnerError.launchFailed(error.localizedDescription)
         }
-        let stderrTask = Task.detached(priority: nil) {
-            stderrPipe.fileHandleForReading.readDataToEndOfFile()
+
+        // The child owns duplicated descriptors after launch. Closing the parent's
+        // unused ends is what lets readers and a blocked stdin writer observe EOF.
+        try? stdoutPipe.fileHandleForWriting.close()
+        try? stderrPipe.fileHandleForWriting.close()
+        try? stdinPipe?.fileHandleForReading.close()
+
+        let stdoutTask = Task {
+            try await readToEndOffCooperativeExecutor(stdoutPipe.fileHandleForReading)
+        }
+        let stderrTask = Task {
+            try await readToEndOffCooperativeExecutor(stderrPipe.fileHandleForReading)
+        }
+        let stdinTask: Task<Void, Error>? = if
+            let stdinPipe,
+            let stdin
+        {
+            let inputData = Data(stdin.utf8)
+            Task {
+                do {
+                    try await writeOffCooperativeExecutor(
+                        inputData,
+                        to: stdinPipe.fileHandleForWriting
+                    )
+                } catch {
+                    throw RunnerError.inputWriteFailed(error.localizedDescription)
+                }
+            }
+        } else {
+            nil
         }
         let terminationTask = Task<Int32, Error> {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Int32, Error>) in
                 completionBox.store(continuation)
             }
-        }
-
-        do {
-            try process.run()
-        } catch {
-            completionBox.resume(throwing: error)
-            throw RunnerError.launchFailed(error.localizedDescription)
-        }
-
-        if let stdin {
-            if let data = stdin.data(using: .utf8) {
-                stdinPipe.fileHandleForWriting.write(data)
-            }
-            try? stdinPipe.fileHandleForWriting.close()
         }
 
         do {
@@ -152,9 +176,10 @@ struct ProcessRunner {
                 }
                 group.addTask {
                     try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                    await terminateIfNeeded(process)
                     let error = RunnerError.timedOut(executableURL.lastPathComponent)
                     completionBox.resume(throwing: error)
+                    await terminateIfNeeded(process)
+                    try? stdinPipe?.fileHandleForWriting.close()
                     throw error
                 }
                 let result = try await group.next()
@@ -163,13 +188,59 @@ struct ProcessRunner {
                 return result ?? process.terminationStatus
             }
 
-            let stdout = String(decoding: await stdoutTask.value, as: UTF8.self)
-            let stderr = String(decoding: await stderrTask.value, as: UTF8.self)
+            try await stdinTask?.value
+            let stdout = String(decoding: try await stdoutTask.value, as: UTF8.self)
+            let stderr = String(decoding: try await stderrTask.value, as: UTF8.self)
             return .init(terminationStatus: status, stdout: stdout, stderr: stderr)
         } catch {
-            let _ = await stdoutTask.value
-            let _ = await stderrTask.value
+            try? stdinPipe?.fileHandleForWriting.close()
+            _ = try? await stdinTask?.value
+            _ = try? await stdoutTask.value
+            _ = try? await stderrTask.value
             throw error
+        }
+    }
+
+    private static func closeAfterLaunchFailure(
+        stdoutPipe: Pipe,
+        stderrPipe: Pipe,
+        stdinPipe: Pipe?
+    ) {
+        try? stdoutPipe.fileHandleForWriting.close()
+        try? stdoutPipe.fileHandleForReading.close()
+        try? stderrPipe.fileHandleForWriting.close()
+        try? stderrPipe.fileHandleForReading.close()
+        try? stdinPipe?.fileHandleForWriting.close()
+        try? stdinPipe?.fileHandleForReading.close()
+    }
+
+    private static func readToEndOffCooperativeExecutor(_ handle: FileHandle) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                do {
+                    let data = try handle.readToEnd() ?? Data()
+                    try handle.close()
+                    continuation.resume(returning: data)
+                } catch {
+                    try? handle.close()
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    private static func writeOffCooperativeExecutor(_ data: Data, to handle: FileHandle) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                do {
+                    try handle.write(contentsOf: data)
+                    try handle.close()
+                    continuation.resume()
+                } catch {
+                    try? handle.close()
+                    continuation.resume(throwing: error)
+                }
+            }
         }
     }
 
