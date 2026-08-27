@@ -1,7 +1,7 @@
 import Foundation
 
-struct ActivityEvent: Identifiable, Codable, Equatable {
-    enum Kind: String, Codable {
+struct ActivityEvent: Identifiable, Codable, Equatable, Sendable {
+    enum Kind: String, Codable, Sendable {
         case info
         case warning
         case error

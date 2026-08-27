@@ -95,7 +95,9 @@ struct ActivityView: View {
                 .disabled(filteredEvents.isEmpty)
 
                 Button("Clear", role: .destructive) {
-                    appModel.activity.clear()
+                    Task {
+                        await appModel.activity.clear()
+                    }
                 }
             }
 
