@@ -121,7 +121,10 @@ final class EnglishTitlesOnlyViewModel: ObservableObject {
     }
 
     func startDryRun(profile: Profile) {
-        guard !isBusy else { return }
+        guard !isBusy else {
+            reportRunAlreadyActive()
+            return
+        }
 
         let translationConfig: TitleTranslationConfig
         switch selectedProvider {
@@ -185,7 +188,10 @@ final class EnglishTitlesOnlyViewModel: ObservableObject {
     }
 
     func startApply(profile: Profile, archives: ArchiveLoader, mode: ApplyMode) {
-        guard !isBusy else { return }
+        guard !isBusy else {
+            reportRunAlreadyActive()
+            return
+        }
         guard let plan else {
             statusText = "Run dry-run first."
             return
@@ -245,9 +251,20 @@ final class EnglishTitlesOnlyViewModel: ObservableObject {
     }
 
     private func beginRun() -> EnglishTitlesRunOwnership.Run? {
-        guard let run = runOwnership.begin() else { return nil }
+        guard let run = runOwnership.begin() else {
+            reportRunAlreadyActive()
+            return nil
+        }
         isBusy = true
         return run
+    }
+
+    private func reportRunAlreadyActive() {
+        let message = runOwnership.isCancellationRequested
+            ? "Cancellation is still finishing. Please wait."
+            : "A title operation is already running."
+        statusText = message
+        appendLog(message)
     }
 
     private func finishRun(_ run: EnglishTitlesRunOwnership.Run) {

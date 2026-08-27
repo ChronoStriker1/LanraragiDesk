@@ -8,10 +8,6 @@ struct EnglishTitlesRunOwnership {
     private(set) var activeRun: Run?
     private(set) var isCancellationRequested = false
 
-    var isBusy: Bool {
-        activeRun != nil
-    }
-
     mutating func begin(id: UUID = UUID()) -> Run? {
         guard activeRun == nil else { return nil }
 

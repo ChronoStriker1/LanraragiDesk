@@ -9,13 +9,13 @@ final class EnglishTitlesRunOwnershipTests: XCTestCase {
         let first = try XCTUnwrap(ownership.begin(id: firstID))
 
         XCTAssertTrue(ownership.requestCancellation(of: first))
-        XCTAssertTrue(ownership.isBusy)
+        XCTAssertNotNil(ownership.activeRun)
         XCTAssertTrue(ownership.owns(first))
         XCTAssertFalse(ownership.acceptsUpdates(from: first))
         XCTAssertNil(ownership.begin(id: UUID()))
 
         XCTAssertTrue(ownership.finish(first))
-        XCTAssertFalse(ownership.isBusy)
+        XCTAssertNil(ownership.activeRun)
         XCTAssertFalse(ownership.isCancellationRequested)
         XCTAssertNotNil(ownership.begin(id: UUID()))
     }
@@ -28,7 +28,7 @@ final class EnglishTitlesRunOwnershipTests: XCTestCase {
         let second = try XCTUnwrap(ownership.begin(id: UUID()))
 
         XCTAssertFalse(ownership.finish(first))
-        XCTAssertTrue(ownership.isBusy)
+        XCTAssertNotNil(ownership.activeRun)
         XCTAssertTrue(ownership.owns(second))
         XCTAssertTrue(ownership.acceptsUpdates(from: second))
     }
