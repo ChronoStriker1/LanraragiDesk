@@ -2,6 +2,8 @@ import Foundation
 import SQLite3
 
 public final class IndexStore: @unchecked Sendable {
+    private static let center75PruneSchemaVersion: Int32 = 1
+
     public struct ScanFingerprint: Sendable, Hashable {
         public var arcid: String
         public var checksumSHA256: Data
@@ -228,13 +230,16 @@ public final class IndexStore: @unchecked Sendable {
     /// Upserts all fingerprint records for one archive inside a single transaction,
     /// instead of committing (and fsyncing) once per record.
     public func upsertFingerprints(_ fps: [FingerprintRecord]) throws {
-        guard !fps.isEmpty else { return }
+        // Keep accepting the public enum case for source compatibility, but do not
+        // reintroduce the deprecated, unconsumed crop into the index.
+        let supportedFingerprints = fps.filter { $0.crop != .center75 }
+        guard !supportedFingerprints.isEmpty else { return }
         try queue.sync {
             guard let db, let stmtUpsertFingerprint else { throw IndexStoreError.notOpen }
 
             try Self.exec(db, "BEGIN IMMEDIATE TRANSACTION;")
             do {
-                for fp in fps {
+                for fp in supportedFingerprints {
                     sqlite3_reset(stmtUpsertFingerprint)
                     sqlite3_clear_bindings(stmtUpsertFingerprint)
 
@@ -595,6 +600,36 @@ public final class IndexStore: @unchecked Sendable {
         // We keep checksums in the fingerprints table for compatibility, but we do not index them:
         // most rows store an empty BLOB to keep storage down, and checksum grouping is done in-memory.
         try exec(db, "DROP INDEX IF EXISTS idx_fingerprints_profile_checksum;")
+
+        try pruneDeprecatedCenter75FingerprintsIfNeeded(db: db)
+    }
+
+    /// Version 1 stops persisting the unused center75 crop. The enum case remains public so
+    /// existing clients can still decode or construct legacy values, while the migration only
+    /// removes rows whose crop is explicitly center75 and leaves all other index data intact.
+    private static func pruneDeprecatedCenter75FingerprintsIfNeeded(db: OpaquePointer) throws {
+        guard try userVersion(db) < center75PruneSchemaVersion else { return }
+
+        try exec(db, "BEGIN IMMEDIATE TRANSACTION;")
+        do {
+            try exec(db, "DELETE FROM fingerprints WHERE crop = \(FingerprintCrop.center75.rawValue);")
+            try exec(db, "PRAGMA user_version = \(center75PruneSchemaVersion);")
+            try exec(db, "COMMIT;")
+        } catch {
+            try? exec(db, "ROLLBACK;")
+            throw error
+        }
+    }
+
+    private static func userVersion(_ db: OpaquePointer) throws -> Int32 {
+        let stmt = try prepare(db, sql: "PRAGMA user_version;")
+        defer { sqlite3_finalize(stmt) }
+
+        let rc = sqlite3_step(stmt)
+        guard rc == SQLITE_ROW else {
+            throw IndexStoreError.sqlite(rc: rc, message: errorMessage(db))
+        }
+        return sqlite3_column_int(stmt, 0)
     }
 
     private static func exec(_ db: OpaquePointer, _ sql: String) throws {

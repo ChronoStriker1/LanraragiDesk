@@ -43,7 +43,6 @@ public enum Fingerprinter {
         let crops: [(FingerprintCrop, vImage_Buffer)] = [
             (.full, argb),
             (.center90, centerCrop(argb, scale: 0.90)),
-            (.center75, centerCrop(argb, scale: 0.75)),
         ]
 
         var out: [(FingerprintKind, FingerprintCrop, UInt64)] = []
