@@ -440,7 +440,7 @@ public final class IndexStore: @unchecked Sendable {
             let pair = NotDuplicatePair(arcidA: arcidA, arcidB: arcidB)
             let timestamp = createdAt ?? Int64(Date().timeIntervalSince1970 * 1000)
 
-            try Self.exec(db, "BEGIN IMMEDIATE TRANSACTION;")
+            try Self.exec(db, "BEGIN TRANSACTION;")
             do {
                 try bindText(stmtInsertNotDuplicate, index: 1, value: profileID.uuidString)
                 try bindText(stmtInsertNotDuplicate, index: 2, value: pair.arcidA)
@@ -457,7 +457,7 @@ public final class IndexStore: @unchecked Sendable {
                     if rc == SQLITE_DONE {
                         throw IndexStoreError.sqlite(
                             rc: rc,
-                            message: "Inserted Not a match pair could not be read back"
+                            message: "Inserted Not a match pair \(pair.arcidA) • \(pair.arcidB) could not be read back"
                         )
                     }
                     throw IndexStoreError.sqlite(rc: rc, message: Self.errorMessage(db))
