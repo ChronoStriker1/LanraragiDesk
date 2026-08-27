@@ -44,6 +44,7 @@ extension BatchView {
             interrupted: false,
             okCount: 0,
             failCount: 0,
+            indeterminateCount: 0,
             lastRunStatus: "Running plugin on \(arcids.count) archives…",
             lastCurrentArchive: nil,
             lastLiveEvents: [],
@@ -66,7 +67,10 @@ extension BatchView {
         pluginID: String,
         arcids: [String],
         startIndex: Int,
-        resumed: Bool
+        resumed: Bool,
+        initialOK: Int = 0,
+        initialFail: Int = 0,
+        initialIndeterminate: Int = 0
     ) {
         let delaySeconds = sanitizedDelaySeconds(from: pluginDelayText)
 
@@ -91,9 +95,9 @@ extension BatchView {
 
         pluginTask?.cancel()
         pluginTask = Task {
-            var ok = 0
-            var fail = 0
-            var indeterminate = 0
+            var ok = initialOK
+            var fail = initialFail
+            var indeterminate = initialIndeterminate
             for index in startIndex..<arcids.count {
                 let arcid = arcids[index]
                 if await MainActor.run(body: { pluginCancelRequested || pluginPauseRequested }) { break }
@@ -102,7 +106,14 @@ extension BatchView {
                     appendPluginLiveEvent("Processing \(displayName(for: arcid))")
                 }
 
-                persistPluginCheckpointIndexAndUI(pluginID: pluginID, nextIndex: index, ok: ok, fail: fail, total: arcids.count)
+                persistPluginCheckpointIndexAndUI(
+                    pluginID: pluginID,
+                    nextIndex: index,
+                    ok: ok,
+                    fail: fail,
+                    indeterminate: indeterminate,
+                    total: arcids.count
+                )
 
                 do {
                     let prePluginMeta = try? await appModel.archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
@@ -222,18 +233,26 @@ extension BatchView {
                 await MainActor.run {
                     pluginRunStatus = "Processed \(index + 1)/\(arcids.count) • Success \(ok) • Failed \(fail) • Indeterminate \(indeterminate)…"
                 }
-                persistPluginCheckpointIndexAndUI(pluginID: pluginID, nextIndex: index, ok: ok, fail: fail, total: arcids.count)
+                persistPluginCheckpointIndexAndUI(
+                    pluginID: pluginID,
+                    nextIndex: index + 1,
+                    ok: ok,
+                    fail: fail,
+                    indeterminate: indeterminate,
+                    total: arcids.count
+                )
 
                 if await MainActor.run(body: { pluginPauseRequested }) {
                     if let existing = loadPluginBatchCheckpoint() {
                         var updated = existing
-                        // Redo the last touched archive on resume.
-                        updated.nextIndex = max(0, index)
+                        // The current archive completed before the pause took effect.
+                        updated.nextIndex = min(index + 1, arcids.count)
                         updated.paused = true
                         updated.inProgress = true
                         updated.interrupted = false
                         updated.okCount = ok
                         updated.failCount = fail
+                        updated.indeterminateCount = indeterminate
                         updated.lastRunStatus = pluginRunStatus
                         updated.lastCurrentArchive = pluginCurrentArchive
                         updated.lastLiveEvents = trimmedCheckpointEvents(pluginLiveEvents)
@@ -284,7 +303,8 @@ extension BatchView {
                     paused: true,
                     interrupted: false,
                     ok: ok,
-                    fail: fail
+                    fail: fail,
+                    indeterminate: indeterminate
                 )
                 await MainActor.run {
                     refreshResumablePluginBatch()
@@ -296,7 +316,8 @@ extension BatchView {
                     paused: false,
                     interrupted: false,
                     ok: ok,
-                    fail: fail
+                    fail: fail,
+                    indeterminate: indeterminate
                 )
                 clearPluginBatchCheckpoint()
                 await MainActor.run {
@@ -310,7 +331,8 @@ extension BatchView {
                     paused: false,
                     interrupted: false,
                     ok: ok,
-                    fail: fail
+                    fail: fail,
+                    indeterminate: indeterminate
                 )
                 clearPluginBatchCheckpoint()
                 await MainActor.run {
@@ -330,7 +352,8 @@ extension BatchView {
             paused: false,
             interrupted: false,
             ok: nil,
-            fail: nil
+            fail: nil,
+            indeterminate: nil
         )
         appModel.activity.add(.init(kind: .warning, title: "Plugin batch cancel requested"))
     }
@@ -345,7 +368,8 @@ extension BatchView {
             paused: false,
             interrupted: false,
             ok: nil,
-            fail: nil
+            fail: nil,
+            indeterminate: nil
         )
         appModel.activity.add(.init(kind: .warning, title: "Plugin batch pause requested"))
     }
@@ -371,13 +395,16 @@ extension BatchView {
         }
         restorePluginUIFromCheckpointIfNeeded(checkpoint)
 
-        let startIndex = min(max(0, checkpoint.nextIndex), max(0, checkpoint.arcids.count - 1))
+        let startIndex = min(max(0, checkpoint.nextIndex), checkpoint.arcids.count)
         startPluginBatch(
             profile: profile,
             pluginID: checkpoint.selectedPluginID,
             arcids: checkpoint.arcids,
             startIndex: startIndex,
-            resumed: true
+            resumed: true,
+            initialOK: checkpoint.okCount ?? 0,
+            initialFail: checkpoint.failCount ?? 0,
+            initialIndeterminate: checkpoint.indeterminateCount ?? 0
         )
     }
 
@@ -397,7 +424,14 @@ extension BatchView {
             resumablePluginBatch = nil
         }
     }
-    func persistPluginCheckpointIndexAndUI(pluginID: String, nextIndex: Int, ok: Int, fail: Int, total: Int) {
+    func persistPluginCheckpointIndexAndUI(
+        pluginID: String,
+        nextIndex: Int,
+        ok: Int,
+        fail: Int,
+        indeterminate: Int,
+        total: Int
+    ) {
         guard let existing = loadPluginBatchCheckpoint() else { return }
         var updated = existing
         updated.nextIndex = nextIndex
@@ -406,6 +440,7 @@ extension BatchView {
         updated.interrupted = false
         updated.okCount = ok
         updated.failCount = fail
+        updated.indeterminateCount = indeterminate
         updated.lastRunStatus = pluginRunStatus
         updated.lastCurrentArchive = pluginCurrentArchive
         updated.lastLiveEvents = trimmedCheckpointEvents(pluginLiveEvents)
@@ -413,7 +448,15 @@ extension BatchView {
         savePluginBatchCheckpoint(updated)
     }
 
-    func persistPluginCheckpointUI(pluginID: String, inProgress: Bool, paused: Bool, interrupted: Bool, ok: Int?, fail: Int?) {
+    func persistPluginCheckpointUI(
+        pluginID: String,
+        inProgress: Bool,
+        paused: Bool,
+        interrupted: Bool,
+        ok: Int?,
+        fail: Int?,
+        indeterminate: Int?
+    ) {
         guard let existing = loadPluginBatchCheckpoint() else { return }
         var updated = existing
         updated.inProgress = inProgress
@@ -421,6 +464,7 @@ extension BatchView {
         updated.interrupted = interrupted
         if let ok { updated.okCount = ok }
         if let fail { updated.failCount = fail }
+        if let indeterminate { updated.indeterminateCount = indeterminate }
         updated.lastRunStatus = pluginRunStatus
         updated.lastCurrentArchive = pluginCurrentArchive
         updated.lastLiveEvents = trimmedCheckpointEvents(pluginLiveEvents)
