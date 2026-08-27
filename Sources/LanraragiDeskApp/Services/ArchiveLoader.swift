@@ -42,6 +42,12 @@ struct ArchiveLoaderInFlightRegistry<Key: Hashable, Value: Sendable> {
     }
 }
 
+struct ArchiveLoaderFetchOverrides: Sendable {
+    let metadata: @Sendable (String) async throws -> ArchiveMetadata
+    let archiveFiles: @Sendable (String, Bool) async throws -> ArchiveFilesResponse
+    let absoluteURL: @Sendable (String) throws -> URL
+}
+
 actor ArchiveLoader {
     enum ArchiveLoaderError: Error {
         case missingAPIKey
@@ -62,8 +68,10 @@ actor ArchiveLoader {
     private var bytesInflight = ArchiveLoaderInFlightRegistry<String, Data>()
 
     private let maxCachedBytes = 8 * 1024 * 1024
+    private let fetchOverrides: ArchiveLoaderFetchOverrides?
 
-    init() {
+    init(fetchOverrides: ArchiveLoaderFetchOverrides? = nil) {
+        self.fetchOverrides = fetchOverrides
         bytesCache.totalCostLimit = 512 * 1024 * 1024 // ~512MB
     }
 
@@ -75,9 +83,14 @@ actor ArchiveLoader {
             }
         }
 
-        let client = try makeClient(profile: profile)
-        let task = Task<ArchiveMetadata, Error> {
-            try await limiter.withPermit {
+        let fetchMetadata: @Sendable () async throws -> ArchiveMetadata
+        if let metadataOverride = fetchOverrides?.metadata {
+            fetchMetadata = {
+                try await metadataOverride(arcid)
+            }
+        } else {
+            let client = try makeClient(profile: profile)
+            fetchMetadata = {
                 // Tankoubons have no /api/archives metadata; synthesize it from the tank object.
                 if LANraragiID.isTankoubon(arcid) {
                     let tank = try await client.getTankoubon(id: arcid)
@@ -93,10 +106,16 @@ actor ArchiveLoader {
                 return try await client.getArchiveMetadata(arcid: arcid)
             }
         }
+        let task = Task<ArchiveMetadata, Error> {
+            try await limiter.withPermit {
+                try await fetchMetadata()
+            }
+        }
 
         // A forced refresh replaces the shared slot without cancelling the old
         // operation. Existing waiters can still receive its result, but only the
-        // replacement is allowed to publish into the cache.
+        // replacement is allowed to publish into the cache. The last known-good
+        // cached value remains available until that replacement succeeds.
         let operation = metaInflight.insert(task, for: arcid)
 
         do {
@@ -188,27 +207,42 @@ actor ArchiveLoader {
             return try await operation.task.value
         }
 
-        let client = try makeClient(profile: profile)
+        let fetchArchiveFiles: @Sendable (Bool) async throws -> ArchiveFilesResponse
+        let makeAbsoluteURL: @Sendable (String) throws -> URL
+        if let fetchOverrides {
+            fetchArchiveFiles = { force in
+                try await fetchOverrides.archiveFiles(arcid, force)
+            }
+            makeAbsoluteURL = fetchOverrides.absoluteURL
+        } else {
+            let client = try makeClient(profile: profile)
+            fetchArchiveFiles = { force in
+                try await client.getArchiveFiles(arcid: arcid, force: force)
+            }
+            makeAbsoluteURL = { rawURL in
+                try client.makeAbsoluteURL(from: rawURL)
+            }
+        }
         let task = Task<[URL], Error> {
             try await limiter.withPermit {
                 let resp: ArchiveFilesResponse
                 do {
-                    let initial = try await client.getArchiveFiles(arcid: arcid, force: false)
+                    let initial = try await fetchArchiveFiles(false)
                     if initial.pages.count <= 1 {
                         // Some servers return only the first extracted page unless forced.
-                        let forced = try await client.getArchiveFiles(arcid: arcid, force: true)
+                        let forced = try await fetchArchiveFiles(true)
                         resp = forced.pages.count > initial.pages.count ? forced : initial
                     } else {
                         resp = initial
                     }
                 } catch let LANraragiError.httpStatus(code, _) where code == 400 {
                     // Some LANraragi setups return 400 unless file listing is forced (e.g. stale extraction state).
-                    resp = try await client.getArchiveFiles(arcid: arcid, force: true)
+                    resp = try await fetchArchiveFiles(true)
                 }
                 var out: [URL] = []
                 out.reserveCapacity(resp.pages.count)
                 for s in resp.pages {
-                    out.append(try client.makeAbsoluteURL(from: s))
+                    out.append(try makeAbsoluteURL(s))
                 }
                 return out
             }
