@@ -138,6 +138,9 @@ public enum DuplicateFinder {
         config: DuplicateScanConfig
     ) async throws -> DuplicateScanResult {
         let started = Date()
+        try Task.checkCancellation()
+        await Task.yield()
+        try Task.checkCancellation()
 
         if fingerprints.isEmpty {
             return DuplicateScanResult(
@@ -159,6 +162,10 @@ public enum DuplicateFinder {
         var arcidToIndex: [String: Int] = [:]
         arcidToIndex.reserveCapacity(n)
         for (i, fp) in fingerprints.enumerated() {
+            if i.isMultiple(of: 1_024) {
+                try Task.checkCancellation()
+                await Task.yield()
+            }
             arcidToIndex[fp.arcid] = i
         }
 
@@ -181,10 +188,19 @@ public enum DuplicateFinder {
             byChecksum.reserveCapacity(n / 2)
 
             for (i, fp) in fingerprints.enumerated() {
+                if i.isMultiple(of: 1_024) {
+                    try Task.checkCancellation()
+                    await Task.yield()
+                }
                 byChecksum[fp.checksumSHA256, default: []].append(i)
             }
 
-            for (_, idxs) in byChecksum {
+            for (groupIndex, element) in byChecksum.enumerated() {
+                if groupIndex.isMultiple(of: 128) {
+                    try Task.checkCancellation()
+                    await Task.yield()
+                }
+                let idxs = element.value
                 if idxs.count < 2 { continue }
                 let isLikelyFrequentPlaceholder = idxs.count >= config.exactFrequentMinCount &&
                     Double(idxs.count) / Double(max(1, n)) >= config.exactFrequentShareThreshold
@@ -222,6 +238,10 @@ public enum DuplicateFinder {
             buckets.reserveCapacity(n * 2)
 
             for (i, fp) in fingerprints.enumerated() {
+                if i.isMultiple(of: 1_024) {
+                    try Task.checkCancellation()
+                    await Task.yield()
+                }
                 let h = fp.dHashCenter90
                 for band in 0..<4 {
                     let key16 = UInt16((h >> (UInt64(band) * 16)) & 0xffff)
@@ -234,8 +254,12 @@ public enum DuplicateFinder {
             // Heuristic reserve: if most buckets are small, we won't store many edges.
             seenPairs.reserveCapacity(n * 2)
 
-            for (_, idxs) in buckets {
+            for (bucketIndex, element) in buckets.enumerated() {
                 try Task.checkCancellation()
+                if bucketIndex.isMultiple(of: 64) {
+                    await Task.yield()
+                }
+                let idxs = element.value
 
                 if idxs.count < 2 { continue }
                 if idxs.count > config.bucketMaxSize {
@@ -291,6 +315,10 @@ public enum DuplicateFinder {
         groupsByRoot.reserveCapacity(n / 8)
 
         for i in 0..<n {
+            if i.isMultiple(of: 1_024) {
+                try Task.checkCancellation()
+                await Task.yield()
+            }
             let r = dsu.find(i)
             groupsByRoot[r, default: []].append(fingerprints[i].arcid)
         }

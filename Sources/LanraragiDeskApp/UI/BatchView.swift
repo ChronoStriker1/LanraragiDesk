@@ -5,7 +5,7 @@ import LanraragiKit
 struct BatchView: View {
     @EnvironmentObject var appModel: AppModel
     @StateObject var pluginsVM = PluginsViewModel()
-    @StateObject var runState = BatchRunState.shared
+    @ObservedObject var runState = BatchRunState.shared
 
     @State var addTagsText: String = ""
     @State var removeTagsText: String = ""

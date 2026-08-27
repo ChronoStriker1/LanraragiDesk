@@ -78,6 +78,8 @@ actor TitleNormalizationRunService {
     private let maxConcurrentTranslationChunks = 4
     private let codexTranslationChunkSize = 40
     private let codexMaxConcurrentTranslationChunks = 1
+    private let maxRetainedRunFiles = 20
+    private let maxRunFileAge: TimeInterval = 30 * 24 * 60 * 60
 
     struct SnapshotEntry: Sendable {
         let arcid: String
@@ -724,7 +726,42 @@ actor TitleNormalizationRunService {
     private func makeRunFileURL() throws -> URL {
         let root = AppPaths.cacheDirectory().appendingPathComponent("TitleNormalizationRuns", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        pruneRunFiles(in: root, keepingNewest: max(0, maxRetainedRunFiles - 1))
         return root.appendingPathComponent("run-\(UUID().uuidString).jsonl")
+    }
+
+    private func pruneRunFiles(in directory: URL, keepingNewest: Int) {
+        let fileManager = FileManager.default
+        let resourceKeys: Set<URLResourceKey> = [.isRegularFileKey, .contentModificationDateKey]
+        guard let candidates = try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: Array(resourceKeys),
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        let now = Date()
+        let runFiles: [(url: URL, modifiedAt: Date)] = candidates.compactMap { url in
+            guard url.lastPathComponent.hasPrefix("run-"), url.pathExtension == "jsonl" else { return nil }
+            guard let values = try? url.resourceValues(forKeys: resourceKeys), values.isRegularFile == true else { return nil }
+            return (url, values.contentModificationDate ?? .distantPast)
+        }
+
+        var retained: [(url: URL, modifiedAt: Date)] = []
+        retained.reserveCapacity(runFiles.count)
+        for file in runFiles {
+            if now.timeIntervalSince(file.modifiedAt) > maxRunFileAge {
+                try? fileManager.removeItem(at: file.url)
+            } else {
+                retained.append(file)
+            }
+        }
+
+        let excess = max(0, retained.count - keepingNewest)
+        if excess > 0 {
+            for file in retained.sorted(by: { $0.modifiedAt < $1.modifiedAt }).prefix(excess) {
+                try? fileManager.removeItem(at: file.url)
+            }
+        }
     }
 
     private func loadSelectedPlanItems(in url: URL, onlyArcids: Set<String>?) throws -> [TitleNormalizationPlan.Item] {

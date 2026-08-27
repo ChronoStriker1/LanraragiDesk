@@ -54,15 +54,33 @@ final class DuplicateScanViewModel: ObservableObject {
 
     func start(profile: Profile, rebuildIndex: Bool = false) {
         guard task == nil else {
-            log(.warning, "Duplicate scan already running")
+            log(.warning, task?.isCancelled == true ? "Duplicate scan is still cancelling" : "Duplicate scan already running")
             return
         }
+
+        let capturedStrictness = strictness
+        let capturedIncludeExactChecksum = includeExactChecksum
+        let capturedIncludeApproximate = includeApproximate
+        let (dHashThreshold, aHashThreshold, bucketMaxSize): (Int, Int, Int) = {
+            switch capturedStrictness {
+            case .strict: return (4, 4, 48)
+            case .balanced: return (6, 6, 64)
+            case .loose: return (9, 9, 96)
+            }
+        }()
+        let scanConfig = DuplicateScanConfig(
+            includeExactChecksum: capturedIncludeExactChecksum,
+            includeApproximate: capturedIncludeApproximate,
+            dHashThreshold: dHashThreshold,
+            aHashThreshold: aHashThreshold,
+            bucketMaxSize: bucketMaxSize
+        )
 
         let rid = UUID()
         runID = rid
 
         let strictnessLabel: String = {
-            switch strictness {
+            switch capturedStrictness {
             case .strict: return "Strict"
             case .balanced: return "Balanced"
             case .loose: return "Loose"
@@ -72,7 +90,7 @@ final class DuplicateScanViewModel: ObservableObject {
         log(
             .action,
             "Duplicate scan started",
-            detail: "Mode: \(strictnessLabel) • Exact: \(includeExactChecksum ? "on" : "off") • Approx: \(includeApproximate ? "on" : "off")\(rebuildIndex ? " • Full index rebuild" : "")"
+            detail: "Mode: \(strictnessLabel) • Exact: \(capturedIncludeExactChecksum ? "on" : "off") • Approx: \(capturedIncludeApproximate ? "on" : "off")\(rebuildIndex ? " • Full index rebuild" : "")"
         )
 
         status = .running("Preparing…")
@@ -80,10 +98,11 @@ final class DuplicateScanViewModel: ObservableObject {
 
         task = Task {
             defer {
-                Task { @MainActor in
-                    if self.runID == rid {
-                        self.task = nil
-                        self.runID = nil
+                if self.runID == rid {
+                    self.task = nil
+                    self.runID = nil
+                    if Task.isCancelled, case .running = self.status {
+                        self.status = .idle
                     }
                 }
             }
@@ -126,7 +145,8 @@ final class DuplicateScanViewModel: ObservableObject {
                             guard let self, self.runID == rid else { return }
                             let total = max(1, p.total)
                             let processed = min(total, p.startOffset + p.seen)
-                            let text = "Indexing covers: \(processed)/\(total) (\(p.failed) failed)"
+                            let failureDetail = p.firstError.map { " • First: \($0)" } ?? ""
+                            let text = "Indexing covers: \(processed)/\(total) (\(p.failed) failed)\(failureDetail)"
                             self.status = .running(text)
                         }
                     }
@@ -140,26 +160,10 @@ final class DuplicateScanViewModel: ObservableObject {
 
                 status = .running("Scanning for duplicates…")
 
-                let (dHashThreshold, aHashThreshold, bucketMaxSize): (Int, Int, Int) = {
-                    switch strictness {
-                    case .strict: return (4, 4, 48)
-                    case .balanced: return (6, 6, 64)
-                    case .loose: return (9, 9, 96)
-                    }
-                }()
-
-                let cfg = DuplicateScanConfig(
-                    includeExactChecksum: includeExactChecksum,
-                    includeApproximate: includeApproximate,
-                    dHashThreshold: dHashThreshold,
-                    aHashThreshold: aHashThreshold,
-                    bucketMaxSize: bucketMaxSize
-                )
-
                 let res = try await DuplicateFinder.scan(
                     fingerprints: fps,
                     notDuplicates: notDup,
-                    config: cfg
+                    config: scanConfig
                 )
 
                 if Task.isCancelled { return }
@@ -214,10 +218,7 @@ final class DuplicateScanViewModel: ObservableObject {
 
     func clearNotDuplicateDecisions(profile: Profile) {
         let previousCount = notMatches.count
-        if previousCount > 0 {
-            notMatchUndoStack.append(.cleared(notMatches))
-            hasUndoableNotMatchChange = !notMatchUndoStack.isEmpty
-        }
+        let previousMatches = notMatches
         do {
             let store = try IndexStore(configuration: .init(url: AppPaths.indexDBURL()))
             try store.clearNotDuplicatePairs(profileID: profile.id)
@@ -225,6 +226,10 @@ final class DuplicateScanViewModel: ObservableObject {
             notMatchRefreshError = "Failed to clear exclusions: \(ErrorPresenter.short(error))"
             log(.error, "Failed to clear Not a match pairs", detail: String(describing: error))
             return
+        }
+        if previousCount > 0 {
+            notMatchUndoStack.append(.cleared(previousMatches))
+            hasUndoableNotMatchChange = !notMatchUndoStack.isEmpty
         }
         notMatches = []
         log(.action, "Cleared Not a match pairs", detail: "\(previousCount) pairs")
@@ -389,12 +394,11 @@ final class DuplicateScanViewModel: ObservableObject {
     }
 
     func cancel() {
-        let hadRunningTask = (task != nil)
-        task?.cancel()
-        task = nil
-        runID = nil
-        status = .idle
-        if hadRunningTask {
+        guard let task else { return }
+        let wasAlreadyCancelled = task.isCancelled
+        task.cancel()
+        status = .running("Cancelling…")
+        if !wasAlreadyCancelled {
             log(.warning, "Duplicate scan cancelled")
         }
     }

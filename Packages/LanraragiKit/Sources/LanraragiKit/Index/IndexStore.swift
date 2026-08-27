@@ -663,8 +663,13 @@ public final class IndexStore: @unchecked Sendable {
     }
 
     private func bindBlob(_ stmt: OpaquePointer, index: Int32, value: Data) throws {
-        let rc = value.withUnsafeBytes { buf in
-            sqlite3_bind_blob(stmt, index, buf.baseAddress, Int32(buf.count), sqliteTransientDestructor)
+        let rc: Int32
+        if value.isEmpty {
+            rc = sqlite3_bind_zeroblob(stmt, index, 0)
+        } else {
+            rc = value.withUnsafeBytes { buf in
+                sqlite3_bind_blob(stmt, index, buf.baseAddress, Int32(buf.count), sqliteTransientDestructor)
+            }
         }
         guard rc == SQLITE_OK else {
             throw IndexStoreError.sqlite(rc: rc, message: nil)

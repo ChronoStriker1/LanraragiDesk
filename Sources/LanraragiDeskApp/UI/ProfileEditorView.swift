@@ -10,6 +10,7 @@ struct ProfileEditorView: View {
     @State private var baseURLString: String = ""
     @State private var language: String = "en-US"
     @State private var apiKey: String = ""
+    @State private var shouldClearAPIKey: Bool = false
     @State private var saveError: String?
 
     init(mode: ProfileEditorMode) {
@@ -25,7 +26,29 @@ struct ProfileEditorView: View {
                 TextField("Base URL", text: $baseURLString)
                     .textContentType(.URL)
                 TextField("Language", text: $language)
-                SecureField("API Key (stored in Keychain)", text: $apiKey)
+                HStack {
+                    SecureField("New API Key (leave blank to keep stored key)", text: $apiKey)
+                        .disabled(shouldClearAPIKey)
+
+                    if case .edit = mode {
+                        if shouldClearAPIKey {
+                            Button("Keep Stored Key") {
+                                shouldClearAPIKey = false
+                            }
+                        } else {
+                            Button("Clear Stored Key", role: .destructive) {
+                                apiKey = ""
+                                shouldClearAPIKey = true
+                            }
+                        }
+                    }
+                }
+
+                if shouldClearAPIKey {
+                    Text("The stored API key will be removed when you save.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             if let saveError {
@@ -70,16 +93,19 @@ struct ProfileEditorView: View {
             baseURLString = "http://127.0.0.1:3000"
             language = "en-US"
             apiKey = ""
+            shouldClearAPIKey = false
         case .edit(let profile):
             name = profile.name
             baseURLString = profile.baseURL.absoluteString
             language = profile.language
             apiKey = "" // never prefill secrets
+            shouldClearAPIKey = false
         }
     }
 
     private func save() -> Bool {
         guard let url = normalizedBaseURL else { return false }
+        saveError = nil
 
         let profile: Profile
         switch mode {
@@ -96,24 +122,30 @@ struct ProfileEditorView: View {
 
         let keychainAccount = "apiKey.\(profile.id.uuidString)"
         var previousAPIKey: String?
-        if !apiKey.isEmpty {
+        let shouldChangeAPIKey = shouldClearAPIKey || !apiKey.isEmpty
+        if shouldChangeAPIKey {
             do {
                 previousAPIKey = try KeychainService.getString(account: keychainAccount)
-                try KeychainService.setString(apiKey, account: keychainAccount)
+                if shouldClearAPIKey {
+                    try KeychainService.delete(account: keychainAccount)
+                } else {
+                    try KeychainService.setString(apiKey, account: keychainAccount)
+                }
             } catch {
-                saveError = "Could not save the API key to the Keychain (\(error)). Profile not saved."
+                let action = shouldClearAPIKey ? "clear" : "save"
+                saveError = "Could not \(action) the API key in the Keychain (\(error)). Profile not saved."
                 return false
             }
         }
 
         do {
             if case .rejectedMismatchedID = try appModel.profileStore.upsert(profile) {
-                restoreAPIKey(previousAPIKey, account: keychainAccount)
+                restoreAPIKey(previousAPIKey, account: keychainAccount, ifChanged: shouldChangeAPIKey)
                 saveError = "Another profile already exists. Profile not saved."
                 return false
             }
         } catch {
-            restoreAPIKey(previousAPIKey, account: keychainAccount)
+            restoreAPIKey(previousAPIKey, account: keychainAccount, ifChanged: shouldChangeAPIKey)
             saveError = "Could not save the profile (\(error))."
             return false
         }
@@ -124,8 +156,8 @@ struct ProfileEditorView: View {
         return true
     }
 
-    private func restoreAPIKey(_ previousAPIKey: String?, account: String) {
-        guard !apiKey.isEmpty else { return }
+    private func restoreAPIKey(_ previousAPIKey: String?, account: String, ifChanged: Bool) {
+        guard ifChanged else { return }
         if let previousAPIKey {
             try? KeychainService.setString(previousAPIKey, account: account)
         } else {

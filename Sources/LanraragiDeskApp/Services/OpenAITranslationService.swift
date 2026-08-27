@@ -21,6 +21,7 @@ struct OpenAITranslationService {
     }
 
     enum ServiceError: Error {
+        case invalidEndpoint
         case invalidResponse
         case missingContent
     }
@@ -90,7 +91,10 @@ struct OpenAITranslationService {
             ]
         ]
 
-        var req = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
+        guard let endpoint = URL(string: "https://api.openai.com/v1/chat/completions") else {
+            throw ServiceError.invalidEndpoint
+        }
+        var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -114,7 +118,10 @@ struct OpenAITranslationService {
     }
 
     func availableModelIDs(apiKey: String) async throws -> [String] {
-        var req = URLRequest(url: URL(string: "https://api.openai.com/v1/models")!)
+        guard let endpoint = URL(string: "https://api.openai.com/v1/models") else {
+            throw ServiceError.invalidEndpoint
+        }
+        var req = URLRequest(url: endpoint)
         req.httpMethod = "GET"
         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
 

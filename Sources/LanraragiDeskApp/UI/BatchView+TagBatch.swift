@@ -439,7 +439,14 @@ extension BatchView {
         errors = checkpoint.lastErrors ?? errors
         batchLiveEvents = checkpoint.lastLiveEvents ?? batchLiveEvents
         // Ensure combined log reflects restored events.
-        liveEvents = (checkpoint.lastLiveEvents ?? []).map { "[TAG] \($0)" } + liveEvents
+        liveEvents = (checkpoint.lastLiveEvents ?? []).map { event in
+            guard event.hasPrefix("["), let closingBracket = event.firstIndex(of: "]") else {
+                return "[TAG] \(event)"
+            }
+            let timestamp = event[...closingBracket]
+            let message = event[event.index(after: closingBracket)...].drop(while: { $0.isWhitespace })
+            return "\(timestamp) [TAG] \(message)"
+        } + liveEvents
         restoredTagCheckpointUI = true
     }
     func tagCheckpointBannerText(_ checkpoint: TagBatchCheckpoint) -> String {

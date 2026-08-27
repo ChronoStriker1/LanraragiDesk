@@ -76,9 +76,6 @@ struct MainPageCarouselsView: View {
         .task(id: profile.id) {
             vm.reload(profile: profile, archives: appModel.archives, kind: selectedKind)
         }
-        .onChange(of: profile.id) { _, _ in
-            vm.reload(profile: profile, archives: appModel.archives, kind: selectedKind)
-        }
         .onChange(of: selectedKindRaw) { _, _ in
             vm.reload(profile: profile, archives: appModel.archives, kind: selectedKind)
         }
@@ -522,4 +519,3 @@ private enum MainPageCarouselMetadataHelpers {
     }
 
 }
-

@@ -4,7 +4,10 @@ import CryptoKit
 enum AppPaths {
     static func appSupportDirectory() -> URL {
         let fm = FileManager.default
-        let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fm.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library", isDirectory: true)
+                .appendingPathComponent("Application Support", isDirectory: true)
         return appSupport.appendingPathComponent("LanraragiDesk", isDirectory: true)
     }
 
