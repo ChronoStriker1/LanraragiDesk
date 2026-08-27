@@ -101,7 +101,7 @@ final class DuplicateScanViewModel: ObservableObject {
                 if self.runID == rid {
                     self.task = nil
                     self.runID = nil
-                    if Task<Void, Never>.isCancelled {
+                    if Task.isCancelled {
                         self.status = .idle
                     }
                 }

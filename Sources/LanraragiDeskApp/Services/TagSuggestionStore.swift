@@ -152,7 +152,16 @@ actor TagSuggestionStore {
         let baseKey = profile.baseURL.absoluteString
         let key = LoadKey(baseURL: baseKey, minWeight: settings.minWeight)
         if let existing = inFlightLoads[key] {
-            return try await existing.task.value
+            do {
+                return try await existing.task.value
+            } catch {
+                // The initiating caller may have been a forced refresh without a
+                // stale fallback. Preserve the joining caller's fallback policy.
+                if let staleDisk {
+                    cacheByBaseURL[baseKey] = makeCacheEntry(from: staleDisk)
+                }
+                throw error
+            }
         }
 
         let loadID = UUID()
