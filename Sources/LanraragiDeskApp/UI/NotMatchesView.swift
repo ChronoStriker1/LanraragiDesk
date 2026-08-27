@@ -10,6 +10,8 @@ struct NotMatchesView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var query: String = ""
+    @State private var sortColumn: NotMatchSortColumn = .created
+    @State private var sortAscending: Bool = false
     @State private var confirmRemove: IndexStore.NotDuplicatePair?
     @State private var showClearAllConfirmation: Bool = false
 
@@ -40,26 +42,38 @@ struct NotMatchesView: View {
                         ContentUnavailableView(
                             "No matches for search",
                             systemImage: "magnifyingglass",
-                            description: Text("Try different IDs or clear the search terms.")
+                            description: Text("Try a different archive ID or created time, or clear the search terms.")
                         )
                     }
                 }
                 .frame(maxWidth: .infinity, minHeight: embedded ? 120 : 240)
             } else {
-                ScrollView(.vertical) {
-                    LazyVStack(alignment: .center, spacing: 8) {
-                        ForEach(filteredPairs, id: \.self) { p in
-                            NotMatchRow(
-                                profile: profile,
-                                pair: p,
-                                thumbnails: appModel.duplicates.thumbnails,
-                                onRemove: { confirmRemove = p }
-                            )
+                ScrollView(.horizontal) {
+                    VStack(spacing: 0) {
+                        columnHeaders
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+
+                        Divider()
+
+                        ScrollView(.vertical) {
+                            LazyVStack(alignment: .center, spacing: 8) {
+                                ForEach(filteredPairs, id: \.self) { p in
+                                    NotMatchRow(
+                                        profile: profile,
+                                        pair: p,
+                                        createdText: NotMatchListPresentation.createdText(for: p),
+                                        thumbnails: appModel.duplicates.thumbnails,
+                                        onRemove: { confirmRemove = p }
+                                    )
+                                }
+                            }
+                            .padding(12)
                         }
+                        .scrollIndicators(.visible)
                     }
-                    .padding(12)
+                    .frame(minWidth: NotMatchColumnLayout.minimumTableWidth)
                 }
-                .scrollIndicators(.visible)
                 .frame(maxHeight: embedded ? 320 : .infinity)
             }
         }
@@ -93,17 +107,52 @@ struct NotMatchesView: View {
     }
 
     private var filteredPairs: [IndexStore.NotDuplicatePair] {
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        if q.isEmpty { return appModel.duplicates.notMatches }
-        let tokens = q
-            .split(whereSeparator: { $0 == " " || $0 == "," })
-            .map { String($0).lowercased() }
-            .filter { !$0.isEmpty }
-        if tokens.isEmpty { return appModel.duplicates.notMatches }
-        return appModel.duplicates.notMatches.filter { p in
-            let hay = "\(p.arcidA) \(p.arcidB)".lowercased()
-            return tokens.allSatisfy { hay.contains($0) }
+        NotMatchListPresentation.filterAndSort(
+            appModel.duplicates.notMatches,
+            query: query,
+            sortColumn: sortColumn,
+            ascending: sortAscending
+        )
+    }
+
+    private var columnHeaders: some View {
+        HStack(spacing: NotMatchColumnLayout.spacing) {
+            sortButton(for: .created, width: NotMatchColumnLayout.createdWidth)
+            sortButton(for: .leftArchiveID, width: NotMatchColumnLayout.archiveWidth)
+            sortButton(for: .rightArchiveID, width: NotMatchColumnLayout.archiveWidth)
+            Text("Actions")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: NotMatchColumnLayout.actionWidth, alignment: .trailing)
         }
+    }
+
+    private func sortButton(for column: NotMatchSortColumn, width: CGFloat) -> some View {
+        Button {
+            if sortColumn == column {
+                sortAscending.toggle()
+            } else {
+                sortColumn = column
+                sortAscending = column.defaultAscending
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(column.title)
+                    .lineLimit(1)
+                if sortColumn == column {
+                    Image(systemName: sortAscending ? "chevron.up" : "chevron.down")
+                        .accessibilityHidden(true)
+                }
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(sortColumn == column ? .primary : .secondary)
+            .frame(width: width, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Sort by \(column.title)")
+        .accessibilityValue(sortColumn == column ? (sortAscending ? "Ascending" : "Descending") : "Not selected")
+        .help(sortColumn == column ? "Toggle \(column.title.lowercased()) sort direction" : "Sort by \(column.title.lowercased())")
     }
 
     private var header: some View {
@@ -119,7 +168,7 @@ struct NotMatchesView: View {
 
             Spacer()
 
-            TextField("Search ID…", text: $query)
+            TextField("Search ID or created time…", text: $query)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 260)
 
@@ -167,7 +216,7 @@ struct NotMatchesView: View {
 
             Spacer(minLength: 0)
 
-            TextField("Search…", text: $query)
+            TextField("Search ID or time…", text: $query)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 220)
 
@@ -207,20 +256,25 @@ struct NotMatchesView: View {
 private struct NotMatchRow: View {
     let profile: Profile
     let pair: IndexStore.NotDuplicatePair
+    let createdText: String
     let thumbnails: ThumbnailLoader
     let onRemove: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            CoverThumb(profile: profile, arcid: pair.arcidA, thumbnails: thumbnails, size: .init(width: 96, height: 124))
-            CoverThumb(profile: profile, arcid: pair.arcidB, thumbnails: thumbnails, size: .init(width: 96, height: 124))
+        HStack(spacing: NotMatchColumnLayout.spacing) {
+            Text(createdText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: NotMatchColumnLayout.createdWidth, alignment: .leading)
 
-            Spacer(minLength: 0)
+            archiveColumn(arcid: pair.arcidA)
+            archiveColumn(arcid: pair.arcidB)
 
             Button(role: .destructive) { onRemove() } label: {
                 Label("Remove", systemImage: "xmark.circle.fill")
             }
             .buttonStyle(.bordered)
+            .frame(width: NotMatchColumnLayout.actionWidth, alignment: .trailing)
         }
         .padding(10)
         .background(.quaternary.opacity(0.28))
@@ -234,4 +288,29 @@ private struct NotMatchRow: View {
             Button("Copy Right ID") { NSPasteboard.general.setString(pair.arcidB, forType: .string) }
         }
     }
+
+    private func archiveColumn(arcid: String) -> some View {
+        HStack(spacing: 8) {
+            CoverThumb(
+                profile: profile,
+                arcid: arcid,
+                thumbnails: thumbnails,
+                size: .init(width: 56, height: 72)
+            )
+            Text(arcid)
+                .font(.caption.monospaced())
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .help(arcid)
+        }
+        .frame(width: NotMatchColumnLayout.archiveWidth, alignment: .leading)
+    }
+}
+
+private enum NotMatchColumnLayout {
+    static let spacing: CGFloat = 12
+    static let createdWidth: CGFloat = 160
+    static let archiveWidth: CGFloat = 190
+    static let actionWidth: CGFloat = 96
+    static let minimumTableWidth = createdWidth + (archiveWidth * 2) + actionWidth + (spacing * 3)
 }
