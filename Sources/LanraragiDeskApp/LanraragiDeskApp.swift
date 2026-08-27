@@ -4,11 +4,21 @@ import AppKit
 @main
 struct LanraragiDeskApp: App {
     @StateObject private var appModel = AppModel()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(appModel)
+                .onChange(of: scenePhase) { _, newPhase in
+                    guard newPhase != .active else { return }
+                    Task {
+                        await appModel.activity.flush()
+                    }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+                    appModel.activity.flushForTermination()
+                }
         }
         .windowStyle(.automatic)
         .windowToolbarStyle(.unifiedCompact(showsTitle: false))
