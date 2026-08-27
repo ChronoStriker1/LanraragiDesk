@@ -3,6 +3,7 @@ import LanraragiKit
 
 struct ArchiveLoaderInFlightOperation<Value: Sendable>: Sendable {
     let id: UUID
+    let generation: UInt64
     let task: Task<Value, Error>
 }
 
@@ -16,16 +17,26 @@ struct ArchiveLoaderInFlightRegistry<Key: Hashable, Value: Sendable> {
     @discardableResult
     mutating func insert(
         _ task: Task<Value, Error>,
-        for key: Key
+        for key: Key,
+        generation: UInt64 = 0
     ) -> ArchiveLoaderInFlightOperation<Value> {
-        let operation = ArchiveLoaderInFlightOperation(id: UUID(), task: task)
+        let operation = ArchiveLoaderInFlightOperation(
+            id: UUID(),
+            generation: generation,
+            task: task
+        )
         operations[key] = operation
         return operation
     }
 
     @discardableResult
-    mutating func removeValue(for key: Key, ownedBy id: UUID) -> Bool {
-        guard operations[key]?.id == id else { return false }
+    mutating func removeValue(
+        for key: Key,
+        ownedBy id: UUID,
+        generation: UInt64? = nil
+    ) -> Bool {
+        guard let operation = operations[key], operation.id == id else { return false }
+        if let generation, operation.generation != generation { return false }
         operations[key] = nil
         return true
     }
@@ -40,6 +51,18 @@ struct ArchiveLoaderInFlightRegistry<Key: Hashable, Value: Sendable> {
         }
         operations.removeAll()
     }
+
+    mutating func cancelAndRemoveAll(where shouldRemove: (Key) -> Bool) {
+        let keys = operations.keys.filter(shouldRemove)
+        for key in keys {
+            operations.removeValue(forKey: key)?.task.cancel()
+        }
+    }
+}
+
+private struct ArchiveLoaderResourceKey: Hashable, Sendable {
+    let profileID: UUID
+    let resource: String
 }
 
 struct ArchiveLoaderFetchOverrides: Sendable {
@@ -58,15 +81,17 @@ actor ArchiveLoader {
 
     private var apiKeyByProfileID: [UUID: String] = [:]
     private var clientByProfileID: [UUID: LANraragiClient] = [:]
+    private var clientGenerationByProfileID: [UUID: UInt64] = [:]
 
-    private var metaCache: [String: ArchiveMetadata] = [:]
-    private var metaInflight = ArchiveLoaderInFlightRegistry<String, ArchiveMetadata>()
+    private var metaCache: [ArchiveLoaderResourceKey: ArchiveMetadata] = [:]
+    private var metaInflight = ArchiveLoaderInFlightRegistry<ArchiveLoaderResourceKey, ArchiveMetadata>()
 
-    private var pagesCache: [String: [URL]] = [:]
-    private var pagesInflight = ArchiveLoaderInFlightRegistry<String, [URL]>()
+    private var pagesCache: [ArchiveLoaderResourceKey: [URL]] = [:]
+    private var pagesInflight = ArchiveLoaderInFlightRegistry<ArchiveLoaderResourceKey, [URL]>()
 
     private let bytesCache = NSCache<NSString, NSData>()
-    private var bytesInflight = ArchiveLoaderInFlightRegistry<String, Data>()
+    private var bytesCacheKeysByProfileID: [UUID: Set<String>] = [:]
+    private var bytesInflight = ArchiveLoaderInFlightRegistry<ArchiveLoaderResourceKey, Data>()
 
     private let maxCachedBytes = 8 * 1024 * 1024
     private let fetchOverrides: ArchiveLoaderFetchOverrides?
@@ -77,9 +102,11 @@ actor ArchiveLoader {
     }
 
     func metadata(profile: Profile, arcid: String, forceRefresh: Bool = false) async throws -> ArchiveMetadata {
+        let key = ArchiveLoaderResourceKey(profileID: profile.id, resource: arcid)
+        let generation = clientGeneration(for: profile.id)
         if !forceRefresh {
-            if let metadata = metaCache[arcid] { return metadata }
-            if let operation = metaInflight[arcid] {
+            if let metadata = metaCache[key] { return metadata }
+            if let operation = metaInflight[key], operation.generation == generation {
                 return try await operation.task.value
             }
         }
@@ -117,16 +144,27 @@ actor ArchiveLoader {
         // operation. Existing waiters can still receive its result, but only the
         // replacement is allowed to publish into the cache. The last known-good
         // cached value remains available until that replacement succeeds.
-        let operation = metaInflight.insert(task, for: arcid)
+        let operation = metaInflight.insert(task, for: key, generation: generation)
 
         do {
             let metadata = try await task.value
-            if metaInflight.removeValue(for: arcid, ownedBy: operation.id) {
-                metaCache[arcid] = metadata
+            if clientGeneration(for: profile.id) == generation,
+               metaInflight.removeValue(
+                   for: key,
+                   ownedBy: operation.id,
+                   generation: generation
+               ) {
+                metaCache[key] = metadata
             }
             return metadata
         } catch {
-            metaInflight.removeValue(for: arcid, ownedBy: operation.id)
+            if clientGeneration(for: profile.id) == generation {
+                metaInflight.removeValue(
+                    for: key,
+                    ownedBy: operation.id,
+                    generation: generation
+                )
+            }
             throw error
         }
     }
@@ -139,7 +177,7 @@ actor ArchiveLoader {
             // Only a definitive "gone" answer means the archive doesn't exist.
             // Transient server errors (5xx, etc.) must propagate so callers don't
             // prune user data based on a hiccup.
-            invalidateArchiveCaches(arcid: arcid)
+            invalidateArchiveCaches(profileID: profile.id, arcid: arcid)
             return false
         }
     }
@@ -157,7 +195,7 @@ actor ArchiveLoader {
         }
 
         // Refresh caches for this archive.
-        invalidateMetadataCache(arcid: arcid)
+        invalidateMetadataCache(profileID: profile.id, arcid: arcid)
         let updated = try await metadata(profile: profile, arcid: arcid, forceRefresh: true)
         return updated
     }
@@ -200,11 +238,13 @@ actor ArchiveLoader {
         }
 
         // Drop cached references for the deleted archive.
-        invalidateArchiveCaches(arcid: arcid)
+        invalidateArchiveCaches(profileID: profile.id, arcid: arcid)
     }
     func pageURLs(profile: Profile, arcid: String) async throws -> [URL] {
-        if let pages = pagesCache[arcid] { return pages }
-        if let operation = pagesInflight[arcid] {
+        let key = ArchiveLoaderResourceKey(profileID: profile.id, resource: arcid)
+        let generation = clientGeneration(for: profile.id)
+        if let pages = pagesCache[key] { return pages }
+        if let operation = pagesInflight[key], operation.generation == generation {
             return try await operation.task.value
         }
 
@@ -249,30 +289,43 @@ actor ArchiveLoader {
             }
         }
 
-        let operation = pagesInflight.insert(task, for: arcid)
+        let operation = pagesInflight.insert(task, for: key, generation: generation)
 
         do {
             let pages = try await task.value
-            if pagesInflight.removeValue(for: arcid, ownedBy: operation.id) {
+            if clientGeneration(for: profile.id) == generation,
+               pagesInflight.removeValue(
+                   for: key,
+                   ownedBy: operation.id,
+                   generation: generation
+               ) {
                 // Even a single-page result is verified here: the request task has
                 // already completed the initial + forced listing path above.
-                pagesCache[arcid] = pages
+                pagesCache[key] = pages
             }
             return pages
         } catch {
-            pagesInflight.removeValue(for: arcid, ownedBy: operation.id)
+            if clientGeneration(for: profile.id) == generation {
+                pagesInflight.removeValue(
+                    for: key,
+                    ownedBy: operation.id,
+                    generation: generation
+                )
+            }
             throw error
         }
     }
 
     func bytes(profile: Profile, url: URL) async throws -> Data {
-        let key = url.absoluteString as NSString
-        if let b = bytesCache.object(forKey: key) {
+        let cacheKeyString = "\(profile.id.uuidString)/\(url.absoluteString)"
+        let cacheKey = cacheKeyString as NSString
+        let key = ArchiveLoaderResourceKey(profileID: profile.id, resource: url.absoluteString)
+        let generation = clientGeneration(for: profile.id)
+        if let b = bytesCache.object(forKey: cacheKey) {
             return Data(referencing: b)
         }
 
-        let inflightKey = String(key)
-        if let operation = bytesInflight[inflightKey] {
+        if let operation = bytesInflight[key], operation.generation == generation {
             return try await operation.task.value
         }
 
@@ -293,17 +346,29 @@ actor ArchiveLoader {
             }
         }
 
-        let operation = bytesInflight.insert(task, for: inflightKey)
+        let operation = bytesInflight.insert(task, for: key, generation: generation)
 
         do {
             let data = try await task.value
-            if bytesInflight.removeValue(for: inflightKey, ownedBy: operation.id),
+            if clientGeneration(for: profile.id) == generation,
+               bytesInflight.removeValue(
+                   for: key,
+                   ownedBy: operation.id,
+                   generation: generation
+               ),
                data.count <= maxCachedBytes {
-                bytesCache.setObject(data as NSData, forKey: key, cost: data.count)
+                bytesCache.setObject(data as NSData, forKey: cacheKey, cost: data.count)
+                bytesCacheKeysByProfileID[profile.id, default: []].insert(cacheKeyString)
             }
             return data
         } catch {
-            bytesInflight.removeValue(for: inflightKey, ownedBy: operation.id)
+            if clientGeneration(for: profile.id) == generation {
+                bytesInflight.removeValue(
+                    for: key,
+                    ownedBy: operation.id,
+                    generation: generation
+                )
+            }
             throw error
         }
     }
@@ -324,7 +389,7 @@ actor ArchiveLoader {
         let id = try await limiter.withPermit {
             try await client.createTankoubon(name: name, tankID: tankID)
         }
-        invalidateMetadataCache(arcid: id)
+        invalidateMetadataCache(profileID: profile.id, arcid: id)
         return id
     }
 
@@ -353,7 +418,7 @@ actor ArchiveLoader {
                 tags: tags
             )
         }
-        invalidateMetadataCache(arcid: tankID)
+        invalidateMetadataCache(profileID: profile.id, arcid: tankID)
     }
 
     func deleteTankoubon(profile: Profile, tankID: String) async throws {
@@ -361,7 +426,7 @@ actor ArchiveLoader {
         try await limiter.withPermit {
             try await client.deleteTankoubon(id: tankID)
         }
-        invalidateMetadataCache(arcid: tankID)
+        invalidateMetadataCache(profileID: profile.id, arcid: tankID)
     }
 
     func addArchiveToTankoubon(profile: Profile, tankID: String, arcid: String) async throws {
@@ -369,7 +434,7 @@ actor ArchiveLoader {
         try await limiter.withPermit {
             try await client.addArchiveToTankoubon(tankID: tankID, arcid: arcid)
         }
-        invalidateMetadataCache(arcid: tankID)
+        invalidateMetadataCache(profileID: profile.id, arcid: tankID)
     }
 
     func removeArchiveFromTankoubon(profile: Profile, tankID: String, arcid: String) async throws {
@@ -377,7 +442,7 @@ actor ArchiveLoader {
         try await limiter.withPermit {
             try await client.removeArchiveFromTankoubon(tankID: tankID, arcid: arcid)
         }
-        invalidateMetadataCache(arcid: tankID)
+        invalidateMetadataCache(profileID: profile.id, arcid: tankID)
     }
 
     // MARK: - Stamps
@@ -421,25 +486,34 @@ actor ArchiveLoader {
     /// Drops the cached client, API key, and all derived caches for a profile.
     /// Call after the profile's base URL or API key changes.
     func invalidateClient(profileID: UUID) {
+        clientGenerationByProfileID[profileID] = clientGeneration(for: profileID) &+ 1
         apiKeyByProfileID[profileID] = nil
         clientByProfileID[profileID] = nil
-        metaCache.removeAll()
-        pagesCache.removeAll()
-        bytesCache.removeAllObjects()
-        metaInflight.cancelAndRemoveAll()
-        pagesInflight.cancelAndRemoveAll()
-        bytesInflight.cancelAndRemoveAll()
+        metaCache = metaCache.filter { $0.key.profileID != profileID }
+        pagesCache = pagesCache.filter { $0.key.profileID != profileID }
+        for key in bytesCacheKeysByProfileID.removeValue(forKey: profileID) ?? [] {
+            bytesCache.removeObject(forKey: key as NSString)
+        }
+        metaInflight.cancelAndRemoveAll { $0.profileID == profileID }
+        pagesInflight.cancelAndRemoveAll { $0.profileID == profileID }
+        bytesInflight.cancelAndRemoveAll { $0.profileID == profileID }
     }
 
-    private func invalidateArchiveCaches(arcid: String) {
-        invalidateMetadataCache(arcid: arcid)
-        pagesCache[arcid] = nil
-        pagesInflight.cancelAndRemoveValue(for: arcid)
+    private func invalidateArchiveCaches(profileID: UUID, arcid: String) {
+        let key = ArchiveLoaderResourceKey(profileID: profileID, resource: arcid)
+        invalidateMetadataCache(profileID: profileID, arcid: arcid)
+        pagesCache[key] = nil
+        pagesInflight.cancelAndRemoveValue(for: key)
     }
 
-    private func invalidateMetadataCache(arcid: String) {
-        metaCache[arcid] = nil
-        metaInflight.cancelAndRemoveValue(for: arcid)
+    private func invalidateMetadataCache(profileID: UUID, arcid: String) {
+        let key = ArchiveLoaderResourceKey(profileID: profileID, resource: arcid)
+        metaCache[key] = nil
+        metaInflight.cancelAndRemoveValue(for: key)
+    }
+
+    private func clientGeneration(for profileID: UUID) -> UInt64 {
+        clientGenerationByProfileID[profileID, default: 0]
     }
 
     private func makeClient(profile: Profile) throws -> LANraragiClient {
