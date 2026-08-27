@@ -20,6 +20,7 @@ struct BatchView: View {
     @State var previewStatus: String?
     @State var previewRunning: Bool = false
     @State var previewTask: Task<Void, Never>?
+    @State var previewWorkflow = BatchPreviewWorkflow()
     @State var previewBeforeQueue: Bool = true
     @State var resumableTagBatch: TagBatchCheckpoint?
     @State var resumablePluginBatch: PluginBatchCheckpoint?
@@ -159,7 +160,7 @@ struct BatchView: View {
                             run()
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(running || pluginRunning || appModel.selection.count == 0 || (parseTags(addTagsText).isEmpty && parseTags(removeTagsText).isEmpty))
+                        .disabled(running || pluginRunning || previewRunning || appModel.selection.count == 0 || (parseTags(addTagsText).isEmpty && parseTags(removeTagsText).isEmpty))
 
                         Button(batchCancelRequested ? "Stopping…" : "Cancel", role: .destructive) {
                             requestBatchCancel()
@@ -376,7 +377,7 @@ struct BatchView: View {
         .debugFrameNumber(1)
         .onDisappear {
             selectedNamesTask?.cancel()
-            previewTask?.cancel()
+            invalidatePreview()
         }
         .task(id: appModel.selectedProfileID) {
             await loadPlugins()
@@ -396,6 +397,7 @@ struct BatchView: View {
         }
         .onChange(of: pluginArgText) { _, _ in invalidatePreview() }
         .onChange(of: pluginDelayText) { _, _ in invalidatePreview() }
+        .onChange(of: appModel.selectedProfileID) { _, _ in invalidatePreview() }
         .onChange(of: previewBeforeQueue) { _, _ in
             if !previewBeforeQueue {
                 invalidatePreview()
@@ -451,21 +453,36 @@ struct BatchView: View {
     }
 
     func invalidatePreview() {
+        guard previewWorkflow.activeRun != nil else {
+            previewRows = []
+            previewStatus = nil
+            return
+        }
+        previewWorkflow.requestCancellation()
         previewTask?.cancel()
-        previewTask = nil
         previewRows = []
         previewStatus = nil
     }
 
-    func generatePreview(sampleSize: Int = 10, executePlugin: Bool = false) {
-        previewTask?.cancel()
+    func generatePreview(
+        sampleSize: Int = 10,
+        executePlugin: Bool = false,
+        purpose: BatchPreviewWorkflow.Intent = .previewOnly,
+        pendingBatch: PluginBatchLaunch? = nil
+    ) {
         guard let profile = appModel.selectedProfile else { return }
-        let arcids = Array(selectedArcidsSorted.prefix(sampleSize))
+        let selectedArcids = selectedArcidsSorted
+        let actualSampleSize = min(max(0, sampleSize), selectedArcids.count)
+        let arcids = Array(selectedArcids.prefix(actualSampleSize))
         guard !arcids.isEmpty else { return }
+        guard purpose != .previewThenQueue || pendingBatch != nil else { return }
+        guard let previewRun = previewWorkflow.begin(intent: purpose) else { return }
 
         let add = parseTags(addTagsText)
         let remove = parseTags(removeTagsText)
         let pluginID = selectedPluginID
+        let pluginArgument = pluginArgText
+        let applyMode = pluginApplyMode
         let delaySeconds = sanitizedDelaySeconds(from: pluginDelayText)
         let hasTagOps = !add.isEmpty || !remove.isEmpty
         let hasPluginOp = pluginID != nil
@@ -476,12 +493,14 @@ struct BatchView: View {
 
         previewTask = Task {
             var rows: [BatchPreviewRow] = []
+            var previewFailed = false
 
             for arcid in arcids where !Task.isCancelled {
                 do {
                     let meta = try await appModel.archives.metadata(profile: profile, arcid: arcid)
                     let filename = archiveDisplayName(metadata: meta, arcid: arcid)
                     await MainActor.run {
+                        guard previewWorkflow.acceptsUpdates(from: previewRun) else { return }
                         selectedArchiveNames[arcid] = filename
                         if executePlugin {
                             appendPluginLiveEvent("Previewing \(filename)")
@@ -500,7 +519,7 @@ struct BatchView: View {
                         previewTags = applyTagEdits(old: previewTags, add: add, remove: remove)
                     }
                     if let pluginID {
-                        let pluginArg = pluginArgText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let pluginArg = pluginArgument.trimmingCharacters(in: .whitespacesAndNewlines)
                         if pluginArg.isEmpty {
                             details.append("Plugin \(pluginID) selected.")
                         } else {
@@ -512,7 +531,7 @@ struct BatchView: View {
                                 profile: profile,
                                 pluginID: pluginID,
                                 arcid: arcid,
-                                arg: pluginArgText
+                                arg: pluginArgument
                             )
                             if let patch = PluginMetadataSupport.parsePatch(from: raw) {
                                 let applied = applyPluginPatch(
@@ -520,7 +539,7 @@ struct BatchView: View {
                                     currentTitle: previewTitle,
                                     currentTags: previewTags,
                                     currentSummary: previewSummary,
-                                    mode: pluginApplyMode
+                                    mode: applyMode
                                 )
                                 previewTitle = applied.title
                                 previewTags = applied.tags
@@ -549,6 +568,7 @@ struct BatchView: View {
                     ))
                     if executePlugin {
                         await MainActor.run {
+                            guard previewWorkflow.acceptsUpdates(from: previewRun) else { return }
                             appendPluginLiveEvent(metadataChangeLiveMessage(
                                 prefix: "Preview",
                                 arcid: arcid,
@@ -562,6 +582,7 @@ struct BatchView: View {
                         }
                     }
                 } catch {
+                    previewFailed = true
                     rows.append(.init(
                         arcid: arcid,
                         filename: arcid,
@@ -570,6 +591,7 @@ struct BatchView: View {
                     ))
                     if executePlugin {
                         await MainActor.run {
+                            guard previewWorkflow.acceptsUpdates(from: previewRun) else { return }
                             appendPluginLiveEvent("Preview failed for \(displayName(for: arcid)): \(ErrorPresenter.short(error))")
                         }
                     }
@@ -577,9 +599,42 @@ struct BatchView: View {
             }
 
             await MainActor.run {
-                previewRows = rows
+                let outcome: BatchPreviewWorkflow.Outcome
+                if Task.isCancelled {
+                    outcome = .cancelled
+                } else if previewFailed {
+                    outcome = .failed
+                } else {
+                    outcome = .succeeded
+                }
+                let completion = previewWorkflow.complete(previewRun, outcome: outcome)
+                guard completion != .ignored else { return }
+
+                previewTask = nil
                 previewRunning = false
-                let suffix = selectedArcidsSorted.count > sampleSize ? " (sample of \(sampleSize))" : ""
+                let suffix = selectedArcids.count > actualSampleSize ? " (sample of \(actualSampleSize))" : ""
+
+                if completion == .cancelled {
+                    if executePlugin {
+                        pluginRunStatus = "Preview cancelled. Batch was not queued."
+                    }
+                    return
+                }
+                previewRows = rows
+                if completion == .failed {
+                    previewStatus = "Preview failed for one or more archives. Batch was not queued."
+                    if executePlugin {
+                        appendPluginLiveEvent("Preview failed; batch was not queued")
+                        pluginRunStatus = "Preview failed. Batch was not queued."
+                        appModel.activity.add(.init(
+                            kind: .warning,
+                            title: "Plugin batch preview failed",
+                            detail: "\(pluginID ?? "Unknown plugin") on sample of \(actualSampleSize) selected"
+                        ))
+                    }
+                    return
+                }
+
                 if !hasTagOps && !hasPluginOp {
                     previewStatus = "Preview generated\(suffix), but no operations are currently configured."
                 } else if hasPluginOp {
@@ -590,6 +645,15 @@ struct BatchView: View {
                 if executePlugin {
                     appendPluginLiveEvent("Preview completed for \(rows.count) archives\(suffix)")
                     pluginRunStatus = "Preview complete for \(rows.count) archives\(suffix)."
+                    appModel.activity.add(.init(
+                        kind: .action,
+                        title: "Plugin batch preview generated",
+                        detail: "\(pluginID ?? "Unknown plugin") on sample of \(actualSampleSize) selected"
+                    ))
+                }
+
+                if completion == .queueBatch, let pendingBatch {
+                    queuePluginBatch(pendingBatch)
                 }
             }
         }
