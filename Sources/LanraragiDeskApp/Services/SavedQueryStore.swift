@@ -24,6 +24,7 @@ final class SavedQueryStore: ObservableObject {
 
     private let fileURL: URL
     private var persistenceBlock: SavedQueryStoreError?
+    private var recoveryNotice: String?
 
     init() {
         self.fileURL = AppPaths.savedBatchQueriesURL()
@@ -44,7 +45,7 @@ final class SavedQueryStore: ObservableObject {
         }
         try persist(updatedQueries)
         queries = updatedQueries
-        errorMessage = nil
+        errorMessage = recoveryNotice
     }
 
     func delete(id: UUID) throws {
@@ -52,7 +53,7 @@ final class SavedQueryStore: ObservableObject {
         updatedQueries.removeAll { $0.id == id }
         try persist(updatedQueries)
         queries = updatedQueries
-        errorMessage = nil
+        errorMessage = recoveryNotice
     }
 
     func queries(for profileID: UUID) -> [SavedBatchQuery] {
@@ -60,6 +61,7 @@ final class SavedQueryStore: ObservableObject {
     }
 
     func clearError() {
+        recoveryNotice = nil
         errorMessage = nil
     }
 
@@ -96,7 +98,9 @@ final class SavedQueryStore: ObservableObject {
             .appendingPathExtension("corrupt.json")
         do {
             try data.write(to: backupURL, options: [.atomic])
-            errorMessage = "Saved queries were corrupt. The original data was preserved in \(backupURL.lastPathComponent)."
+            let notice = "Saved queries were corrupt. The original data was preserved in \(backupURL.lastPathComponent)."
+            recoveryNotice = notice
+            errorMessage = notice
             NSLog(
                 "SavedQueryStore: failed to decode %@ (%@); backed up to %@",
                 fileURL.path,

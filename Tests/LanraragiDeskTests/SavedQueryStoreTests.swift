@@ -40,6 +40,33 @@ final class SavedQueryStoreTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: fixture.backupURL), newestCorruptData)
     }
 
+    func testRecoveryNoticeSurvivesMutationsUntilExplicitlyDismissed() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        try Data("{ corrupt data".utf8).write(to: fixture.fileURL)
+        let store = SavedQueryStore(fileURL: fixture.fileURL)
+        let recoveryNotice = try XCTUnwrap(store.errorMessage)
+        let query = makeQuery(name: "Recovered")
+
+        try FileManager.default.removeItem(at: fixture.fileURL)
+        try FileManager.default.createDirectory(
+            at: fixture.fileURL,
+            withIntermediateDirectories: false
+        )
+        XCTAssertThrowsError(try store.save(query))
+        XCTAssertNotEqual(store.errorMessage, recoveryNotice)
+
+        try FileManager.default.removeItem(at: fixture.fileURL)
+        try store.save(query)
+        XCTAssertEqual(store.errorMessage, recoveryNotice)
+
+        try store.delete(id: query.id)
+        XCTAssertEqual(store.errorMessage, recoveryNotice)
+
+        store.clearError()
+        XCTAssertNil(store.errorMessage)
+    }
+
     func testFailedCorruptBackupBlocksWritesThatWouldDestroyOriginalData() throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
