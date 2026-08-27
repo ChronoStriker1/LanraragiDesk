@@ -49,6 +49,15 @@ struct SettingsView: View {
         }
         .onChange(of: maxConnectionsPerHost) { _, v in
             UserDefaults.standard.set(max(1, min(32, v)), forKey: AppSettings.maxConnectionsKey)
+            let profileIDs = appModel.profileStore.profiles.map(\.id)
+            Task {
+                // URLSession reads this limit at client creation time. Drop cached
+                // clients so the next request observes the new setting.
+                for profileID in profileIDs {
+                    await appModel.archives.invalidateClient(profileID: profileID)
+                    await appModel.thumbnails.invalidateClient(profileID: profileID)
+                }
+            }
         }
     }
 

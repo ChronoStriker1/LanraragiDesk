@@ -240,7 +240,8 @@ private struct TankoubonDetailView: View {
         name = tank.name
         summary = tank.summary ?? ""
         tags = tank.tags ?? ""
-        archives = tank.archives
+        var seen = Set<String>()
+        archives = tank.archives.filter { seen.insert($0).inserted }
         statusText = nil
     }
 

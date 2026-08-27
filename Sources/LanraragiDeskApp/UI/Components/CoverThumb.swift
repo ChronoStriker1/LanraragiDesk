@@ -15,6 +15,31 @@ private enum CoverThumbCache {
     nonisolated static func key(arcid: String, size: CGSize, contentInset: CGFloat, reloadToken: Int) -> String {
         "\(arcid)|\(Int(size.width))x\(Int(size.height))|inset=\(Int(contentInset))|rev=\(reloadToken)"
     }
+
+    static func decodedCost(of image: NSImage) -> Int {
+        let representationCost = image.representations.reduce(into: 0) { total, representation in
+            let width = max(1, representation.pixelsWide)
+            let height = max(1, representation.pixelsHigh)
+            let (pixels, pixelOverflow) = width.multipliedReportingOverflow(by: height)
+            let (bytes, byteOverflow) = pixels.multipliedReportingOverflow(by: 4)
+            if pixelOverflow || byteOverflow || total > Int.max - bytes {
+                total = Int.max
+            } else {
+                total += bytes
+            }
+        }
+        if representationCost > 0 {
+            return representationCost
+        }
+
+        // Some lazily backed NSImages do not expose a representation yet.
+        let width = max(1, Int(image.size.width.rounded(.up)))
+        let height = max(1, Int(image.size.height.rounded(.up)))
+        let (pixels, overflow) = width.multipliedReportingOverflow(by: height)
+        guard !overflow else { return Int.max }
+        let (bytes, byteOverflow) = pixels.multipliedReportingOverflow(by: 4)
+        return byteOverflow ? Int.max : bytes
+    }
 }
 
 struct CoverThumb: View {
@@ -105,17 +130,19 @@ struct CoverThumb: View {
             let maxPixelSize = Int(max(size.width, size.height) * 2.5)
             task = Task.detached(priority: .userInitiated) { [profile, arcid, thumbnails, cacheKey] in
                 do {
-                    let bytesCount: Int
                     let img: NSImage?
                     do {
                         let bytes = try await thumbnails.thumbnailBytes(profile: profile, arcid: arcid)
-                        bytesCount = bytes.count
                         img = ImageDownsampler.thumbnail(from: bytes, maxPixelSize: maxPixelSize)
                     }
                     await MainActor.run {
                         image = img
                         if let img {
-                            CoverThumbCache.images.setObject(img, forKey: cacheKey as NSString, cost: bytesCount)
+                            CoverThumbCache.images.setObject(
+                                img,
+                                forKey: cacheKey as NSString,
+                                cost: CoverThumbCache.decodedCost(of: img)
+                            )
                         }
                     }
                 } catch {

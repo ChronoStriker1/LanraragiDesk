@@ -258,7 +258,11 @@ public final class LANraragiClient: Sendable {
 
     public func listCategories() async throws -> [Category] {
         let data = try await getData(path: "/api/categories")
-        let obj = try JSONSerialization.jsonObject(with: data)
+        return try Self.decodeCategoriesResponse(from: data)
+    }
+
+    static func decodeCategoriesResponse(from data: Data) throws -> [Category] {
+        let obj = try decodeJSONObject(from: data)
 
         // Common shapes:
         // - [{"id":"...", "name":"...", "pinned":true}, ...]
@@ -268,7 +272,10 @@ public final class LANraragiClient: Sendable {
             return parseCategoriesArray(arr)
         }
         if let dict = obj as? [String: Any] {
-            if let arr = dict["categories"] as? [Any] {
+            if let categories = dict["categories"] {
+                guard let arr = categories as? [Any] else {
+                    throw decodingFailure("Expected categories to be an array.")
+                }
                 return parseCategoriesArray(arr)
             }
             // Fallback: mapping of id -> name
@@ -282,7 +289,7 @@ public final class LANraragiClient: Sendable {
             return out
         }
 
-        return []
+        throw decodingFailure("Expected a category array or object.")
     }
 
     public func listPlugins(type: String = "metadata") async throws -> [PluginInfo] {
@@ -317,7 +324,7 @@ public final class LANraragiClient: Sendable {
         return []
     }
 
-    private func parseCategoriesArray(_ arr: [Any]) -> [Category] {
+    private static func parseCategoriesArray(_ arr: [Any]) -> [Category] {
         var out: [Category] = []
         out.reserveCapacity(arr.count)
 
@@ -426,8 +433,8 @@ public final class LANraragiClient: Sendable {
         req.httpBody = makeFormBody(items)
 
         let data = try await performData(req)
-        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        guard let id = obj?["tankoubon_id"] as? String, !id.isEmpty else {
+        let obj = try Self.decodeJSONObjectDictionary(from: data)
+        guard let id = obj["tankoubon_id"] as? String, !id.isEmpty else {
             let err = NSError(
                 domain: "LANraragiClient",
                 code: 2,
@@ -531,8 +538,15 @@ public final class LANraragiClient: Sendable {
     /// Returns the IDs of all Tankoubons containing the given archive.
     public func getArchiveTankoubons(arcid: String) async throws -> [String] {
         let data = try await getData(path: "/api/archives/\(arcid)/tankoubons")
-        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        return (obj?["tankoubons"] as? [String]) ?? []
+        return try Self.decodeArchiveTankoubonsResponse(from: data)
+    }
+
+    static func decodeArchiveTankoubonsResponse(from data: Data) throws -> [String] {
+        let obj = try decodeJSONObjectDictionary(from: data)
+        guard let tankoubons = obj["tankoubons"] as? [String] else {
+            throw decodingFailure("Expected tankoubons to be an array of IDs.")
+        }
+        return tankoubons
     }
 
     // MARK: - Stamps
@@ -540,14 +554,32 @@ public final class LANraragiClient: Sendable {
     /// Returns the 1-indexed page numbers that have at least one stamp.
     public func getStampedPages(arcid: String) async throws -> [Int] {
         let data = try await getData(path: "/api/archives/\(arcid)/stamps")
-        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        guard let arr = obj?["result"] as? [Any] else { return [] }
-        return arr.compactMap { item in
-            if let i = item as? Int { return i }
-            if let n = item as? NSNumber { return n.intValue }
-            if let s = item as? String { return Int(s) }
-            return nil
-        }.sorted()
+        return try Self.decodeStampedPagesResponse(from: data)
+    }
+
+    static func decodeStampedPagesResponse(from data: Data) throws -> [Int] {
+        let obj = try decodeJSONObjectDictionary(from: data)
+        guard let arr = obj["result"] as? [Any] else {
+            throw decodingFailure("Expected stamp result to be an array of page numbers.")
+        }
+        var pages: [Int] = []
+        pages.reserveCapacity(arr.count)
+        for item in arr {
+            if let i = item as? Int {
+                pages.append(i)
+                continue
+            }
+            if let n = item as? NSNumber {
+                pages.append(n.intValue)
+                continue
+            }
+            if let s = item as? String, let page = Int(s) {
+                pages.append(page)
+                continue
+            }
+            throw decodingFailure("Stamp result contained a non-numeric page value.")
+        }
+        return pages.sorted()
     }
 
     public func getStamps(arcid: String, page: Int) async throws -> [Stamp] {
@@ -576,8 +608,15 @@ public final class LANraragiClient: Sendable {
         applyDefaultHeaders(to: &req)
 
         let data = try await performData(req)
-        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        return (obj?["stamp_id"] as? String) ?? ""
+        return try Self.decodeAddedStampResponse(from: data)
+    }
+
+    static func decodeAddedStampResponse(from data: Data) throws -> String {
+        let obj = try decodeJSONObjectDictionary(from: data)
+        guard let stampID = obj["stamp_id"] as? String, !stampID.isEmpty else {
+            throw decodingFailure("Expected a non-empty stamp_id.")
+        }
+        return stampID
     }
 
     public func getStamp(id: String) async throws -> Stamp {
@@ -853,6 +892,31 @@ public final class LANraragiClient: Sendable {
         guard (200...299).contains(http.statusCode) else {
             throw LANraragiError.httpStatus(http.statusCode, body: data)
         }
+    }
+
+    private static func decodeJSONObject(from data: Data) throws -> Any {
+        do {
+            return try JSONSerialization.jsonObject(with: data)
+        } catch {
+            throw LANraragiError.decoding(error)
+        }
+    }
+
+    private static func decodeJSONObjectDictionary(from data: Data) throws -> [String: Any] {
+        let object = try decodeJSONObject(from: data)
+        guard let dictionary = object as? [String: Any] else {
+            throw decodingFailure("Expected a JSON object response.")
+        }
+        return dictionary
+    }
+
+    private static func decodingFailure(_ message: String) -> LANraragiError {
+        let error = NSError(
+            domain: "LANraragiClient",
+            code: 3,
+            userInfo: [NSLocalizedDescriptionKey: message]
+        )
+        return .decoding(error)
     }
 
     private func makeURL(path: String) throws -> URL {

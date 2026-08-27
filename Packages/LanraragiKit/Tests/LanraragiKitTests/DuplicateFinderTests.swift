@@ -2,6 +2,29 @@ import XCTest
 @testable import LanraragiKit
 
 final class DuplicateFinderTests: XCTestCase {
+    func testScanHonorsCancellationBeforeWorkBegins() async {
+        let wasCancelled = await Task { () -> Bool in
+            withUnsafeCurrentTask { task in
+                task?.cancel()
+            }
+
+            do {
+                _ = try await DuplicateFinder.scan(
+                    fingerprints: [],
+                    notDuplicates: [],
+                    config: .init()
+                )
+                return false
+            } catch is CancellationError {
+                return true
+            } catch {
+                return false
+            }
+        }.value
+
+        XCTAssertTrue(wasCancelled)
+    }
+
     func testExactChecksumGrouping() async throws {
         let fps: [IndexStore.ScanFingerprint] = [
             .init(arcid: "a", checksumSHA256: Data([0x01]), dHashCenter90: 0, aHashCenter90: 0),

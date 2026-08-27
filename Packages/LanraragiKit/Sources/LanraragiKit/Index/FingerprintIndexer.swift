@@ -37,6 +37,7 @@ public struct IndexerProgress: Sendable {
     public var skipped: Int
     public var failed: Int
     public var currentArcid: String?
+    public var firstError: String?
 
     public init(
         phase: Phase,
@@ -48,7 +49,8 @@ public struct IndexerProgress: Sendable {
         indexed: Int,
         skipped: Int,
         failed: Int,
-        currentArcid: String?
+        currentArcid: String?,
+        firstError: String? = nil
     ) {
         self.phase = phase
         self.startOffset = startOffset
@@ -60,6 +62,7 @@ public struct IndexerProgress: Sendable {
         self.skipped = skipped
         self.failed = failed
         self.currentArcid = currentArcid
+        self.firstError = firstError
     }
 }
 
@@ -153,7 +156,7 @@ public struct FingerprintIndexer {
 
                                 await counters.didIndex()
                             } catch {
-                                await counters.didFail()
+                                await counters.didFail(message: "\(arcid): \(String(describing: error))")
                             }
 
                             await counters.didComplete()
@@ -202,6 +205,7 @@ private actor Counters {
     private var indexed: Int = 0
     private var skipped: Int = 0
     private var failed: Int = 0
+    private var firstError: String?
 
     init(startOffset: Int) {
         self.startOffset = startOffset
@@ -227,8 +231,11 @@ private actor Counters {
         skipped += 1
     }
 
-    func didFail() {
+    func didFail(message: String) {
         failed += 1
+        if firstError == nil {
+            firstError = String(message.prefix(500))
+        }
     }
 
     func snapshot(phase: IndexerProgress.Phase, total: Int, currentArcid: String?) -> IndexerProgress {
@@ -242,7 +249,8 @@ private actor Counters {
             indexed: indexed,
             skipped: skipped,
             failed: failed,
-            currentArcid: currentArcid
+            currentArcid: currentArcid,
+            firstError: firstError
         )
     }
 }
@@ -263,4 +271,3 @@ private actor ProgressTicker {
         return last.duration(to: now) >= minInterval
     }
 }
-
