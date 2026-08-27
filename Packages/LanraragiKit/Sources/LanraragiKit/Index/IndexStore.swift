@@ -64,6 +64,7 @@ public final class IndexStore: @unchecked Sendable {
     private var stmtSetLastStart: OpaquePointer?
     private var stmtSelectScanFingerprints: OpaquePointer?
     private var stmtSelectNotDuplicates: OpaquePointer?
+    private var stmtSelectNotDuplicatePair: OpaquePointer?
     private var stmtInsertNotDuplicate: OpaquePointer?
     private var stmtDeleteNotDuplicates: OpaquePointer?
     private var stmtDeleteNotDuplicatePair: OpaquePointer?
@@ -132,6 +133,14 @@ public final class IndexStore: @unchecked Sendable {
             ORDER BY created_at DESC, arcid_a ASC, arcid_b ASC;
             """)
 
+            stmtSelectNotDuplicatePair = try Self.prepare(opened, sql: """
+            SELECT created_at
+            FROM not_duplicates
+            WHERE profile_id = ?
+              AND arcid_a = ?
+              AND arcid_b = ?;
+            """)
+
             stmtInsertNotDuplicate = try Self.prepare(opened, sql: """
             INSERT INTO not_duplicates(profile_id, arcid_a, arcid_b, created_at)
             VALUES(?, ?, ?, ?)
@@ -160,6 +169,7 @@ public final class IndexStore: @unchecked Sendable {
                 stmtSetLastStart,
                 stmtSelectScanFingerprints,
                 stmtSelectNotDuplicates,
+                stmtSelectNotDuplicatePair,
                 stmtInsertNotDuplicate,
                 stmtDeleteNotDuplicates,
                 stmtDeleteNotDuplicatePair,
@@ -180,6 +190,7 @@ public final class IndexStore: @unchecked Sendable {
             stmtSetLastStart = nil
             stmtSelectScanFingerprints = nil
             stmtSelectNotDuplicates = nil
+            stmtSelectNotDuplicatePair = nil
             stmtInsertNotDuplicate = nil
             stmtDeleteNotDuplicates = nil
             stmtDeleteNotDuplicatePair = nil
@@ -365,6 +376,11 @@ public final class IndexStore: @unchecked Sendable {
     }
 
     public func loadNotDuplicatePairs(profileID: UUID) throws -> Set<NotDuplicatePair> {
+        Set(try loadNotDuplicatePairsNewestFirst(profileID: profileID))
+    }
+
+    /// Loads Not a match decisions in their persisted display order.
+    public func loadNotDuplicatePairsNewestFirst(profileID: UUID) throws -> [NotDuplicatePair] {
         try queue.sync {
             guard let db, let stmtSelectNotDuplicates else { throw IndexStoreError.notOpen }
             sqlite3_reset(stmtSelectNotDuplicates)
@@ -373,7 +389,7 @@ public final class IndexStore: @unchecked Sendable {
 
             try bindText(stmtSelectNotDuplicates, index: 1, value: profileID.uuidString)
 
-            var out = Set<NotDuplicatePair>()
+            var out: [NotDuplicatePair] = []
 
             while true {
                 let rc = sqlite3_step(stmtSelectNotDuplicates)
@@ -388,7 +404,7 @@ public final class IndexStore: @unchecked Sendable {
                 else { continue }
 
                 let createdAt = sqlite3_column_int64(stmtSelectNotDuplicates, 2)
-                out.insert(.init(
+                out.append(.init(
                     arcidA: String(cString: aC),
                     arcidB: String(cString: bC),
                     createdAt: createdAt
@@ -401,21 +417,65 @@ public final class IndexStore: @unchecked Sendable {
 
     /// `createdAt` is milliseconds since the Unix epoch (unlike `profiles`/`index_state`,
     /// which store seconds). Callers passing an explicit value must use milliseconds.
-    public func addNotDuplicatePair(profileID: UUID, arcidA: String, arcidB: String, createdAt: Int64? = nil) throws {
+    /// Returns the stored row. If the pair already exists, its original timestamp is
+    /// retained and returned to match `ON CONFLICT DO NOTHING` semantics.
+    @discardableResult
+    public func addNotDuplicatePair(
+        profileID: UUID,
+        arcidA: String,
+        arcidB: String,
+        createdAt: Int64? = nil
+    ) throws -> NotDuplicatePair {
         try queue.sync {
-            guard let db, let stmtInsertNotDuplicate else { throw IndexStoreError.notOpen }
+            guard
+                let db,
+                let stmtInsertNotDuplicate,
+                let stmtSelectNotDuplicatePair
+            else { throw IndexStoreError.notOpen }
             sqlite3_reset(stmtInsertNotDuplicate)
             sqlite3_clear_bindings(stmtInsertNotDuplicate)
+            sqlite3_reset(stmtSelectNotDuplicatePair)
+            sqlite3_clear_bindings(stmtSelectNotDuplicatePair)
 
             let pair = NotDuplicatePair(arcidA: arcidA, arcidB: arcidB)
             let timestamp = createdAt ?? Int64(Date().timeIntervalSince1970 * 1000)
 
-            try bindText(stmtInsertNotDuplicate, index: 1, value: profileID.uuidString)
-            try bindText(stmtInsertNotDuplicate, index: 2, value: pair.arcidA)
-            try bindText(stmtInsertNotDuplicate, index: 3, value: pair.arcidB)
-            sqlite3_bind_int64(stmtInsertNotDuplicate, 4, timestamp)
+            try Self.exec(db, "BEGIN TRANSACTION;")
+            do {
+                try bindText(stmtInsertNotDuplicate, index: 1, value: profileID.uuidString)
+                try bindText(stmtInsertNotDuplicate, index: 2, value: pair.arcidA)
+                try bindText(stmtInsertNotDuplicate, index: 3, value: pair.arcidB)
+                sqlite3_bind_int64(stmtInsertNotDuplicate, 4, timestamp)
+                try stepDone(stmtInsertNotDuplicate, db: db)
 
-            try stepDone(stmtInsertNotDuplicate, db: db)
+                try bindText(stmtSelectNotDuplicatePair, index: 1, value: profileID.uuidString)
+                try bindText(stmtSelectNotDuplicatePair, index: 2, value: pair.arcidA)
+                try bindText(stmtSelectNotDuplicatePair, index: 3, value: pair.arcidB)
+
+                let rc = sqlite3_step(stmtSelectNotDuplicatePair)
+                guard rc == SQLITE_ROW else {
+                    if rc == SQLITE_DONE {
+                        throw IndexStoreError.sqlite(
+                            rc: rc,
+                            message: "Inserted Not a match pair \(pair.arcidA) • \(pair.arcidB) could not be read back"
+                        )
+                    }
+                    throw IndexStoreError.sqlite(rc: rc, message: Self.errorMessage(db))
+                }
+
+                let stored = NotDuplicatePair(
+                    arcidA: pair.arcidA,
+                    arcidB: pair.arcidB,
+                    createdAt: sqlite3_column_int64(stmtSelectNotDuplicatePair, 0)
+                )
+                sqlite3_reset(stmtSelectNotDuplicatePair)
+                try Self.exec(db, "COMMIT;")
+                return stored
+            } catch {
+                sqlite3_reset(stmtSelectNotDuplicatePair)
+                try? Self.exec(db, "ROLLBACK;")
+                throw error
+            }
         }
     }
 

@@ -188,10 +188,14 @@ final class DuplicateScanViewModel: ObservableObject {
 
     func markNotDuplicate(profile: Profile, pair: DuplicateScanResult.Pair) {
         // Persist immediately so future scans won't show this again.
-        let markedAt = Int64(Date().timeIntervalSince1970 * 1000)
+        let storedPair: IndexStore.NotDuplicatePair
         do {
             let store = try IndexStore(configuration: .init(url: AppPaths.indexDBURL()))
-            try store.addNotDuplicatePair(profileID: profile.id, arcidA: pair.arcidA, arcidB: pair.arcidB, createdAt: markedAt)
+            storedPair = try store.addNotDuplicatePair(
+                profileID: profile.id,
+                arcidA: pair.arcidA,
+                arcidB: pair.arcidB
+            )
         } catch {
             status = .failed("Failed to save exclusion: \(error)")
             log(.error, "Failed to save Not a match pair", detail: "\(pair.arcidA) • \(pair.arcidB)\n\(error)")
@@ -199,9 +203,9 @@ final class DuplicateScanViewModel: ObservableObject {
         }
 
         // Keep the Manage tab list fresh; newest decision should appear first.
-        let notPair = IndexStore.NotDuplicatePair(arcidA: pair.arcidA, arcidB: pair.arcidB, createdAt: markedAt)
-        notMatches.removeAll { $0 == notPair }
-        notMatches.insert(notPair, at: 0)
+        notMatches.removeAll { $0 == storedPair }
+        notMatches.append(storedPair)
+        notMatches = Self.sortNotMatchesForDisplay(notMatches)
 
         // Update the in-memory result to keep the UI responsive.
         if var r = result {
@@ -247,8 +251,7 @@ final class DuplicateScanViewModel: ObservableObject {
 
         do {
             let store = try IndexStore(configuration: .init(url: AppPaths.indexDBURL()))
-            let set = try store.loadNotDuplicatePairs(profileID: profile.id)
-            var pairs = Self.sortNotMatchesForDisplay(Array(set))
+            var pairs = try store.loadNotDuplicatePairsNewestFirst(profileID: profile.id)
 
             notMatches = pairs
             if pairs.isEmpty { return }

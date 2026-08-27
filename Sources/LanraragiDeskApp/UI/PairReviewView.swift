@@ -887,17 +887,8 @@ private struct ArchiveSideDetails: View {
     }
 
     private func addedString(from tags: String?) -> String? {
-        // LANraragi exposes date_added as a tag like `date_added:1712345678`.
-        for t in TagParsing.tokens(tags) {
-            if t.hasPrefix("date_added:") {
-                let v = t.dropFirst("date_added:".count)
-                if let ts = TimeInterval(v) {
-                    let d = Date(timeIntervalSince1970: ts)
-                    return Self.addedFormatter.string(from: d)
-                }
-            }
-        }
-        return nil
+        guard let tags, let date = TagParsing.parseDateAddedTag(tags) else { return nil }
+        return Self.addedFormatter.string(from: date)
     }
 
     private func sourceString(from tags: String?) -> String? {
