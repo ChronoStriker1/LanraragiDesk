@@ -313,7 +313,7 @@ struct CoverThumb: View {
                     try Task.checkCancellation()
                     let decodedImage = ImageDownsampler.thumbnail(from: bytes, maxPixelSize: maxPixelSize)
                     try Task.checkCancellation()
-                    await MainActor.run {
+                    _ = await MainActor.run {
                         CoverThumbLoadOwnership.commitIfCurrent(
                             active: activeLoad,
                             candidate: loadToken,
@@ -329,7 +329,7 @@ struct CoverThumb: View {
                     if Task.isCancelled || ErrorPresenter.isCancellationLike(error) {
                         return
                     }
-                    await MainActor.run {
+                    _ = await MainActor.run {
                         CoverThumbLoadOwnership.commitIfCurrent(
                             active: activeLoad,
                             candidate: loadToken,
