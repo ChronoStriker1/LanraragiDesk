@@ -28,6 +28,7 @@ struct ReaderView: View {
     @State private var countdownRemaining: Int?
     @State private var timerTask: Task<Void, Never>?
     @State private var loadTask: Task<Void, Never>?
+    @State private var activePageLoadID: UUID?
     @State private var prefetchTask: Task<Void, Never>?
 
     @AppStorage("reader.showStamps") private var showStamps: Bool = true
@@ -234,6 +235,7 @@ struct ReaderView: View {
         .onDisappear {
             timerTask?.cancel()
             loadTask?.cancel()
+            activePageLoadID = nil
             prefetchTask?.cancel()
             stampsTask?.cancel()
         }
@@ -515,6 +517,7 @@ struct ReaderView: View {
         countdownRemaining = nil
         timerTask?.cancel()
         loadTask?.cancel()
+        activePageLoadID = nil
         prefetchTask?.cancel()
         stampsTask?.cancel()
         currentStamps = []
@@ -609,6 +612,7 @@ struct ReaderView: View {
 
     private func loadCurrentPage() {
         loadTask?.cancel()
+        activePageLoadID = nil
         image = nil
         imageB = nil
         imagePixelSize = nil
@@ -626,32 +630,45 @@ struct ReaderView: View {
         let urlA = pages[pageIndex]
         let idxB = pageIndex + 1
         let urlB = (twoPageSpread && idxB < pages.count) ? pages[idxB] : nil
+        let loadID = UUID()
+        activePageLoadID = loadID
 
         loadTask = Task {
             do {
                 let bytesA = try await appModel.archives.bytes(profile: profile, url: urlA)
-                let pxA = ImageDownsampler.pixelSize(from: bytesA)
-                let imgA = ImageDownsampler.thumbnail(from: bytesA, maxPixelSize: 2400)
-                if Task.isCancelled { return }
-                if let imgA {
-                    self.image = imgA
-                    self.imagePixelSize = pxA
+                let decodedA = try await AsyncImageDownsampler.decode(
+                    bytesA,
+                    maxPixelSize: 2400,
+                    metadata: .pixelSize
+                )
+                try Task.checkCancellation()
+                guard activePageLoadID == loadID else { return }
+                if let imageA = decodedA.image {
+                    self.image = imageA
+                    self.imagePixelSize = decodedA.pixelSize
                 } else {
                     self.errorText = "Decode failed"
                 }
 
                 if let urlB {
                     let bytesB = try await appModel.archives.bytes(profile: profile, url: urlB)
-                    let pxB = ImageDownsampler.pixelSize(from: bytesB)
-                    let imgB = ImageDownsampler.thumbnail(from: bytesB, maxPixelSize: 2400)
-                    if Task.isCancelled { return }
-                    self.imageB = imgB
-                    self.imageBPixelSize = pxB
+                    let decodedB = try await AsyncImageDownsampler.decode(
+                        bytesB,
+                        maxPixelSize: 2400,
+                        metadata: .pixelSize
+                    )
+                    try Task.checkCancellation()
+                    guard activePageLoadID == loadID else { return }
+                    self.imageB = decodedB.image
+                    self.imageBPixelSize = decodedB.pixelSize
                 }
 
+                try Task.checkCancellation()
+                guard activePageLoadID == loadID else { return }
                 startPrefetch(profile: profile)
             } catch {
-                if Task.isCancelled { return }
+                if Task.isCancelled || ErrorPresenter.isCancellationLike(error) { return }
+                guard activePageLoadID == loadID else { return }
                 self.errorText = ErrorPresenter.short(error)
             }
         }
@@ -1116,6 +1133,7 @@ private struct PageThumbnailCell: View {
 
     @State private var thumbnail: NSImage?
     @State private var isLoading = true
+    @State private var activeLoadID: UUID?
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -1175,15 +1193,24 @@ private struct PageThumbnailCell: View {
             Button("Set as Cover") { onSetCover() }
         }
         .task(id: url) {
+            let loadID = UUID()
+            activeLoadID = loadID
             isLoading = true
             thumbnail = nil
             do {
                 let bytes = try await appModel.archives.bytes(profile: profile, url: url)
-                thumbnail = ImageDownsampler.thumbnail(from: bytes, maxPixelSize: 240)
+                let decoded = try await AsyncImageDownsampler.decode(bytes, maxPixelSize: 240)
+                try Task.checkCancellation()
+                guard activeLoadID == loadID else { return }
+                thumbnail = decoded.image
             } catch {
                 // placeholder shown on failure
             }
+            guard !Task.isCancelled, activeLoadID == loadID else { return }
             isLoading = false
+        }
+        .onDisappear {
+            activeLoadID = nil
         }
     }
 }

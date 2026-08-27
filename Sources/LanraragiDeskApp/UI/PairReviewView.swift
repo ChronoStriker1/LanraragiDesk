@@ -1543,6 +1543,8 @@ private struct PageThumbTile: View {
     @State private var errorText: String?
     @State private var hovering: Bool = false
     @State private var resolutionText: String?
+    @State private var activeTileLoadID: UUID?
+    @State private var activePreviewLoadID: UUID?
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -1630,6 +1632,9 @@ private struct PageThumbTile: View {
             }
         }
         .task(id: url) {
+            let loadID = UUID()
+            activeTileLoadID = loadID
+            activePreviewLoadID = nil
             image = nil
             fullImage = nil
             errorText = nil
@@ -1637,11 +1642,16 @@ private struct PageThumbTile: View {
             guard let url else { return }
             do {
                 let bytes = try await archives.bytes(profile: profile, url: url)
-                let res = ImageDownsampler.resolutionText(from: bytes)
-                let img = ImageDownsampler.thumbnail(from: bytes, maxPixelSize: 540)
-                if let img {
-                    image = img
-                    resolutionText = res
+                let decoded = try await AsyncImageDownsampler.decode(
+                    bytes,
+                    maxPixelSize: 540,
+                    metadata: .resolutionText
+                )
+                try Task.checkCancellation()
+                guard activeTileLoadID == loadID else { return }
+                if let decodedImage = decoded.image {
+                    image = decodedImage
+                    resolutionText = decoded.resolutionText
                 } else {
                     errorText = "Decode failed"
                 }
@@ -1649,17 +1659,26 @@ private struct PageThumbTile: View {
                 if Task.isCancelled || ErrorPresenter.isCancellationLike(error) {
                     return
                 }
+                guard activeTileLoadID == loadID else { return }
                 errorText = ErrorPresenter.short(error)
             }
+        }
+        .onDisappear {
+            activeTileLoadID = nil
+            activePreviewLoadID = nil
         }
     }
 
     private func loadFullPreview() async {
         guard fullImage == nil, let url else { return }
+        let loadID = UUID()
+        activePreviewLoadID = loadID
         do {
             let bytes = try await archives.bytes(profile: profile, url: url)
-            let img = ImageDownsampler.thumbnail(from: bytes, maxPixelSize: 1600)
-            await MainActor.run { fullImage = img }
+            let decoded = try await AsyncImageDownsampler.decode(bytes, maxPixelSize: 1600)
+            try Task.checkCancellation()
+            guard activePreviewLoadID == loadID else { return }
+            fullImage = decoded.image
         } catch {
             // Ignore preview failures; tiles still work.
         }
