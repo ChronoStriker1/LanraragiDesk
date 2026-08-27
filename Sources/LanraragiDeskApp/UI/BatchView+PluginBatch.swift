@@ -129,9 +129,14 @@ extension BatchView {
         }
         if resumed {
             let startHuman = min(max(startIndex + 1, 1), max(arcids.count, 1))
-            pluginRunStatus = "Resumed \(pluginID) at archive \(startHuman)/\(arcids.count)…"
-            appendPluginLiveEvent("Resumed \(pluginID) at \(startHuman)/\(arcids.count)")
-            appModel.activity.add(.init(kind: .action, title: "Plugin batch resumed", detail: "\(pluginID) at \(startHuman)/\(arcids.count)"))
+            let activeDelay = delayDisplay(delaySeconds)
+            pluginRunStatus = "Resumed \(pluginID) at archive \(startHuman)/\(arcids.count) • Active delay \(activeDelay)s."
+            appendPluginLiveEvent("Resumed \(pluginID) at \(startHuman)/\(arcids.count) with \(activeDelay)s delay")
+            appModel.activity.add(.init(
+                kind: .action,
+                title: "Plugin batch resumed",
+                detail: "\(pluginID) at \(startHuman)/\(arcids.count) • \(activeDelay)s delay"
+            ))
         } else {
             pluginRunStatus = "Running plugin on \(arcids.count) archives…"
             appModel.activity.add(.init(kind: .action, title: "Plugin batch queued", detail: "\(pluginID) on \(arcids.count) archives"))
@@ -428,30 +433,41 @@ extension BatchView {
             return
         }
 
+        // Capture the editable delay before restoring the remaining checkpoint
+        // settings. The updated checkpoint then becomes the source of truth for
+        // this run and for any later pause/relaunch.
+        let resumePlan = PluginBatchResumePlan(
+            checkpoint: checkpoint,
+            editedDelayText: pluginDelayText
+        )
+        let resumeCheckpoint = resumePlan.checkpoint
+        savePluginBatchCheckpoint(resumeCheckpoint)
+        resumablePluginBatch = resumeCheckpoint
+
         // Make the UI reflect the resumable batch context.
         appModel.selection.clear()
-        appModel.selection.add(checkpoint.arcids)
+        appModel.selection.add(resumeCheckpoint.arcids)
 
-        selectedPluginID = checkpoint.selectedPluginID
-        pluginArgText = checkpoint.pluginArgText
-        pluginDelayText = checkpoint.pluginDelayText
-        if let mode = PluginApplyMode(rawValue: checkpoint.pluginApplyModeRaw) {
+        selectedPluginID = resumeCheckpoint.selectedPluginID
+        pluginArgText = resumeCheckpoint.pluginArgText
+        pluginDelayText = resumeCheckpoint.pluginDelayText
+        if let mode = PluginApplyMode(rawValue: resumeCheckpoint.pluginApplyModeRaw) {
             pluginApplyMode = mode
         }
-        restorePluginUIFromCheckpointIfNeeded(checkpoint)
+        restorePluginUIFromCheckpointIfNeeded(resumeCheckpoint)
 
-        let startIndex = min(max(0, checkpoint.nextIndex), checkpoint.arcids.count)
+        let startIndex = min(max(0, resumeCheckpoint.nextIndex), resumeCheckpoint.arcids.count)
         startPluginBatch(
             profile: profile,
-            pluginID: checkpoint.selectedPluginID,
-            pluginArgument: checkpoint.pluginArgText,
-            delayText: checkpoint.pluginDelayText,
-            arcids: checkpoint.arcids,
+            pluginID: resumeCheckpoint.selectedPluginID,
+            pluginArgument: resumeCheckpoint.pluginArgText,
+            delayText: resumeCheckpoint.pluginDelayText,
+            arcids: resumeCheckpoint.arcids,
             startIndex: startIndex,
             resumed: true,
-            initialOK: checkpoint.okCount ?? 0,
-            initialFail: checkpoint.failCount ?? 0,
-            initialIndeterminate: checkpoint.indeterminateCount ?? 0
+            initialOK: resumeCheckpoint.okCount ?? 0,
+            initialFail: resumeCheckpoint.failCount ?? 0,
+            initialIndeterminate: resumeCheckpoint.indeterminateCount ?? 0
         )
     }
 
@@ -539,6 +555,7 @@ extension BatchView {
         pluginRunStatus = checkpoint.lastRunStatus ?? pluginRunStatus
         pluginCurrentArchive = checkpoint.lastCurrentArchive ?? pluginCurrentArchive
         pluginLiveEvents = checkpoint.lastLiveEvents ?? pluginLiveEvents
+        pluginDelayText = checkpoint.pluginDelayText
         liveEvents = (checkpoint.lastLiveEvents ?? []).map { event in
             guard event.hasPrefix("["), let timestampEnd = event.firstIndex(of: "]") else {
                 return "[PLUGIN] \(event)"

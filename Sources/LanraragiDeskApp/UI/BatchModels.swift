@@ -32,7 +32,7 @@ struct PluginBatchCheckpoint: Codable {
     var nextIndex: Int
     let selectedPluginID: String
     let pluginArgText: String
-    let pluginDelayText: String
+    var pluginDelayText: String
     let pluginApplyModeRaw: String
     var inProgress: Bool?
     var paused: Bool?
@@ -44,6 +44,46 @@ struct PluginBatchCheckpoint: Codable {
     var lastCurrentArchive: String?
     var lastLiveEvents: [String]?
     var lastUpdatedAt: Date?
+}
+
+struct PluginBatchResumePlan {
+    let checkpoint: PluginBatchCheckpoint
+
+    init(
+        checkpoint: PluginBatchCheckpoint,
+        editedDelayText: String,
+        resumedAt: Date = Date()
+    ) {
+        var updated = checkpoint
+        updated.pluginDelayText = editedDelayText
+        updated.inProgress = true
+        updated.paused = false
+        updated.interrupted = false
+        let delaySeconds = PluginBatchDelayPresentation.seconds(from: editedDelayText)
+        let delayDisplay = PluginBatchDelayPresentation.display(delaySeconds)
+        updated.lastRunStatus = "Resuming • Active delay \(delayDisplay)s."
+        updated.lastUpdatedAt = resumedAt
+        self.checkpoint = updated
+    }
+}
+
+enum PluginBatchDelayPresentation {
+    static func seconds(from raw: String) -> Double {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let parsed = Double(trimmed), parsed.isFinite else { return 0 }
+        return max(0, parsed)
+    }
+
+    static func display(_ seconds: Double) -> String {
+        if seconds.rounded() == seconds {
+            return String(Int(seconds))
+        }
+        return String(format: "%.2f", seconds)
+    }
+
+    static func resumeText(delayText: String) -> String {
+        "Resume will use a \(display(seconds(from: delayText)))s delay between runs."
+    }
 }
 
 @MainActor
