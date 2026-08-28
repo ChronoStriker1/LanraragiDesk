@@ -52,6 +52,18 @@ final class PluginMetadataSupportTests: XCTestCase {
             PluginMetadataSupport.queuedResult(from: nonMetadata),
             .nonMetadata(type: "script")
         )
+        XCTAssertTrue(QueuedPluginMetadataResult.missing.shouldRefreshServerMetadata)
+        XCTAssertFalse(QueuedPluginMetadataResult.malformed.shouldRefreshServerMetadata)
+    }
+
+    func testMergingTagsDeduplicatesCaseInsensitivelyAndPreservesFirstSpelling() {
+        XCTAssertEqual(
+            PluginMetadataSupport.mergingTags(
+                existing: "Artist:One, language:English, artist:one",
+                additions: "LANGUAGE:english, group:Circle, Group:circle"
+            ),
+            "Artist:One, language:English, group:Circle"
+        )
     }
 
     func testQueuedResultUsesFailedMinionStateAndTopLevelError() throws {

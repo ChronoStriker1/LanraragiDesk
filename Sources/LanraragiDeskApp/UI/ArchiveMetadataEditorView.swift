@@ -714,7 +714,8 @@ struct ArchiveMetadataEditorView: View {
                         await handleQueuedPluginResult(
                             completion.metadataResult ?? .missing,
                             pluginID: pluginID,
-                            jobID: job.job
+                            jobID: job.job,
+                            previousSignature: prePluginSignature
                         )
                     case .failed:
                         await reportQueuedPluginFailure(completion.metadataResult, pluginID: pluginID, jobID: job.job)
@@ -749,7 +750,8 @@ struct ArchiveMetadataEditorView: View {
     private func handleQueuedPluginResult(
         _ result: QueuedPluginMetadataResult,
         pluginID: String,
-        jobID: Int
+        jobID: Int,
+        previousSignature: String
     ) async {
         switch result {
         case .patch(let patch):
@@ -766,13 +768,17 @@ struct ArchiveMetadataEditorView: View {
         case .failed:
             await reportQueuedPluginFailure(result, pluginID: pluginID, jobID: jobID)
         case .missing:
-            await MainActor.run {
-                pluginRunStatus = "Plugin job \(jobID) completed, but its result is unavailable. Metadata was not applied."
+            if result.shouldRefreshServerMetadata {
+                _ = await refreshMetadataAfterPlugin(
+                    status: "Plugin job \(jobID) result unavailable. Server metadata refreshed.",
+                    previousSignature: previousSignature,
+                    unchangedStatus: "Plugin job \(jobID) result unavailable. No server metadata changes detected."
+                )
             }
             appModel.activity.add(.init(
                 kind: .warning,
                 title: "Plugin result unavailable",
-                detail: "\(pluginID) • \(arcid) • job \(jobID)"
+                detail: "\(pluginID) • \(arcid) • job \(jobID) • server metadata refresh attempted without rerunning"
             ))
         case .malformed:
             await MainActor.run {
@@ -810,7 +816,7 @@ struct ArchiveMetadataEditorView: View {
             let updatedTitle = patch.title ?? currentTitle
             let updatedSummary = patch.summary ?? currentSummary
             let updatedTags = patch.tags.map {
-                MetadataTagFormatter.normalizedCSV(from: [currentTags, $0].filter { !$0.isEmpty }.joined(separator: ", "))
+                PluginMetadataSupport.mergingTags(existing: currentTags, additions: $0)
             } ?? currentTags
 
             let currentSignature = PluginMetadataSupport.signature(

@@ -42,6 +42,14 @@ public enum QueuedPluginMetadataResult: Equatable, Sendable {
         guard case .failed(let message) = self else { return nil }
         return message
     }
+
+    /// A missing detail payload can indicate an older server that only
+    /// exposes basic job status. Refresh metadata to preserve legacy behavior,
+    /// but do not rerun the plugin to recover output.
+    public var shouldRefreshServerMetadata: Bool {
+        guard case .missing = self else { return false }
+        return true
+    }
 }
 
 /// Shared interpretation of plugin output and options used by single-archive and batch flows.
@@ -103,6 +111,22 @@ public enum PluginMetadataSupport {
             normalizedTagsForComparison(tags),
             summary.trimmingCharacters(in: .whitespacesAndNewlines),
         ].joined(separator: "|||")
+    }
+
+    /// Merges LANraragi tag CSVs while preserving first-seen spelling and
+    /// order and removing duplicates case-insensitively.
+    public static func mergingTags(existing: String, additions: String) -> String {
+        deduplicatedTags([existing, additions].joined(separator: ", "))
+    }
+
+    public static func deduplicatedTags(_ tags: String) -> String {
+        var seen: Set<String> = []
+        return tags
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .filter { seen.insert($0.lowercased()).inserted }
+            .joined(separator: ", ")
     }
 
     public static func optionPresentation(for parameter: PluginInfo.Parameter) -> PluginOptionPresentation {

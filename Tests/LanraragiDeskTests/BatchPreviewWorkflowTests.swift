@@ -158,21 +158,21 @@ final class BatchPreviewWorkflowTests: XCTestCase {
         let view = BatchView()
         let patch = PluginMetadataPatch(
             title: "Plugin title",
-            tags: "artist:New, language:English",
+            tags: "artist:New, LANGUAGE:english, Artist:new",
             summary: "Plugin summary"
         )
 
         let merged = view.applyPluginPatch(
             patch,
             currentTitle: "Old title",
-            currentTags: "artist:Old, language:English",
+            currentTags: "artist:Old, language:English, ARTIST:old",
             currentSummary: "Old summary",
             mode: .mergeWithExisting
         )
         let replaced = view.applyPluginPatch(
             patch,
             currentTitle: "Old title",
-            currentTags: "artist:Old, language:English",
+            currentTags: "artist:Old, language:English, ARTIST:old",
             currentSummary: "Old summary",
             mode: .replaceWithPluginData
         )
@@ -181,7 +181,7 @@ final class BatchPreviewWorkflowTests: XCTestCase {
         XCTAssertEqual(merged.tags, "artist:Old, language:English, artist:New")
         XCTAssertEqual(merged.summary, "Plugin summary")
         XCTAssertEqual(replaced.title, "Plugin title")
-        XCTAssertEqual(replaced.tags, "artist:New, language:English")
+        XCTAssertEqual(replaced.tags, "artist:New, LANGUAGE:english")
         XCTAssertEqual(replaced.summary, "Plugin summary")
     }
 

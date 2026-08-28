@@ -201,7 +201,8 @@ extension BatchView {
                                 appendPluginLiveEvent("Job \(job.job) failed for \(displayName(for: arcid))\(suffix)")
                             }
                         case .finished:
-                            switch completion.metadataResult ?? .missing {
+                            let metadataResult = completion.metadataResult ?? .missing
+                            switch metadataResult {
                             case .patch(let patch):
                                 let applied = try await applyQueuedPluginPatchBatch(
                                     patch,
@@ -271,13 +272,22 @@ extension BatchView {
                             case .missing:
                                 indeterminate += 1
                                 let reason = "result unavailable"
+                                var serverChanged = false
+                                if metadataResult.shouldRefreshServerMetadata {
+                                    serverChanged = await refreshMetadataAfterPluginBatch(
+                                        profile: profile,
+                                        arcid: arcid,
+                                        previousSignature: preSignature
+                                    )
+                                }
                                 appModel.activity.add(.init(
                                     kind: .warning,
                                     title: "Plugin job result indeterminate",
-                                    detail: "\(pluginID) • \(arcid) • job \(job.job) • \(reason)"
+                                    detail: "\(pluginID) • \(arcid) • job \(job.job) • \(reason) • server metadata refresh attempted"
                                 ))
                                 await MainActor.run {
-                                    appendPluginLiveEvent("Job \(job.job) \(reason) for \(displayName(for: arcid)); metadata not applied")
+                                    let refreshResult = serverChanged ? "server metadata changed" : "server metadata refresh attempted"
+                                    appendPluginLiveEvent("Job \(job.job) \(reason) for \(displayName(for: arcid)); \(refreshResult)")
                                 }
                             case .malformed:
                                 indeterminate += 1
@@ -717,17 +727,6 @@ extension BatchView {
         return (current, updated, true)
     }
 
-    func mergeTagCSV(base: String, additions: String) -> String {
-        var items = parseTags(base)
-        var seen = Set(items.map { $0.lowercased() })
-        for tag in parseTags(additions) {
-            let key = tag.lowercased()
-            if seen.insert(key).inserted {
-                items.append(tag)
-            }
-        }
-        return items.joined(separator: ", ")
-    }
     func pauseBetweenPluginRuns(
         seconds: Double,
         done: Int,
@@ -776,12 +775,12 @@ extension BatchView {
         if let patchTags = patch.tags {
             switch mode {
             case .mergeWithExisting:
-                tags = uniqueTagCSV(mergeTagCSV(base: currentTags, additions: patchTags))
+                tags = PluginMetadataSupport.mergingTags(existing: currentTags, additions: patchTags)
             case .replaceWithPluginData:
-                tags = uniqueTagCSV(patchTags)
+                tags = PluginMetadataSupport.deduplicatedTags(patchTags)
             }
         } else {
-            tags = uniqueTagCSV(currentTags)
+            tags = PluginMetadataSupport.deduplicatedTags(currentTags)
         }
 
         return (title, tags, summary)
