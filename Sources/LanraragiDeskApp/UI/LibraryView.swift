@@ -3,6 +3,25 @@ import AppKit
 import SwiftUI
 import LanraragiKit
 
+@MainActor
+enum LibrarySearchSubmission {
+    /// Ends field editing before reading the bound draft. AppKit's field editor can
+    /// otherwise be one event-loop turn ahead of SwiftUI's binding on submission.
+    @discardableResult
+    static func afterEndingEditing(
+        editorDraft: String?,
+        endEditing: () -> Void,
+        readDraft: @escaping @MainActor () -> String,
+        submit: @escaping @MainActor (String) -> Void
+    ) -> Task<Void, Never> {
+        endEditing()
+        return Task { @MainActor in
+            await Task.yield()
+            submit(editorDraft ?? readDraft())
+        }
+    }
+}
+
 struct LibraryView: View {
     @EnvironmentObject private var appModel: AppModel
     @Environment(\.openWindow) private var openWindow
@@ -230,13 +249,13 @@ struct LibraryView: View {
                         TextField("Search…", text: $queryDraft)
                             .textFieldStyle(.roundedBorder)
                             .focused($searchFocused)
-                            .onSubmit { handleSearchSubmit() }
+                            .onSubmit { beginSearchSubmit() }
                             .onChange(of: queryDraft) { _, _ in
                                 queueSuggestionRefresh()
                             }
                             .frame(maxWidth: .infinity)
 
-                        Button("Search") { handleSearchSubmit() }
+                        Button("Search") { beginSearchSubmit() }
 
                         Button("Clear") {
                             queryDraft = ""
@@ -527,14 +546,37 @@ struct LibraryView: View {
         openWindow(id: "reader")
     }
 
-    private func handleSearchSubmit() {
-        let normalized = normalizeLANraragiQuery(queryDraft)
-        queryDraft = normalized
-        vm.query = normalized
-        refreshLibrary()
+    private func beginSearchSubmit() {
+        // On macOS the field editor can display newly typed text before SwiftUI has
+        // propagated it to this view's @State. Ending editing and reading on the next
+        // MainActor turn makes both Return and the Search button commit what is visible.
+        let editorDraft: String?
+        if let fieldEditor = NSApp.keyWindow?.firstResponder as? NSTextView {
+            editorDraft = fieldEditor.string
+        } else {
+            editorDraft = nil
+        }
+        LibrarySearchSubmission.afterEndingEditing(
+            editorDraft: editorDraft,
+            endEditing: {
+                searchFocused = false
+                _ = NSApp.keyWindow?.makeFirstResponder(nil)
+            },
+            readDraft: { queryDraft },
+            submit: { handleSearchSubmit($0) }
+        )
     }
 
-    private func refreshLibrary(excluding excludedArcid: String? = nil) {
+    private func handleSearchSubmit(_ draft: String) {
+        let normalized = normalizeLANraragiQuery(draft)
+        queryDraft = normalized
+        refreshLibrary(submittingQuery: normalized)
+    }
+
+    private func refreshLibrary(
+        excluding excludedArcid: String? = nil,
+        submittingQuery: String? = nil
+    ) {
         metadataEpoch &+= 1
         metaByArcid.removeAll()
         let visibleArcids: [String]
@@ -548,7 +590,11 @@ struct LibraryView: View {
             metadata: metaByArcid,
             sortOrder: listSortOrder
         )
-        vm.refresh(profile: profile)
+        if let submittingQuery {
+            vm.submitSearch(query: submittingQuery, profile: profile)
+        } else {
+            vm.refresh(profile: profile)
+        }
     }
 
     private func selectAllResults() async {

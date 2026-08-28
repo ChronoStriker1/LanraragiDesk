@@ -5,6 +5,70 @@ import XCTest
 
 @MainActor
 final class LibraryViewModelGenerationTests: XCTestCase {
+    func testSearchSubmissionPrefersVisibleEditorDraftWhenBindingIsStale() async {
+        let visibleDraft = "codex-regression-20260827-fixture"
+        let boundDraft = ""
+        var submittedDraft: String?
+
+        let submission = LibrarySearchSubmission.afterEndingEditing(
+            editorDraft: visibleDraft,
+            endEditing: {},
+            readDraft: { boundDraft },
+            submit: { submittedDraft = $0 }
+        )
+        await submission.value
+
+        XCTAssertEqual(submittedDraft, visibleDraft)
+    }
+
+    func testSearchSubmissionReadsBindingAfterEndingEditingWithoutFieldEditor() async {
+        let visibleDraft = "codex-regression-20260827-fixture"
+        var boundDraft = ""
+        var submittedDraft: String?
+
+        let submission = LibrarySearchSubmission.afterEndingEditing(
+            editorDraft: nil,
+            endEditing: { boundDraft = visibleDraft },
+            readDraft: { boundDraft },
+            submit: { submittedDraft = $0 }
+        )
+        await submission.value
+
+        XCTAssertEqual(submittedDraft, visibleDraft)
+    }
+
+    func testSubmitSearchCommitsExactQueryAndRejectsInflightUnfilteredResponse() async throws {
+        let loader = ControlledLibraryPageLoader()
+        let viewModel = makeViewModel(loader: loader)
+        let profile = makeProfile()
+
+        let unfilteredLoad = Task { await viewModel.loadMore(profile: profile) }
+        await loader.waitForRequestCount(1)
+
+        let query = "codex-regression-20260827-fixture"
+        viewModel.submitSearch(query: query, profile: profile)
+        await loader.waitForRequestCount(2)
+
+        let storedSubmittedRequest = await loader.request(at: 1)
+        let submittedRequest = try XCTUnwrap(storedSubmittedRequest)
+        XCTAssertEqual(submittedRequest.start, 0)
+        XCTAssertEqual(submittedRequest.query, query)
+
+        await loader.succeed(call: 0, arcids: (0..<25).map { "stale-\($0)" }, recordsFiltered: 25)
+        _ = await unfilteredLoad.value
+        XCTAssertTrue(viewModel.arcids.isEmpty)
+
+        let fixtureIDs = ["fixture-a", "fixture-b"]
+        await loader.succeed(call: 1, arcids: fixtureIDs, recordsFiltered: fixtureIDs.count)
+        let submittedLoadFinished = await eventually {
+            viewModel.arcids == fixtureIDs && !viewModel.isLoading
+        }
+
+        XCTAssertTrue(submittedLoadFinished)
+        XCTAssertEqual(viewModel.query, query)
+        XCTAssertEqual(viewModel.arcids, fixtureIDs)
+    }
+
     func testRefreshStartsNewGenerationAndStaleSuccessCannotMutateItsState() async throws {
         let loader = ControlledLibraryPageLoader()
         let viewModel = makeViewModel(loader: loader)
