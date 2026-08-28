@@ -117,6 +117,14 @@ final class LibraryViewModel: ObservableObject {
         Task { await loadMore(profile: profile, generationID: generation.id) }
     }
 
+    /// Commits a search query and starts its load as one MainActor-isolated operation.
+    /// Keeping these together prevents callers from accidentally refreshing a generation
+    /// that still contains the previous query.
+    func submitSearch(query: String, profile: Profile) {
+        self.query = query
+        refresh(profile: profile)
+    }
+
     func loadCategories(profile: Profile) async {
         guard !isLoadingCategories else { return }
         isLoadingCategories = true

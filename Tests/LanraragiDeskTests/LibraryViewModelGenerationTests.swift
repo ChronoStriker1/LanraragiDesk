@@ -1,10 +1,99 @@
 import Foundation
+import AppKit
 import LanraragiKit
+import SwiftUI
 import XCTest
 @testable import LanraragiDesk
 
 @MainActor
 final class LibraryViewModelGenerationTests: XCTestCase {
+    func testSearchButtonReadsRetainedControlAfterFieldEditorResigns() {
+        let visibleDraft = "codex-regression-20260827-fixture"
+        let textField = NSTextField(string: visibleDraft)
+        let control = LibrarySearchFieldControl()
+        control.attach(textField)
+
+        XCTAssertNil(textField.currentEditor())
+        XCTAssertEqual(control.currentText(fallback: ""), visibleDraft)
+    }
+
+    func testSearchControlFallsBackOnlyAfterUnderlyingFieldIsReleased() {
+        let fallback = "bound-query"
+        let textField = NSTextField(string: "visible-query")
+        let control = LibrarySearchFieldControl()
+        control.attach(textField)
+        control.detach(textField)
+
+        XCTAssertEqual(control.currentText(fallback: fallback), fallback)
+    }
+
+    func testSearchReturnCommandSubmitsLiveFieldEditorValue() {
+        let visibleDraft = "artist:codex-regression-20260827"
+        var boundDraft = ""
+        var submittedDraft: String?
+        let control = LibrarySearchFieldControl()
+        let coordinator = LibrarySearchTextField.Coordinator(
+            text: Binding(
+                get: { boundDraft },
+                set: { boundDraft = $0 }
+            ),
+            control: control,
+            onSubmit: { submittedDraft = $0 }
+        )
+        let textField = NSTextField(string: "")
+        let fieldEditor = NSTextView(frame: .zero)
+        fieldEditor.string = visibleDraft
+
+        let handled = coordinator.control(
+            textField,
+            textView: fieldEditor,
+            doCommandBy: #selector(NSResponder.insertNewline(_:))
+        )
+
+        XCTAssertTrue(handled)
+        XCTAssertEqual(textField.stringValue, visibleDraft)
+        XCTAssertEqual(boundDraft, visibleDraft)
+        XCTAssertEqual(submittedDraft, visibleDraft)
+    }
+
+    func testReturnSearchSupersedesInflightBlankSubmission() async throws {
+        let loader = ControlledLibraryPageLoader()
+        let viewModel = makeViewModel(loader: loader)
+        let profile = makeProfile()
+
+        viewModel.submitSearch(query: "", profile: profile)
+        await loader.waitForRequestCount(1)
+        let storedBlankRequest = await loader.request(at: 0)
+        let blankRequest = try XCTUnwrap(storedBlankRequest)
+        XCTAssertEqual(blankRequest.query, "")
+
+        let query = "artist:codex-regression-20260827"
+        viewModel.submitSearch(query: query, profile: profile)
+        await loader.waitForRequestCount(2)
+
+        let storedSubmittedRequest = await loader.request(at: 1)
+        let submittedRequest = try XCTUnwrap(storedSubmittedRequest)
+        XCTAssertEqual(submittedRequest.start, 0)
+        XCTAssertEqual(submittedRequest.query, query)
+
+        await loader.succeed(call: 0, arcids: (0..<25).map { "stale-\($0)" }, recordsFiltered: 25)
+        let staleLoadFinished = await eventually {
+            viewModel.requestTimingHistory.entries.contains { $0.outcome == .superseded }
+        }
+        XCTAssertTrue(staleLoadFinished)
+        XCTAssertTrue(viewModel.arcids.isEmpty)
+
+        let fixtureIDs = ["fixture-a", "fixture-b"]
+        await loader.succeed(call: 1, arcids: fixtureIDs, recordsFiltered: fixtureIDs.count)
+        let submittedLoadFinished = await eventually {
+            viewModel.arcids == fixtureIDs && !viewModel.isLoading
+        }
+
+        XCTAssertTrue(submittedLoadFinished)
+        XCTAssertEqual(viewModel.query, query)
+        XCTAssertEqual(viewModel.arcids, fixtureIDs)
+    }
+
     func testRefreshStartsNewGenerationAndStaleSuccessCannotMutateItsState() async throws {
         let loader = ControlledLibraryPageLoader()
         let viewModel = makeViewModel(loader: loader)
