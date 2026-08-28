@@ -4,20 +4,97 @@ import SwiftUI
 import LanraragiKit
 
 @MainActor
-enum LibrarySearchSubmission {
-    /// Ends field editing before reading the bound draft. AppKit's field editor can
-    /// otherwise be one event-loop turn ahead of SwiftUI's binding on submission.
-    @discardableResult
-    static func afterEndingEditing(
-        editorDraft: String?,
-        endEditing: () -> Void,
-        readDraft: @escaping @MainActor () -> String,
-        submit: @escaping @MainActor (String) -> Void
-    ) -> Task<Void, Never> {
-        endEditing()
-        return Task { @MainActor in
-            await Task.yield()
-            submit(editorDraft ?? readDraft())
+final class LibrarySearchFieldControl: ObservableObject {
+    private weak var textField: NSTextField?
+
+    func attach(_ textField: NSTextField) {
+        self.textField = textField
+    }
+
+    func detach(_ textField: NSTextField) {
+        if self.textField === textField {
+            self.textField = nil
+        }
+    }
+
+    func currentText(fallback: String) -> String {
+        textField?.stringValue ?? fallback
+    }
+
+    func resignFocus() {
+        guard let textField, textField.currentEditor() != nil else { return }
+        _ = textField.window?.makeFirstResponder(nil)
+    }
+}
+
+struct LibrarySearchTextField: NSViewRepresentable {
+    @Binding var text: String
+    let control: LibrarySearchFieldControl
+    let onSubmit: @MainActor (String) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, control: control, onSubmit: onSubmit)
+    }
+
+    func makeNSView(context: Context) -> NSTextField {
+        let textField = NSTextField(string: text)
+        textField.placeholderString = "Search…"
+        textField.isBezeled = true
+        textField.bezelStyle = .roundedBezel
+        textField.drawsBackground = true
+        textField.isEditable = true
+        textField.isSelectable = true
+        textField.usesSingleLineMode = true
+        textField.lineBreakMode = .byTruncatingTail
+        textField.delegate = context.coordinator
+        textField.target = context.coordinator
+        textField.action = #selector(Coordinator.submit(_:))
+        textField.setAccessibilityIdentifier("library.search")
+        control.attach(textField)
+        return textField
+    }
+
+    func updateNSView(_ textField: NSTextField, context: Context) {
+        context.coordinator.text = $text
+        context.coordinator.onSubmit = onSubmit
+        control.attach(textField)
+        if textField.stringValue != text {
+            textField.stringValue = text
+        }
+    }
+
+    static func dismantleNSView(_ textField: NSTextField, coordinator: Coordinator) {
+        textField.delegate = nil
+        textField.target = nil
+        textField.action = nil
+        coordinator.control?.detach(textField)
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var text: Binding<String>
+        var onSubmit: @MainActor (String) -> Void
+        weak var control: LibrarySearchFieldControl?
+
+        init(
+            text: Binding<String>,
+            control: LibrarySearchFieldControl,
+            onSubmit: @escaping @MainActor (String) -> Void
+        ) {
+            self.text = text
+            self.control = control
+            self.onSubmit = onSubmit
+        }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let textField = notification.object as? NSTextField else { return }
+            text.wrappedValue = textField.stringValue
+        }
+
+        @objc func submit(_ sender: NSTextField) {
+            let liveText = sender.stringValue
+            text.wrappedValue = liveText
+            onSubmit(liveText)
         }
     }
 }
@@ -31,6 +108,7 @@ struct LibraryView: View {
     @AppStorage("thumbs.cropToFill") private var cropThumbsToFill: Bool = false
 
     @StateObject private var vm = LibraryViewModel()
+    @StateObject private var searchFieldControl = LibrarySearchFieldControl()
     @State private var filtersExpanded: Bool = false
     @State private var requestTimingsExpanded: Bool = false
     @State private var queryDraft: String = ""
@@ -42,7 +120,6 @@ struct LibraryView: View {
     @State private var tankPicker: TankPickerRoute?
     @State private var tankEditor: TankEditorRoute?
     @State private var hoveringArchiveResultsArea: Bool = false
-    @FocusState private var searchFocused: Bool
 
     // Used by list/table view to avoid refetching metadata per-cell.
     @State private var metaByArcid: [String: ArchiveMetadata] = [:]
@@ -185,7 +262,7 @@ struct LibraryView: View {
             queryDraft = normalized
             vm.query = normalized
             refreshLibrary()
-            searchFocused = false
+            searchFieldControl.resignFocus()
             tagSuggestions = []
             appModel.consumeLibrarySearchRequest(id: request.id)
         }
@@ -246,16 +323,19 @@ struct LibraryView: View {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 10) {
-                        TextField("Search…", text: $queryDraft)
-                            .textFieldStyle(.roundedBorder)
-                            .focused($searchFocused)
-                            .onSubmit { beginSearchSubmit() }
-                            .onChange(of: queryDraft) { _, _ in
-                                queueSuggestionRefresh()
-                            }
-                            .frame(maxWidth: .infinity)
+                        LibrarySearchTextField(
+                            text: $queryDraft,
+                            control: searchFieldControl,
+                            onSubmit: handleSearchSubmit
+                        )
+                        .frame(height: 24)
+                        .accessibilityLabel("Search")
+                        .onChange(of: queryDraft) { _, _ in queueSuggestionRefresh() }
+                        .frame(maxWidth: .infinity)
 
-                        Button("Search") { beginSearchSubmit() }
+                        Button("Search") {
+                            handleSearchSubmit(searchFieldControl.currentText(fallback: queryDraft))
+                        }
 
                         Button("Clear") {
                             queryDraft = ""
@@ -544,27 +624,6 @@ struct LibraryView: View {
         }
         appModel.setActiveReader(profileID: profile.id, arcid: arcid)
         openWindow(id: "reader")
-    }
-
-    private func beginSearchSubmit() {
-        // On macOS the field editor can display newly typed text before SwiftUI has
-        // propagated it to this view's @State. Ending editing and reading on the next
-        // MainActor turn makes both Return and the Search button commit what is visible.
-        let editorDraft: String?
-        if let fieldEditor = NSApp.keyWindow?.firstResponder as? NSTextView {
-            editorDraft = fieldEditor.string
-        } else {
-            editorDraft = nil
-        }
-        LibrarySearchSubmission.afterEndingEditing(
-            editorDraft: editorDraft,
-            endEditing: {
-                searchFocused = false
-                _ = NSApp.keyWindow?.makeFirstResponder(nil)
-            },
-            readDraft: { queryDraft },
-            submit: { handleSearchSubmit($0) }
-        )
     }
 
     private func handleSearchSubmit(_ draft: String) {

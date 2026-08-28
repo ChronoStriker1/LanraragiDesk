@@ -1,39 +1,50 @@
 import Foundation
+import AppKit
 import LanraragiKit
+import SwiftUI
 import XCTest
 @testable import LanraragiDesk
 
 @MainActor
 final class LibraryViewModelGenerationTests: XCTestCase {
-    func testSearchSubmissionPrefersVisibleEditorDraftWhenBindingIsStale() async {
+    func testSearchButtonReadsRetainedControlAfterFieldEditorResigns() {
         let visibleDraft = "codex-regression-20260827-fixture"
-        let boundDraft = ""
-        var submittedDraft: String?
+        let textField = NSTextField(string: visibleDraft)
+        let control = LibrarySearchFieldControl()
+        control.attach(textField)
 
-        let submission = LibrarySearchSubmission.afterEndingEditing(
-            editorDraft: visibleDraft,
-            endEditing: {},
-            readDraft: { boundDraft },
-            submit: { submittedDraft = $0 }
-        )
-        await submission.value
-
-        XCTAssertEqual(submittedDraft, visibleDraft)
+        XCTAssertNil(textField.currentEditor())
+        XCTAssertEqual(control.currentText(fallback: ""), visibleDraft)
     }
 
-    func testSearchSubmissionReadsBindingAfterEndingEditingWithoutFieldEditor() async {
+    func testSearchControlFallsBackOnlyAfterUnderlyingFieldIsReleased() {
+        let fallback = "bound-query"
+        let textField = NSTextField(string: "visible-query")
+        let control = LibrarySearchFieldControl()
+        control.attach(textField)
+        control.detach(textField)
+
+        XCTAssertEqual(control.currentText(fallback: fallback), fallback)
+    }
+
+    func testSearchReturnSubmitsLiveUnderlyingControlValue() {
         let visibleDraft = "codex-regression-20260827-fixture"
         var boundDraft = ""
         var submittedDraft: String?
-
-        let submission = LibrarySearchSubmission.afterEndingEditing(
-            editorDraft: nil,
-            endEditing: { boundDraft = visibleDraft },
-            readDraft: { boundDraft },
-            submit: { submittedDraft = $0 }
+        let control = LibrarySearchFieldControl()
+        let coordinator = LibrarySearchTextField.Coordinator(
+            text: Binding(
+                get: { boundDraft },
+                set: { boundDraft = $0 }
+            ),
+            control: control,
+            onSubmit: { submittedDraft = $0 }
         )
-        await submission.value
+        let textField = NSTextField(string: visibleDraft)
 
+        coordinator.submit(textField)
+
+        XCTAssertEqual(boundDraft, visibleDraft)
         XCTAssertEqual(submittedDraft, visibleDraft)
     }
 
