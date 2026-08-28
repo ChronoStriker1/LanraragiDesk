@@ -91,8 +91,30 @@ struct LibrarySearchTextField: NSViewRepresentable {
             text.wrappedValue = textField.stringValue
         }
 
+        func control(
+            _ control: NSControl,
+            textView: NSTextView,
+            doCommandBy commandSelector: Selector
+        ) -> Bool {
+            guard commandSelector == #selector(NSResponder.insertNewline(_:)),
+                  let textField = control as? NSTextField else {
+                return false
+            }
+
+            // NSTextField's target/action is not consistently dispatched for Return
+            // when hosted through NSViewRepresentable. Consume the field editor command
+            // and commit its live value directly so an in-flight prior search cannot win.
+            submit(textView.string, through: textField)
+            return true
+        }
+
         @objc func submit(_ sender: NSTextField) {
-            let liveText = sender.stringValue
+            let liveText = (sender.currentEditor() as? NSTextView)?.string ?? sender.stringValue
+            submit(liveText, through: sender)
+        }
+
+        private func submit(_ liveText: String, through textField: NSTextField) {
+            textField.stringValue = liveText
             text.wrappedValue = liveText
             onSubmit(liveText)
         }

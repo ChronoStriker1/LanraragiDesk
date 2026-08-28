@@ -27,8 +27,8 @@ final class LibraryViewModelGenerationTests: XCTestCase {
         XCTAssertEqual(control.currentText(fallback: fallback), fallback)
     }
 
-    func testSearchReturnSubmitsLiveUnderlyingControlValue() {
-        let visibleDraft = "codex-regression-20260827-fixture"
+    func testSearchReturnCommandSubmitsLiveFieldEditorValue() {
+        let visibleDraft = "artist:codex-regression-20260827"
         var boundDraft = ""
         var submittedDraft: String?
         let control = LibrarySearchFieldControl()
@@ -40,23 +40,34 @@ final class LibraryViewModelGenerationTests: XCTestCase {
             control: control,
             onSubmit: { submittedDraft = $0 }
         )
-        let textField = NSTextField(string: visibleDraft)
+        let textField = NSTextField(string: "")
+        let fieldEditor = NSTextView(frame: .zero)
+        fieldEditor.string = visibleDraft
 
-        coordinator.submit(textField)
+        let handled = coordinator.control(
+            textField,
+            textView: fieldEditor,
+            doCommandBy: #selector(NSResponder.insertNewline(_:))
+        )
 
+        XCTAssertTrue(handled)
+        XCTAssertEqual(textField.stringValue, visibleDraft)
         XCTAssertEqual(boundDraft, visibleDraft)
         XCTAssertEqual(submittedDraft, visibleDraft)
     }
 
-    func testSubmitSearchCommitsExactQueryAndRejectsInflightUnfilteredResponse() async throws {
+    func testReturnSearchSupersedesInflightBlankSubmission() async throws {
         let loader = ControlledLibraryPageLoader()
         let viewModel = makeViewModel(loader: loader)
         let profile = makeProfile()
 
-        let unfilteredLoad = Task { await viewModel.loadMore(profile: profile) }
+        viewModel.submitSearch(query: "", profile: profile)
         await loader.waitForRequestCount(1)
+        let storedBlankRequest = await loader.request(at: 0)
+        let blankRequest = try XCTUnwrap(storedBlankRequest)
+        XCTAssertEqual(blankRequest.query, "")
 
-        let query = "codex-regression-20260827-fixture"
+        let query = "artist:codex-regression-20260827"
         viewModel.submitSearch(query: query, profile: profile)
         await loader.waitForRequestCount(2)
 
@@ -66,7 +77,10 @@ final class LibraryViewModelGenerationTests: XCTestCase {
         XCTAssertEqual(submittedRequest.query, query)
 
         await loader.succeed(call: 0, arcids: (0..<25).map { "stale-\($0)" }, recordsFiltered: 25)
-        _ = await unfilteredLoad.value
+        let staleLoadFinished = await eventually {
+            viewModel.requestTimingHistory.entries.contains { $0.outcome == .superseded }
+        }
+        XCTAssertTrue(staleLoadFinished)
         XCTAssertTrue(viewModel.arcids.isEmpty)
 
         let fixtureIDs = ["fixture-a", "fixture-b"]
