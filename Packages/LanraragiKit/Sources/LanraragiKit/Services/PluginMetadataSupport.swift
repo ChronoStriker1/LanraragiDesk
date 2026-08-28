@@ -29,6 +29,29 @@ public struct PluginOptionPresentation: Equatable, Sendable {
     }
 }
 
+/// The validated terminal result of a queued LANraragi metadata plugin job.
+public enum QueuedPluginMetadataResult: Equatable, Sendable {
+    case patch(PluginMetadataPatch)
+    case noChanges
+    case failed(message: String?)
+    case missing
+    case malformed
+    case nonMetadata(type: String?)
+
+    public var failureMessage: String? {
+        guard case .failed(let message) = self else { return nil }
+        return message
+    }
+
+    /// A missing detail payload can indicate an older server that only
+    /// exposes basic job status. Refresh metadata to preserve legacy behavior,
+    /// but do not rerun the plugin to recover output.
+    public var shouldRefreshServerMetadata: Bool {
+        guard case .missing = self else { return false }
+        return true
+    }
+}
+
 /// Shared interpretation of plugin output and options used by single-archive and batch flows.
 public enum PluginMetadataSupport {
     public static func parsePatch(from response: String) -> PluginMetadataPatch? {
@@ -45,16 +68,40 @@ public enum PluginMetadataSupport {
         let summary = scalarString(payload["summary"])
         let newTags = csvString(payload["new_tags"])
         let fullTags = csvString(payload["tags"])
-        let tags = [newTags, fullTags]
-            .compactMap { $0 }
-            .filter { !$0.isEmpty }
-            .joined(separator: ", ")
+        return makePatch(title: title, summary: summary, newTags: newTags, fullTags: fullTags)
+    }
+
+    /// Validates the result contract produced by LANraragi's `run_plugin`
+    /// Minion task. A finished Minion job can still contain `success: 0`, so
+    /// callers must inspect both the job state and its result.
+    public static func queuedResult(from status: MinionStatus) -> QueuedPluginMetadataResult {
+        let state = (status.state ?? status.data?.state)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if state == "failed" {
+            return .failed(message: normalized(status.error))
+        }
 
-        let normalizedTags = tags.isEmpty ? nil : tags
-        guard title != nil || summary != nil || normalizedTags != nil else { return nil }
+        guard let result = status.result else { return .missing }
+        guard let success = result.success, success == 0 || success == 1 else { return .malformed }
+        guard success == 1 else {
+            return .failed(message: normalized(result.error))
+        }
 
-        return PluginMetadataPatch(title: title, tags: normalizedTags, summary: summary)
+        guard let type = normalized(result.type) else { return .malformed }
+        guard type.lowercased() == "metadata" else {
+            return .nonMetadata(type: type)
+        }
+
+        guard !result.dataWasMalformed else { return .malformed }
+        guard let data = result.data else { return .noChanges }
+        let patch = makePatch(
+            title: normalized(data.title),
+            summary: normalized(data.summary),
+            newTags: normalized(data.newTags),
+            fullTags: normalized(data.tags)
+        )
+        return patch.map(QueuedPluginMetadataResult.patch) ?? .noChanges
     }
 
     /// Produces the comparison semantics historically used by the stronger batch flow.
@@ -64,6 +111,22 @@ public enum PluginMetadataSupport {
             normalizedTagsForComparison(tags),
             summary.trimmingCharacters(in: .whitespacesAndNewlines),
         ].joined(separator: "|||")
+    }
+
+    /// Merges LANraragi tag CSVs while preserving first-seen spelling and
+    /// order and removing duplicates case-insensitively.
+    public static func mergingTags(existing: String, additions: String) -> String {
+        deduplicatedTags([existing, additions].joined(separator: ", "))
+    }
+
+    public static func deduplicatedTags(_ tags: String) -> String {
+        var seen: Set<String> = []
+        return tags
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .filter { seen.insert($0.lowercased()).inserted }
+            .joined(separator: ", ")
     }
 
     public static func optionPresentation(for parameter: PluginInfo.Parameter) -> PluginOptionPresentation {
@@ -107,6 +170,11 @@ public enum PluginMetadataSupport {
         return nil
     }
 
+    private static func normalized(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed : nil
+    }
+
     private static func csvString(_ value: Any?) -> String? {
         if let scalar = scalarString(value) {
             return scalar
@@ -116,6 +184,22 @@ public enum PluginMetadataSupport {
             return parts.isEmpty ? nil : parts.joined(separator: ", ")
         }
         return nil
+    }
+
+    private static func makePatch(
+        title: String?,
+        summary: String?,
+        newTags: String?,
+        fullTags: String?
+    ) -> PluginMetadataPatch? {
+        let tags = [newTags, fullTags]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: ", ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedTags = tags.isEmpty ? nil : tags
+        guard title != nil || summary != nil || normalizedTags != nil else { return nil }
+        return PluginMetadataPatch(title: title, tags: normalizedTags, summary: summary)
     }
 
     private static func extractPayload(from value: Any) -> [String: Any]? {

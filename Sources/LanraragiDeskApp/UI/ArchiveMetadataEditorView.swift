@@ -708,19 +708,17 @@ struct ArchiveMetadataEditorView: View {
                 appModel.activity.add(.init(kind: .action, title: "Plugin job queued", detail: detail))
 
                 if job.job > 0 {
-                    let state = await pluginsVM.waitForJobCompletion(profile: profile, jobID: job.job)
-                    switch state {
+                    let completion = await pluginsVM.waitForJobCompletion(profile: profile, jobID: job.job)
+                    switch completion.state {
                     case .finished:
-                        // The queued plugin already ran. Minion status has no output payload,
-                        // so only refresh metadata here; calling `run` would execute it again.
-                        _ = await refreshMetadataAfterPlugin(
-                            status: "Plugin completed. Metadata refreshed.",
+                        await handleQueuedPluginResult(
+                            completion.metadataResult ?? .missing,
+                            pluginID: pluginID,
+                            jobID: job.job,
                             previousSignature: prePluginSignature
                         )
                     case .failed:
-                        await MainActor.run {
-                            pluginRunStatus = "Plugin job \(job.job) failed."
-                        }
+                        await reportQueuedPluginFailure(completion.metadataResult, pluginID: pluginID, jobID: job.job)
                     case .queued, .running, .unknown:
                         _ = await refreshMetadataAfterPlugin(
                             status: "Plugin job \(job.job) has an indeterminate outcome. Metadata refreshed.",
@@ -730,7 +728,7 @@ struct ArchiveMetadataEditorView: View {
                         appModel.activity.add(.init(
                             kind: .warning,
                             title: "Plugin job outcome indeterminate",
-                            detail: "\(pluginID) • \(arcid) • job \(job.job) • \(state.rawValue)"
+                            detail: "\(pluginID) • \(arcid) • job \(job.job) • \(completion.state.rawValue)"
                         ))
                     }
                 } else {
@@ -747,6 +745,147 @@ struct ArchiveMetadataEditorView: View {
                 appModel.activity.add(.init(kind: .error, title: "Plugin queue failed", detail: "\(pluginID) • \(arcid)\n\(error)"))
             }
         }
+    }
+
+    private func handleQueuedPluginResult(
+        _ result: QueuedPluginMetadataResult,
+        pluginID: String,
+        jobID: Int,
+        previousSignature: String
+    ) async {
+        switch result {
+        case .patch(let patch):
+            await applyQueuedPluginPatch(patch, pluginID: pluginID, jobID: jobID)
+        case .noChanges:
+            await MainActor.run {
+                pluginRunStatus = "Plugin completed. No metadata changes returned."
+            }
+            appModel.activity.add(.init(
+                kind: .action,
+                title: "Plugin completed with no metadata changes",
+                detail: "\(pluginID) • \(arcid) • job \(jobID)"
+            ))
+        case .failed:
+            await reportQueuedPluginFailure(result, pluginID: pluginID, jobID: jobID)
+        case .missing:
+            if result.shouldRefreshServerMetadata {
+                _ = await refreshMetadataAfterPlugin(
+                    status: "Plugin job \(jobID) result unavailable. Server metadata refreshed.",
+                    previousSignature: previousSignature,
+                    unchangedStatus: "Plugin job \(jobID) result unavailable. No server metadata changes detected."
+                )
+            }
+            appModel.activity.add(.init(
+                kind: .warning,
+                title: "Plugin result unavailable",
+                detail: "\(pluginID) • \(arcid) • job \(jobID) • server metadata refresh attempted without rerunning"
+            ))
+        case .malformed:
+            await MainActor.run {
+                pluginRunStatus = "Plugin job \(jobID) returned malformed metadata. Metadata was not applied."
+            }
+            appModel.activity.add(.init(
+                kind: .warning,
+                title: "Malformed plugin result",
+                detail: "\(pluginID) • \(arcid) • job \(jobID)"
+            ))
+        case .nonMetadata(let type):
+            let suffix = type.map { " (\($0))" } ?? ""
+            await MainActor.run {
+                pluginRunStatus = "Plugin completed\(suffix). No metadata output to apply."
+            }
+            appModel.activity.add(.init(
+                kind: .action,
+                title: "Non-metadata plugin completed",
+                detail: "\(pluginID) • \(arcid) • job \(jobID)\(suffix)"
+            ))
+        }
+    }
+
+    private func applyQueuedPluginPatch(
+        _ patch: PluginMetadataPatch,
+        pluginID: String,
+        jobID: Int
+    ) async {
+        do {
+            let current = try await archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
+            let currentTitle = (current.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let currentTags = MetadataTagFormatter.normalizedCSV(from: current.tags ?? "")
+            let currentSummary = (current.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+
+            let updatedTitle = patch.title ?? currentTitle
+            let updatedSummary = patch.summary ?? currentSummary
+            let updatedTags = patch.tags.map {
+                PluginMetadataSupport.mergingTags(existing: currentTags, additions: $0)
+            } ?? currentTags
+
+            let currentSignature = PluginMetadataSupport.signature(
+                title: currentTitle,
+                tags: currentTags,
+                summary: currentSummary
+            )
+            let updatedSignature = PluginMetadataSupport.signature(
+                title: updatedTitle,
+                tags: updatedTags,
+                summary: updatedSummary
+            )
+            guard currentSignature != updatedSignature else {
+                await MainActor.run {
+                    apply(meta: current)
+                    pluginRunStatus = "Plugin completed. Returned metadata is unchanged."
+                }
+                appModel.activity.add(.init(
+                    kind: .action,
+                    title: "Plugin completed with no metadata changes",
+                    detail: "\(pluginID) • \(arcid) • job \(jobID)"
+                ))
+                return
+            }
+
+            let updated = try await archives.updateMetadata(
+                profile: profile,
+                arcid: arcid,
+                title: updatedTitle,
+                tags: updatedTags,
+                summary: updatedSummary
+            )
+            await MainActor.run {
+                apply(meta: updated)
+                onSaved(updated)
+                pluginRunStatus = "Plugin output applied and metadata refreshed."
+            }
+            appModel.activity.add(.init(
+                kind: .action,
+                title: "Plugin output applied",
+                detail: "\(pluginID) • \(arcid) • job \(jobID)"
+            ))
+        } catch {
+            await MainActor.run {
+                pluginRunStatus = "Plugin completed, but output apply failed: \(ErrorPresenter.short(error))"
+            }
+            appModel.activity.add(.init(
+                kind: .warning,
+                title: "Plugin output apply failed",
+                detail: "\(pluginID) • \(arcid) • job \(jobID)\n\(error)"
+            ))
+        }
+    }
+
+    private func reportQueuedPluginFailure(
+        _ result: QueuedPluginMetadataResult?,
+        pluginID: String,
+        jobID: Int
+    ) async {
+        let message = result?.failureMessage
+        await MainActor.run {
+            pluginRunStatus = message.map { "Plugin job \(jobID) failed: \($0)" }
+                ?? "Plugin job \(jobID) failed."
+        }
+        appModel.activity.add(.init(
+            kind: .warning,
+            title: "Plugin job failed",
+            detail: ["\(pluginID) • \(arcid) • job \(jobID)", message].compactMap { $0 }.joined(separator: "\n")
+        ))
     }
 
     private func refreshMetadataAfterPlugin(
