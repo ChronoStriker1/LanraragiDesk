@@ -33,6 +33,11 @@ final class PluginsViewModel: ObservableObject {
         var lastError: String?
     }
 
+    struct PluginJobCompletion: Equatable {
+        let state: TrackedPluginJob.State
+        let metadataResult: QueuedPluginMetadataResult?
+    }
+
     @Published private(set) var plugins: [PluginInfo] = []
     @Published private(set) var statusText: String?
     @Published private(set) var isLoading: Bool = false
@@ -98,8 +103,10 @@ final class PluginsViewModel: ObservableObject {
         maxPolls: Int = 180,
         pollInterval: Duration = .seconds(1),
         maxConsecutiveStatusErrors: Int = 4
-    ) async -> TrackedPluginJob.State {
-        guard jobID > 0 else { return .finished }
+    ) async -> PluginJobCompletion {
+        guard jobID > 0 else {
+            return .init(state: .finished, metadataResult: .missing)
+        }
 
         do {
             let client = try await clientProvider.client(for: profile)
@@ -108,28 +115,34 @@ final class PluginsViewModel: ObservableObject {
             var consecutiveStatusErrors = 0
 
             for pollIndex in 0..<pollLimit {
-                if Task.isCancelled { return .unknown }
+                if Task.isCancelled { return .init(state: .unknown, metadataResult: nil) }
                 var nextPollDelay = pollInterval
                 do {
-                    let status = try await client.getMinionStatus(job: jobID)
+                    let status = try await client.getMinionJobDetail(job: jobID)
                     let raw = status.state ?? status.data?.state
                     let normalized = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                    let mapped = mapJobState(normalized: normalized)
+                    var mapped = mapJobState(normalized: normalized)
+                    let metadataResult = mapped.isTerminal
+                        ? PluginMetadataSupport.queuedResult(from: status)
+                        : nil
+                    if let metadataResult, case .failed = metadataResult {
+                        mapped = .failed
+                    }
                     consecutiveStatusErrors = 0
                     update(jobID: jobID, state: mapped, rawState: raw, lastError: nil)
                     if mapped.isTerminal {
-                        return mapped
+                        return .init(state: mapped, metadataResult: metadataResult)
                     }
                 } catch let lrrError as LANraragiError {
                     switch lrrError {
                     case .httpStatus(let code, _) where code == 404 || code == 410:
                         update(jobID: jobID, state: .finished, rawState: "finished", lastError: nil)
-                        return .finished
+                        return .init(state: .finished, metadataResult: .missing)
                     default:
                         consecutiveStatusErrors += 1
                         update(jobID: jobID, state: .unknown, rawState: nil, lastError: ErrorPresenter.short(lrrError))
                         if consecutiveStatusErrors >= statusErrorLimit {
-                            return .unknown
+                            return .init(state: .unknown, metadataResult: nil)
                         }
                         nextPollDelay = Self.statusErrorRetryDelay(
                             base: pollInterval,
@@ -140,7 +153,7 @@ final class PluginsViewModel: ObservableObject {
                     consecutiveStatusErrors += 1
                     update(jobID: jobID, state: .unknown, rawState: nil, lastError: ErrorPresenter.short(error))
                     if consecutiveStatusErrors >= statusErrorLimit {
-                        return .unknown
+                        return .init(state: .unknown, metadataResult: nil)
                     }
                     nextPollDelay = Self.statusErrorRetryDelay(
                         base: pollInterval,
@@ -151,7 +164,7 @@ final class PluginsViewModel: ObservableObject {
                     do {
                         try await Task.sleep(for: nextPollDelay)
                     } catch {
-                        return .unknown
+                        return .init(state: .unknown, metadataResult: nil)
                     }
                 }
             }
@@ -165,7 +178,7 @@ final class PluginsViewModel: ObservableObject {
             statusText = "Failed to wait for job: \(ErrorPresenter.short(error))"
         }
 
-        return .unknown
+        return .init(state: .unknown, metadataResult: nil)
     }
 
     nonisolated static func statusErrorRetryDelay(
@@ -256,7 +269,7 @@ final class PluginsViewModel: ObservableObject {
         guard let normalized, !normalized.isEmpty else { return .finished }
 
         switch normalized {
-        case "queued", "pending", "waiting", "enqueued":
+        case "queued", "pending", "waiting", "enqueued", "inactive":
             return .queued
         case "running", "processing", "active", "started":
             return .running

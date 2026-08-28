@@ -412,6 +412,23 @@ public final class LANraragiClient: Sendable {
         try await getJSON(path: "/api/minion/\(job)")
     }
 
+    /// Fetches the authenticated Minion detail document, including the
+    /// terminal result payload omitted by the basic status endpoint.
+    public func getMinionJobDetail(job: Int) async throws -> MinionStatus {
+        do {
+            return try await getJSON(path: "/api/minion/\(job)/detail")
+        } catch let error as LANraragiError {
+            // Older variants can omit the detail route. Preserve state polling;
+            // a terminal job will then be reported with an unavailable result.
+            switch error {
+            case .httpStatus(let code, _) where code == 404 || code == 405:
+                return try await getMinionStatus(job: job)
+            default:
+                throw error
+            }
+        }
+    }
+
     // MARK: - Tankoubons
 
     public func listTankoubons(page: Int? = nil) async throws -> TankoubonList {

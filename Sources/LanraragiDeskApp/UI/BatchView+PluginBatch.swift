@@ -186,45 +186,110 @@ extension BatchView {
                     }
 
                     if job.job > 0 {
-                        let state = await pluginsVM.waitForJobCompletion(profile: profile, jobID: job.job)
-                        switch state {
+                        let completion = await pluginsVM.waitForJobCompletion(profile: profile, jobID: job.job)
+                        switch completion.state {
                         case .failed:
                             fail += 1
-                            appModel.activity.add(.init(kind: .warning, title: "Plugin job failed", detail: "\(pluginID) • \(arcid) • job \(job.job)"))
+                            let message = completion.metadataResult?.failureMessage
+                            appModel.activity.add(.init(
+                                kind: .warning,
+                                title: "Plugin job failed",
+                                detail: ["\(pluginID) • \(arcid) • job \(job.job)", message].compactMap { $0 }.joined(separator: "\n")
+                            ))
                             await MainActor.run {
-                                appendPluginLiveEvent("Job \(job.job) failed for \(displayName(for: arcid))")
+                                let suffix = message.map { ": \($0)" } ?? ""
+                                appendPluginLiveEvent("Job \(job.job) failed for \(displayName(for: arcid))\(suffix)")
                             }
                         case .finished:
-                            // The queued plugin already ran. Minion status has no output payload,
-                            // so only refresh metadata here; calling `run` would execute it again.
-                            let changed = await refreshMetadataAfterPluginBatch(profile: profile, arcid: arcid, previousSignature: preSignature)
-                            if !changed {
+                            switch completion.metadataResult ?? .missing {
+                            case .patch(let patch):
+                                let applied = try await applyQueuedPluginPatchBatch(
+                                    patch,
+                                    profile: profile,
+                                    arcid: arcid,
+                                    mode: pluginApplyMode
+                                )
+                                ok += 1
+                                if applied.changed {
+                                    appModel.activity.add(.init(
+                                        kind: .action,
+                                        title: "Plugin output applied",
+                                        detail: "\(pluginID) • \(arcid) • job \(job.job)"
+                                    ))
+                                } else {
+                                    appModel.activity.add(.init(
+                                        kind: .action,
+                                        title: "Plugin completed with no metadata changes",
+                                        detail: "\(pluginID) • \(arcid) • job \(job.job)"
+                                    ))
+                                }
+                                await MainActor.run {
+                                    appendPluginLiveEvent(metadataChangeLiveMessage(
+                                        prefix: applied.changed ? "Saved" : "Unchanged",
+                                        arcid: arcid,
+                                        beforeTitle: applied.before.title ?? "",
+                                        beforeTags: applied.before.tags ?? "",
+                                        beforeSummary: applied.before.summary ?? "",
+                                        afterTitle: applied.after.title ?? "",
+                                        afterTags: applied.after.tags ?? "",
+                                        afterSummary: applied.after.summary ?? ""
+                                    ))
+                                    appendPluginLiveEvent("Finished \(displayName(for: arcid))")
+                                }
+                            case .noChanges:
+                                ok += 1
                                 appModel.activity.add(.init(
                                     kind: .action,
                                     title: "Plugin completed with no metadata changes",
-                                    detail: "\(pluginID) • \(arcid) • queued job output unavailable"
+                                    detail: "\(pluginID) • \(arcid) • job \(job.job)"
                                 ))
-                            }
-                            if let before = prePluginMeta {
-                                let latest = try? await appModel.archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
-                                if let latest {
-                                    await MainActor.run {
-                                        appendPluginLiveEvent(metadataChangeLiveMessage(
-                                            prefix: "Saved",
-                                            arcid: arcid,
-                                            beforeTitle: before.title ?? "",
-                                            beforeTags: before.tags ?? "",
-                                            beforeSummary: before.summary ?? "",
-                                            afterTitle: latest.title ?? "",
-                                            afterTags: latest.tags ?? "",
-                                            afterSummary: latest.summary ?? ""
-                                        ))
-                                    }
+                                await MainActor.run {
+                                    appendPluginLiveEvent("Finished \(displayName(for: arcid)) with no metadata changes")
                                 }
-                            }
-                            ok += 1
-                            await MainActor.run {
-                                appendPluginLiveEvent("Finished \(displayName(for: arcid))")
+                            case .nonMetadata(let type):
+                                ok += 1
+                                let suffix = type.map { " (\($0))" } ?? ""
+                                appModel.activity.add(.init(
+                                    kind: .action,
+                                    title: "Non-metadata plugin completed",
+                                    detail: "\(pluginID) • \(arcid) • job \(job.job)\(suffix)"
+                                ))
+                                await MainActor.run {
+                                    appendPluginLiveEvent("Finished \(displayName(for: arcid))\(suffix); no metadata output")
+                                }
+                            case .failed(let message):
+                                fail += 1
+                                appModel.activity.add(.init(
+                                    kind: .warning,
+                                    title: "Plugin job failed",
+                                    detail: ["\(pluginID) • \(arcid) • job \(job.job)", message].compactMap { $0 }.joined(separator: "\n")
+                                ))
+                                await MainActor.run {
+                                    let suffix = message.map { ": \($0)" } ?? ""
+                                    appendPluginLiveEvent("Job \(job.job) failed for \(displayName(for: arcid))\(suffix)")
+                                }
+                            case .missing:
+                                indeterminate += 1
+                                let reason = "result unavailable"
+                                appModel.activity.add(.init(
+                                    kind: .warning,
+                                    title: "Plugin job result indeterminate",
+                                    detail: "\(pluginID) • \(arcid) • job \(job.job) • \(reason)"
+                                ))
+                                await MainActor.run {
+                                    appendPluginLiveEvent("Job \(job.job) \(reason) for \(displayName(for: arcid)); metadata not applied")
+                                }
+                            case .malformed:
+                                indeterminate += 1
+                                let reason = "malformed metadata result"
+                                appModel.activity.add(.init(
+                                    kind: .warning,
+                                    title: "Plugin job result indeterminate",
+                                    detail: "\(pluginID) • \(arcid) • job \(job.job) • \(reason)"
+                                ))
+                                await MainActor.run {
+                                    appendPluginLiveEvent("Job \(job.job) \(reason) for \(displayName(for: arcid)); metadata not applied")
+                                }
                             }
                         case .queued, .running, .unknown:
                             indeterminate += 1
@@ -236,7 +301,7 @@ extension BatchView {
                             appModel.activity.add(.init(
                                 kind: .warning,
                                 title: "Plugin job outcome indeterminate",
-                                detail: "\(pluginID) • \(arcid) • job \(job.job) • \(state.rawValue)"
+                                detail: "\(pluginID) • \(arcid) • job \(job.job) • \(completion.state.rawValue)"
                             ))
                             await MainActor.run {
                                 appendPluginLiveEvent("Job \(job.job) outcome unknown for \(displayName(for: arcid)); not counted as success")
@@ -275,7 +340,7 @@ extension BatchView {
                     }
                 } catch {
                     fail += 1
-                    appModel.activity.add(.init(kind: .error, title: "Plugin queue failed", detail: "\(pluginID) • \(arcid)\n\(error)"))
+                    appModel.activity.add(.init(kind: .error, title: "Plugin batch item failed", detail: "\(pluginID) • \(arcid)\n\(error)"))
                     await MainActor.run {
                         appendPluginLiveEvent("Failed \(displayName(for: arcid)): \(ErrorPresenter.short(error))")
                     }
@@ -608,6 +673,48 @@ extension BatchView {
         } catch {
             return false
         }
+    }
+
+    func applyQueuedPluginPatchBatch(
+        _ patch: PluginMetadataPatch,
+        profile: Profile,
+        arcid: String,
+        mode: PluginApplyMode
+    ) async throws -> (before: ArchiveMetadata, after: ArchiveMetadata, changed: Bool) {
+        let current = try await appModel.archives.metadata(profile: profile, arcid: arcid, forceRefresh: true)
+        let currentTitle = (current.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let currentTags = uniqueTagCSV(current.tags ?? "")
+        let currentSummary = (current.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let applied = applyPluginPatch(
+            patch,
+            currentTitle: currentTitle,
+            currentTags: currentTags,
+            currentSummary: currentSummary,
+            mode: mode
+        )
+
+        let currentSignature = PluginMetadataSupport.signature(
+            title: currentTitle,
+            tags: currentTags,
+            summary: currentSummary
+        )
+        let appliedSignature = PluginMetadataSupport.signature(
+            title: applied.title,
+            tags: applied.tags,
+            summary: applied.summary
+        )
+        guard currentSignature != appliedSignature else {
+            return (current, current, false)
+        }
+
+        let updated = try await appModel.archives.updateMetadata(
+            profile: profile,
+            arcid: arcid,
+            title: applied.title,
+            tags: applied.tags,
+            summary: applied.summary
+        )
+        return (current, updated, true)
     }
 
     func mergeTagCSV(base: String, additions: String) -> String {
