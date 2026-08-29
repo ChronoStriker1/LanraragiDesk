@@ -28,6 +28,8 @@ struct ReaderView: View {
     @State private var countdownRemaining: Int?
     @State private var timerTask: Task<Void, Never>?
     @State private var loadTask: Task<Void, Never>?
+    @State private var archiveLoadOwnership = ImageLoadOwnership()
+    @State private var positionedRoute: ReaderRoute?
     @State private var pageLoadOwnership = ImageLoadOwnership()
     @State private var prefetchTask: Task<Void, Never>?
 
@@ -98,7 +100,12 @@ struct ReaderView: View {
         .navigationTitle("")
         .toolbar {
             ToolbarItem(placement: .principal) {
-                pageNavigationToolbarControl
+                HStack(spacing: 8) {
+                    pageNavigationToolbarControl
+                    if route.tank != nil {
+                        tankNavigationToolbarControl
+                    }
+                }
             }
 
             ToolbarItem(placement: .navigation) {
@@ -235,6 +242,7 @@ struct ReaderView: View {
         .onDisappear {
             timerTask?.cancel()
             loadTask?.cancel()
+            archiveLoadOwnership.invalidate()
             pageLoadOwnership.invalidate()
             prefetchTask?.cancel()
             stampsTask?.cancel()
@@ -304,6 +312,122 @@ struct ReaderView: View {
         return false
     }
 
+    private var tankIndex: Int? {
+        route.tank?.index(of: route.arcid)
+    }
+
+    private var previousArchiveInTank: String? {
+        route.tank?.archiveBefore(route.arcid)
+    }
+
+    private var nextArchiveInTank: String? {
+        route.tank?.archiveAfter(route.arcid)
+    }
+
+    private func navigationDestination(
+        for input: ReaderNavigationInput,
+        userInitiated: Bool = true
+    ) -> ReaderNavigationDestination {
+        ReaderNavigation.destination(
+            for: input,
+            from: pageIndex,
+            pageCount: pages.count,
+            twoPageSpread: twoPageSpread,
+            rightToLeft: readingDirection == .rtl,
+            route: route,
+            userInitiated: userInitiated
+        )
+    }
+
+    private func canNavigate(_ input: ReaderNavigationInput) -> Bool {
+        navigationDestination(for: input) != .boundary
+    }
+
+    private func openTankArchive(_ arcid: String, startAtLastPage: Bool = false) {
+        guard let tank = route.tank,
+              let destination = tank.readerRoute(
+                  profileID: route.profileID,
+                  startingAt: arcid,
+                  startAtLastPage: startAtLastPage
+              ) else { return }
+        appModel.setActiveReader(destination)
+    }
+
+    private var tankNavigationToolbarControl: some View {
+        HStack(spacing: 10) {
+            Button {
+                if readingDirection == .rtl {
+                    if let nextArchiveInTank { openTankArchive(nextArchiveInTank) }
+                } else if let previousArchiveInTank {
+                    openTankArchive(previousArchiveInTank)
+                }
+            } label: {
+                Image(systemName: "chevron.left.2")
+                    .imageScale(.medium)
+            }
+            .buttonStyle(.borderless)
+            .disabled((readingDirection == .rtl ? nextArchiveInTank : previousArchiveInTank) == nil)
+            .help(readingDirection == .rtl ? "Next archive" : "Previous archive")
+            .accessibilityLabel(readingDirection == .rtl ? "Next archive" : "Previous archive")
+
+            Menu {
+                if let tank = route.tank {
+                    ForEach(Array(tank.archives.enumerated()), id: \.offset) { index, arcid in
+                        Button {
+                            if arcid != route.arcid {
+                                openTankArchive(arcid)
+                            }
+                        } label: {
+                            if arcid == route.arcid {
+                                Label(
+                                    "\(index + 1). \(tank.displayTitle(for: arcid, position: index + 1))",
+                                    systemImage: "checkmark"
+                                )
+                            } else {
+                                Text("\(index + 1). \(tank.displayTitle(for: arcid, position: index + 1))")
+                            }
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "books.vertical")
+                        .imageScale(.small)
+                    if let tank = route.tank, let tankIndex {
+                        Text("\(tankIndex + 1)/\(tank.archives.count)")
+                            .font(.callout.monospacedDigit())
+                    }
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help(route.tank.map { "Tankoubon: \($0.name)" } ?? "Tankoubon")
+            .accessibilityLabel(route.tank.map { tank in
+                let position = (tankIndex ?? 0) + 1
+                return "\(tank.name), archive \(position) of \(tank.archives.count)"
+            } ?? "Tankoubon archives")
+
+            Button {
+                if readingDirection == .rtl {
+                    if let previousArchiveInTank { openTankArchive(previousArchiveInTank) }
+                } else if let nextArchiveInTank {
+                    openTankArchive(nextArchiveInTank)
+                }
+            } label: {
+                Image(systemName: "chevron.right.2")
+                    .imageScale(.medium)
+            }
+            .buttonStyle(.borderless)
+            .disabled((readingDirection == .rtl ? previousArchiveInTank : nextArchiveInTank) == nil)
+            .help(readingDirection == .rtl ? "Previous archive" : "Next archive")
+            .accessibilityLabel(readingDirection == .rtl ? "Previous archive" : "Next archive")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(.quaternary.opacity(0.3))
+        .clipShape(Capsule())
+    }
+
     private var clampedAutoAdvanceSeconds: Double {
         min(Self.autoAdvanceMaxSeconds, max(Self.autoAdvanceMinSeconds, autoAdvanceSeconds))
     }
@@ -317,25 +441,42 @@ struct ReaderView: View {
     }
 
     private var leftToolbarHelp: String {
-        readingDirection == .rtl ? "Next page" : "Previous page"
+        navigationHelp(for: .toolbarLeft)
     }
 
     private var rightToolbarHelp: String {
-        readingDirection == .rtl ? "Previous page" : "Next page"
+        navigationHelp(for: .toolbarRight)
+    }
+
+    private func navigationHelp(for input: ReaderNavigationInput) -> String {
+        let action = ReaderNavigation.action(
+            for: input,
+            rightToLeft: readingDirection == .rtl
+        )
+        let defaultHelp = action == .advance ? "Next page" : "Previous page"
+        let decision = ReaderNavigation.decision(
+            for: input,
+            from: pageIndex,
+            pageCount: pages.count,
+            twoPageSpread: twoPageSpread,
+            rightToLeft: readingDirection == .rtl
+        )
+        switch decision {
+        case .endOfArchive where nextArchiveInTank != nil:
+            return "Next archive"
+        case .startOfArchive where previousArchiveInTank != nil:
+            return "Previous archive"
+        default:
+            return defaultHelp
+        }
     }
 
     private var canGoLeftFromToolbar: Bool {
-        if readingDirection == .rtl {
-            return canGoNext
-        }
-        return canGoPrevious
+        canNavigate(.toolbarLeft)
     }
 
     private var canGoRightFromToolbar: Bool {
-        if readingDirection == .rtl {
-            return canGoPrevious
-        }
-        return canGoNext
+        canNavigate(.toolbarRight)
     }
 
     private var pageNavigationToolbarControl: some View {
@@ -506,6 +647,8 @@ struct ReaderView: View {
     }
 
     private func loadArchive() async {
+        let archiveLoad = archiveLoadOwnership.begin()
+
         // Auto page turn should always start disabled when opening a new archive.
         autoAdvanceEnabled = false
         pages = []
@@ -532,14 +675,31 @@ struct ReaderView: View {
 
         do {
             let urls = try await appModel.archives.pageURLs(profile: profile, arcid: route.arcid)
-            pages = urls
-            pageIndex = 0
+            guard archiveLoadOwnership.performIfCurrent(archiveLoad, {
+                pages = urls
+                if positionedRoute == route {
+                    pageIndex = ReaderNavigation.normalizedIndex(
+                        pageIndex,
+                        pageCount: urls.count,
+                        twoPageSpread: twoPageSpread
+                    )
+                } else {
+                    pageIndex = ReaderNavigation.initialIndex(
+                        pageCount: urls.count,
+                        twoPageSpread: twoPageSpread,
+                        startAtLastPage: route.startAtLastPage
+                    )
+                    positionedRoute = route
+                }
+            }) else { return }
             loadCurrentPage()
             reloadStamps()
             restartAutoAdvance()
         } catch {
-            if Task.isCancelled { return }
-            errorText = ErrorPresenter.short(error)
+            if Task.isCancelled || ErrorPresenter.isCancellationLike(error) { return }
+            archiveLoadOwnership.performIfCurrent(archiveLoad) {
+                errorText = ErrorPresenter.short(error)
+            }
         }
     }
 
@@ -749,24 +909,23 @@ struct ReaderView: View {
         _ input: ReaderNavigationInput,
         userInitiated: Bool
     ) {
+        let destination = navigationDestination(for: input, userInitiated: userInitiated)
         if userInitiated {
             restartAutoAdvance()
         }
-        switch ReaderNavigation.decision(
-            for: input,
-            from: pageIndex,
-            pageCount: pages.count,
-            twoPageSpread: twoPageSpread,
-            rightToLeft: readingDirection == .rtl
-        ) {
-        case .page(let destination):
-            pageIndex = destination
-        case .endOfArchive:
-            if autoAdvanceEnabled {
+        switch destination {
+        case .page(let index):
+            pageIndex = index
+        case .archive(let destination):
+            appModel.setActiveReader(destination)
+        case .boundary:
+            if autoAdvanceEnabled,
+               ReaderNavigation.shouldStopAutoAdvance(
+                   at: destination,
+                   userInitiated: userInitiated
+               ) {
                 autoAdvanceEnabled = false
             }
-        case .startOfArchive:
-            break
         }
     }
 

@@ -67,7 +67,10 @@ struct TankoubonEditorSheet: View {
 
     private func reload() async {
         do {
-            tank = try await appModel.archives.tankoubon(profile: profile, tankID: tankID)
+            tank = try await appModel.archives.tankoubonWithArchiveMetadata(
+                profile: profile,
+                tankID: tankID
+            )
             errorText = nil
         } catch {
             if tank == nil {
@@ -148,6 +151,16 @@ private struct TankoubonDetailView: View {
             }
 
             Spacer()
+
+            Button {
+                if let first = archives.first {
+                    openReader(first)
+                }
+            } label: {
+                Label("Read", systemImage: "book")
+            }
+            .disabled(archives.isEmpty)
+            .help("Read the Tankoubon from the first archive")
 
             Button("Open in Browser") { openInBrowser() }
 
@@ -345,7 +358,17 @@ private struct TankoubonDetailView: View {
     }
 
     private func openReader(_ arcid: String) {
-        appModel.setActiveReader(profileID: profile.id, arcid: arcid)
+        let context = TankoubonReaderContext(
+            tankID: tank.id,
+            name: name,
+            archives: archives,
+            archiveTitles: TankoubonReaderContext(tankoubon: tank).archiveTitles
+        )
+        guard let route = context.readerRoute(
+            profileID: profile.id,
+            startingAt: arcid
+        ) else { return }
+        appModel.setActiveReader(route)
         openWindow(id: "reader")
     }
 

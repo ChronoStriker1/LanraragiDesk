@@ -27,6 +27,39 @@ final class LibrarySearchFieldControl: ObservableObject {
     }
 }
 
+struct TankoubonReadOwnership {
+    struct Token: Equatable {
+        fileprivate let id: UUID
+        let tankID: String
+    }
+
+    private var current: Token?
+
+    mutating func begin(tankID rawTankID: String) -> Token? {
+        let tankID = rawTankID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !tankID.isEmpty else { return nil }
+        if current?.tankID == tankID { return nil }
+        let token = Token(id: UUID(), tankID: tankID)
+        current = token
+        return token
+    }
+
+    func isCurrent(_ token: Token) -> Bool {
+        current == token
+    }
+
+    @discardableResult
+    mutating func finishIfCurrent(_ token: Token) -> Bool {
+        guard current == token else { return false }
+        current = nil
+        return true
+    }
+
+    mutating func invalidate() {
+        current = nil
+    }
+}
+
 struct LibrarySearchTextField: NSViewRepresentable {
     @Binding var text: String
     let control: LibrarySearchFieldControl
@@ -141,6 +174,8 @@ struct LibraryView: View {
     @State private var editingMeta: EditorRoute?
     @State private var tankPicker: TankPickerRoute?
     @State private var tankEditor: TankEditorRoute?
+    @State private var tankoubonReadTask: Task<Void, Never>?
+    @State private var tankoubonReadOwnership = TankoubonReadOwnership()
     @State private var hoveringArchiveResultsArea: Bool = false
 
     // Used by list/table view to avoid refetching metadata per-cell.
@@ -287,6 +322,9 @@ struct LibraryView: View {
             searchFieldControl.resignFocus()
             tagSuggestions = []
             appModel.consumeLibrarySearchRequest(id: request.id)
+        }
+        .onDisappear {
+            cancelPendingTankoubonRead()
         }
     }
 
@@ -639,13 +677,58 @@ struct LibraryView: View {
     }
 
     private func openReader(_ arcid: String) {
-        // Tankoubons aren't directly readable; open their editor instead.
         if LANraragiID.isTankoubon(arcid) {
-            tankEditor = TankEditorRoute(tankID: arcid)
+            readTankoubon(arcid)
             return
         }
+        cancelPendingTankoubonRead()
         appModel.setActiveReader(profileID: profile.id, arcid: arcid)
         openWindow(id: "reader")
+    }
+
+    private func readTankoubon(_ tankID: String) {
+        guard let request = tankoubonReadOwnership.begin(tankID: tankID) else { return }
+        tankoubonReadTask?.cancel()
+        let activeRouteAtStart = appModel.activeReaderRoute
+
+        tankoubonReadTask = Task {
+            defer {
+                if tankoubonReadOwnership.finishIfCurrent(request) {
+                    tankoubonReadTask = nil
+                }
+            }
+            do {
+                let tank = try await appModel.archives.tankoubonWithArchiveMetadata(
+                    profile: profile,
+                    tankID: request.tankID
+                )
+                guard !Task.isCancelled,
+                      tankoubonReadOwnership.isCurrent(request),
+                      appModel.activeReaderRoute == activeRouteAtStart else { return }
+                let context = TankoubonReaderContext(tankoubon: tank)
+                guard let route = context.readerRoute(profileID: profile.id) else {
+                    tankEditor = TankEditorRoute(tankID: request.tankID)
+                    return
+                }
+                appModel.setActiveReader(route)
+                openWindow(id: "reader")
+            } catch {
+                guard !Task.isCancelled,
+                      tankoubonReadOwnership.isCurrent(request) else { return }
+                appModel.activity.add(.init(
+                    kind: .error,
+                    title: "Couldn’t open Tankoubon",
+                    detail: "\(request.tankID)\n\(ErrorPresenter.short(error))",
+                    component: "Tankoubons"
+                ))
+            }
+        }
+    }
+
+    private func cancelPendingTankoubonRead() {
+        tankoubonReadTask?.cancel()
+        tankoubonReadTask = nil
+        tankoubonReadOwnership.invalidate()
     }
 
     private func handleSearchSubmit(_ draft: String) {
@@ -715,6 +798,9 @@ struct LibraryView: View {
                             .environmentObject(appModel)
                             .contextMenu {
                                 if LANraragiID.isTankoubon(arcid) {
+                                    Button("Read Tankoubon") {
+                                        readTankoubon(arcid)
+                                    }
                                     Button("Edit Tankoubon…") {
                                         tankEditor = TankEditorRoute(tankID: arcid)
                                     }
@@ -847,6 +933,9 @@ struct LibraryView: View {
                 }
                 .contextMenu {
                     if LANraragiID.isTankoubon(row.arcid) {
+                        Button("Read Tankoubon") {
+                            readTankoubon(row.arcid)
+                        }
                         Button("Edit Tankoubon…") {
                             tankEditor = TankEditorRoute(tankID: row.arcid)
                         }
