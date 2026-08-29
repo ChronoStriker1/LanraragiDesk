@@ -26,7 +26,33 @@ enum ReaderNavigationAction: Equatable {
     case retreat
 }
 
+enum ReaderNavigationDestination: Equatable {
+    case page(Int)
+    case archive(ReaderRoute)
+    case boundary
+}
+
 enum ReaderNavigation {
+    static func shouldStopAutoAdvance(
+        at destination: ReaderNavigationDestination,
+        userInitiated: Bool
+    ) -> Bool {
+        destination == .boundary && !userInitiated
+    }
+
+    static func initialIndex(
+        pageCount: Int,
+        twoPageSpread: Bool,
+        startAtLastPage: Bool
+    ) -> Int {
+        guard startAtLastPage else { return 0 }
+        return normalizedIndex(
+            pageCount - 1,
+            pageCount: pageCount,
+            twoPageSpread: twoPageSpread
+        )
+    }
+
     static func normalizedIndex(
         _ requestedIndex: Int,
         pageCount: Int,
@@ -113,6 +139,48 @@ enum ReaderNavigation {
                 pageCount: pageCount,
                 twoPageSpread: twoPageSpread
             )
+        }
+    }
+
+    static func destination(
+        for input: ReaderNavigationInput,
+        from currentIndex: Int,
+        pageCount: Int,
+        twoPageSpread: Bool,
+        rightToLeft: Bool,
+        route: ReaderRoute,
+        userInitiated: Bool
+    ) -> ReaderNavigationDestination {
+        let decision = decision(
+            for: input,
+            from: currentIndex,
+            pageCount: pageCount,
+            twoPageSpread: twoPageSpread,
+            rightToLeft: rightToLeft
+        )
+
+        switch decision {
+        case .page(let index):
+            return .page(index)
+        case .startOfArchive:
+            guard userInitiated,
+                  let tank = route.tank,
+                  let previous = tank.archiveBefore(route.arcid),
+                  let destination = tank.readerRoute(
+                      profileID: route.profileID,
+                      startingAt: previous,
+                      startAtLastPage: true
+                  ) else { return .boundary }
+            return .archive(destination)
+        case .endOfArchive:
+            guard userInitiated,
+                  let tank = route.tank,
+                  let next = tank.archiveAfter(route.arcid),
+                  let destination = tank.readerRoute(
+                      profileID: route.profileID,
+                      startingAt: next
+                  ) else { return .boundary }
+            return .archive(destination)
         }
     }
 }

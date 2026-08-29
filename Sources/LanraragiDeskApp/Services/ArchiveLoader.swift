@@ -400,6 +400,13 @@ actor ArchiveLoader {
         }
     }
 
+    func tankoubonWithArchiveMetadata(profile: Profile, tankID: String) async throws -> Tankoubon {
+        let client = try makeClient(profile: profile)
+        return try await limiter.withPermit {
+            try await client.getTankoubonFull(id: tankID, page: -1).result
+        }
+    }
+
     func updateTankoubon(
         profile: Profile,
         tankID: String,

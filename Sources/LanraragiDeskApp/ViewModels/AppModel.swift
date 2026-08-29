@@ -129,9 +129,23 @@ final class AppModel: ObservableObject {
         librarySearchRequest = nil
     }
 
-    func setActiveReader(profileID: Profile.ID, arcid: String) {
+    func setActiveReader(
+        profileID: Profile.ID,
+        arcid: String,
+        tank: TankoubonReaderContext? = nil,
+        startAtLastPage: Bool = false
+    ) {
         let trimmed = arcid.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        activeReaderRoute = ReaderRoute(profileID: profileID, arcid: trimmed)
+        activeReaderRoute = ReaderRoute(
+            profileID: profileID,
+            arcid: trimmed,
+            tank: tank,
+            startAtLastPage: startAtLastPage
+        )
+    }
+
+    func setActiveReader(_ route: ReaderRoute) {
+        activeReaderRoute = route
     }
 }
