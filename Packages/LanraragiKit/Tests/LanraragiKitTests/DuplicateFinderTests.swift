@@ -88,6 +88,128 @@ final class DuplicateFinderTests: XCTestCase {
         XCTAssertEqual(result.pairs[0].reason, .similarCover)
     }
 
+    func testSameTankoubonExcludesExactCoverPair() async throws {
+        let fps: [IndexStore.ScanFingerprint] = [
+            .init(arcid: "chapter-a", checksumSHA256: Data([0x01]), dHashCenter90: 0, aHashCenter90: 0),
+            .init(arcid: "chapter-b", checksumSHA256: Data([0x01]), dHashCenter90: 0, aHashCenter90: 0),
+        ]
+
+        let result = try await DuplicateFinder.scan(
+            fingerprints: fps,
+            notDuplicates: [],
+            tankoubonMemberships: [
+                "chapter-a": ["TANK_series"],
+                "chapter-b": ["TANK_series"],
+            ],
+            config: .init(includeExactChecksum: true, includeApproximate: false)
+        )
+
+        XCTAssertTrue(result.groups.isEmpty)
+        XCTAssertTrue(result.pairs.isEmpty)
+        XCTAssertEqual(result.stats.excludedSameTankoubon, 1)
+    }
+
+    func testSameTankoubonExcludesApproximateCoverPair() async throws {
+        let base: UInt64 = 0b1010
+        let near = base ^ 0b0001
+        let fps: [IndexStore.ScanFingerprint] = [
+            .init(arcid: "volume-a", checksumSHA256: Data([0x01]), dHashCenter90: base, aHashCenter90: base),
+            .init(arcid: "volume-b", checksumSHA256: Data([0x02]), dHashCenter90: near, aHashCenter90: near),
+        ]
+
+        let result = try await DuplicateFinder.scan(
+            fingerprints: fps,
+            notDuplicates: [],
+            tankoubonMemberships: [
+                "volume-a": ["TANK_series"],
+                "volume-b": ["TANK_series"],
+            ],
+            config: .init(includeExactChecksum: false, includeApproximate: true, dHashThreshold: 1, aHashThreshold: 1)
+        )
+
+        XCTAssertTrue(result.groups.isEmpty)
+        XCTAssertTrue(result.pairs.isEmpty)
+        XCTAssertEqual(result.stats.excludedSameTankoubon, 1)
+        XCTAssertEqual(result.stats.approximateCandidates, 1)
+    }
+
+    func testDifferentTankoubonsRemainDuplicateCandidates() async throws {
+        let fps: [IndexStore.ScanFingerprint] = [
+            .init(arcid: "a", checksumSHA256: Data([0x01]), dHashCenter90: 0, aHashCenter90: 0),
+            .init(arcid: "b", checksumSHA256: Data([0x01]), dHashCenter90: 0, aHashCenter90: 0),
+        ]
+
+        let result = try await DuplicateFinder.scan(
+            fingerprints: fps,
+            notDuplicates: [],
+            tankoubonMemberships: [
+                "a": ["TANK_one"],
+                "b": ["TANK_two"],
+            ],
+            config: .init(includeExactChecksum: true, includeApproximate: false)
+        )
+
+        XCTAssertEqual(result.groups, [["a", "b"]])
+        XCTAssertEqual(result.pairs.count, 1)
+        XCTAssertEqual(result.stats.excludedSameTankoubon, 0)
+    }
+
+    func testExactGroupFindsAllowedPairWhenAnchorSharesDifferentTanks() async throws {
+        let checksum = Data([0x01])
+        let fps: [IndexStore.ScanFingerprint] = [
+            .init(arcid: "anchor", checksumSHA256: checksum, dHashCenter90: 0, aHashCenter90: 0),
+            .init(arcid: "chapter", checksumSHA256: checksum, dHashCenter90: 0, aHashCenter90: 0),
+            .init(arcid: "volume", checksumSHA256: checksum, dHashCenter90: 0, aHashCenter90: 0),
+        ]
+
+        let result = try await DuplicateFinder.scan(
+            fingerprints: fps,
+            notDuplicates: [],
+            tankoubonMemberships: [
+                "anchor": ["TANK_chapters", "TANK_volumes"],
+                "chapter": ["TANK_chapters"],
+                "volume": ["TANK_volumes"],
+            ],
+            config: .init(
+                includeExactChecksum: true,
+                includeApproximate: false,
+                exactFrequentMinCount: 4
+            )
+        )
+
+        XCTAssertEqual(result.groups, [["chapter", "volume"]])
+        XCTAssertEqual(result.pairs.count, 1)
+        XCTAssertEqual(Set([result.pairs[0].arcidA, result.pairs[0].arcidB]), Set(["chapter", "volume"]))
+        XCTAssertEqual(result.stats.excludedSameTankoubon, 2)
+    }
+
+    func testExactGroupKeepsAllAllowedConnectionsAroundTankoubonExclusion() async throws {
+        let checksum = Data([0x01])
+        let fps: [IndexStore.ScanFingerprint] = [
+            .init(arcid: "chapter-a", checksumSHA256: checksum, dHashCenter90: 0, aHashCenter90: 0),
+            .init(arcid: "chapter-b", checksumSHA256: checksum, dHashCenter90: 0, aHashCenter90: 0),
+            .init(arcid: "outside-copy", checksumSHA256: checksum, dHashCenter90: 0, aHashCenter90: 0),
+        ]
+
+        let result = try await DuplicateFinder.scan(
+            fingerprints: fps,
+            notDuplicates: [],
+            tankoubonMemberships: [
+                "chapter-a": ["TANK_series"],
+                "chapter-b": ["TANK_series"],
+            ],
+            config: .init(
+                includeExactChecksum: true,
+                includeApproximate: false,
+                exactFrequentMinCount: 4
+            )
+        )
+
+        XCTAssertEqual(result.groups, [["chapter-a", "chapter-b", "outside-copy"]])
+        XCTAssertEqual(result.pairs.count, 2)
+        XCTAssertEqual(result.stats.excludedSameTankoubon, 1)
+    }
+
     func testExactChecksumSkipsFrequentPlaceholderCluster() async throws {
         let shared = Data([0x99])
         let other = Data([0x10])

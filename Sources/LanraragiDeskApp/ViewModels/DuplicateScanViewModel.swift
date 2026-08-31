@@ -158,11 +158,15 @@ final class DuplicateScanViewModel: ObservableObject {
                 status = .running("Loading exclusions…")
                 let notDup = try store.loadNotDuplicatePairs(profileID: profile.id)
 
+                status = .running("Loading Tankoubon memberships…")
+                let tankoubonMemberships = try await loadTankoubonMemberships(client: client)
+
                 status = .running("Scanning for duplicates…")
 
                 let res = try await DuplicateFinder.scan(
                     fingerprints: fps,
                     notDuplicates: notDup,
+                    tankoubonMemberships: tankoubonMemberships,
                     config: scanConfig
                 )
 
@@ -174,7 +178,7 @@ final class DuplicateScanViewModel: ObservableObject {
                 log(
                     .action,
                     "Duplicate scan completed",
-                    detail: "Groups: \(res.groups.count) • Pairs: \(res.pairs.count) • Archives: \(res.stats.archives) • \(String(format: "%.1fs", res.stats.durationSeconds))"
+                    detail: "Groups: \(res.groups.count) • Pairs: \(res.pairs.count) • Same Tankoubon excluded: \(res.stats.excludedSameTankoubon) • Archives: \(res.stats.archives) • \(String(format: "%.1fs", res.stats.durationSeconds))"
                 )
             } catch {
                 if Task.isCancelled || ErrorPresenter.isCancellationLike(error) { return }
@@ -457,6 +461,25 @@ final class DuplicateScanViewModel: ObservableObject {
             return (a.first ?? "") < (b.first ?? "")
         }
         return groups
+    }
+
+    private func loadTankoubonMemberships(client: LANraragiClient) async throws -> [String: Set<String>] {
+        let tanks: [Tankoubon]
+        do {
+            tanks = try await client.listTankoubons(page: -1).result
+        } catch let LANraragiError.httpStatus(code, _) where code == 404 || code == 405 {
+            // Older LANraragi versions do not expose Tankoubons. Other failures abort
+            // the scan so transient errors cannot reintroduce known sibling matches.
+            return [:]
+        }
+
+        var memberships: [String: Set<String>] = [:]
+        for tank in tanks where !tank.id.isEmpty {
+            for arcid in tank.archives where !arcid.isEmpty {
+                memberships[arcid, default: []].insert(tank.id)
+            }
+        }
+        return memberships
     }
 
     private func purgeStoredNotDuplicatePairs(profile: Profile, containing arcid: String) throws -> Int {

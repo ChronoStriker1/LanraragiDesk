@@ -53,6 +53,7 @@ public struct DuplicateScanStats: Sendable, Equatable {
     public var approximateEdges: Int
     public var skippedBuckets: Int
     public var excludedNotDuplicates: Int
+    public var excludedSameTankoubon: Int
     public var durationSeconds: Double
 
     public init(
@@ -63,6 +64,7 @@ public struct DuplicateScanStats: Sendable, Equatable {
         approximateEdges: Int,
         skippedBuckets: Int,
         excludedNotDuplicates: Int,
+        excludedSameTankoubon: Int = 0,
         durationSeconds: Double
     ) {
         self.archives = archives
@@ -72,6 +74,7 @@ public struct DuplicateScanStats: Sendable, Equatable {
         self.approximateEdges = approximateEdges
         self.skippedBuckets = skippedBuckets
         self.excludedNotDuplicates = excludedNotDuplicates
+        self.excludedSameTankoubon = excludedSameTankoubon
         self.durationSeconds = durationSeconds
     }
 }
@@ -135,6 +138,7 @@ public enum DuplicateFinder {
     public static func scan(
         fingerprints: [IndexStore.ScanFingerprint],
         notDuplicates: Set<IndexStore.NotDuplicatePair>,
+        tankoubonMemberships: [String: Set<String>] = [:],
         config: DuplicateScanConfig
     ) async throws -> DuplicateScanResult {
         let started = Date()
@@ -153,6 +157,7 @@ public enum DuplicateFinder {
                     approximateEdges: 0,
                     skippedBuckets: 0,
                     excludedNotDuplicates: 0,
+                    excludedSameTankoubon: 0,
                     durationSeconds: 0
                 )
             )
@@ -182,6 +187,7 @@ public enum DuplicateFinder {
 
         var exactGroupCount = 0
         var skippedExactGroups = 0
+        var excludedSameTankoubonKeys = Set<UInt64>()
         if config.includeExactChecksum {
             // Union identical thumbnail checksums.
             var byChecksum: [Data: [Int]] = [:]
@@ -212,17 +218,31 @@ public enum DuplicateFinder {
                 }
                 exactGroupCount += 1
 
-                // Generate a "star" set of pairs (anchor + others) to avoid O(k^2) pair explosions.
-                let anchor = idxs[0]
-                for p in idxs.dropFirst() {
-                    let key = pairKey(anchor, p)
-                    if excludedNotDupKeys.contains(key) { continue }
-                    dsu.union(anchor, p)
-                    pairs.append(.init(
-                        arcidA: fingerprints[anchor].arcid,
-                        arcidB: fingerprints[p].arcid,
-                        reason: .exactCover
-                    ))
+                // Build a spanning forest from every allowed relationship. Exact groups
+                // are capped at a small size, so checking all pairs remains bounded while
+                // ensuring an excluded first item cannot hide a valid match later on.
+                for candidatePosition in 1..<idxs.count {
+                    let candidate = idxs[candidatePosition]
+                    for prior in idxs[..<candidatePosition] {
+                        let key = pairKey(prior, candidate)
+                        if excludedNotDupKeys.contains(key) { continue }
+                        if shareTankoubon(
+                            fingerprints[prior].arcid,
+                            fingerprints[candidate].arcid,
+                            memberships: tankoubonMemberships
+                        ) {
+                            excludedSameTankoubonKeys.insert(key)
+                            continue
+                        }
+                        if dsu.find(prior) == dsu.find(candidate) { continue }
+
+                        dsu.union(prior, candidate)
+                        pairs.append(.init(
+                            arcidA: fingerprints[prior].arcid,
+                            arcidB: fingerprints[candidate].arcid,
+                            reason: .exactCover
+                        ))
+                    }
                 }
             }
         }
@@ -291,6 +311,15 @@ public enum DuplicateFinder {
                         let aDist = hamming(a.aHashCenter90, fingerprints[ib].aHashCenter90)
                         if aDist > config.aHashThreshold { continue }
 
+                        if shareTankoubon(
+                            a.arcid,
+                            fingerprints[ib].arcid,
+                            memberships: tankoubonMemberships
+                        ) {
+                            excludedSameTankoubonKeys.insert(key)
+                            continue
+                        }
+
                         // If these two already match exactly, don't also show them as "similar".
                         if config.includeExactChecksum, a.checksumSHA256 == fingerprints[ib].checksumSHA256 {
                             continue
@@ -343,6 +372,7 @@ public enum DuplicateFinder {
             approximateEdges: approximateEdges,
             skippedBuckets: skippedBuckets,
             excludedNotDuplicates: excludedNotDuplicates,
+            excludedSameTankoubon: excludedSameTankoubonKeys.count,
             durationSeconds: duration
         )
 
@@ -377,6 +407,17 @@ public enum DuplicateFinder {
         let lo = UInt64(min(a, b))
         let hi = UInt64(max(a, b))
         return (lo << 32) | hi
+    }
+
+    private static func shareTankoubon(
+        _ arcidA: String,
+        _ arcidB: String,
+        memberships: [String: Set<String>]
+    ) -> Bool {
+        guard let tanksA = memberships[arcidA], let tanksB = memberships[arcidB] else {
+            return false
+        }
+        return !tanksA.isDisjoint(with: tanksB)
     }
 }
 
