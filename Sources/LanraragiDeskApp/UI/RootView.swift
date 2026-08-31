@@ -7,7 +7,6 @@ struct RootView: View {
 
     @State private var showNotMatchesPanel: Bool = false
     @State private var showClearNotMatchesConfirmation: Bool = false
-    @State private var collapseRunCard: Bool = false
     @State private var advancedExpanded: Bool = false
     @State private var section: Section = .library
     @State private var activatedSections: Set<Section> = [.library]
@@ -61,10 +60,9 @@ struct RootView: View {
             ProfileEditorView(mode: mode)
         }
         .onChange(of: appModel.duplicates.resultRevision) { _, _ in
-            // Keep users on the Duplicates workspace and collapse controls when results are ready.
+            // Keep users on the Duplicates workspace when results are ready.
             if case .completed = appModel.duplicates.status, appModel.duplicates.result != nil {
                 section = .duplicates
-                collapseRunCard = true
             }
         }
         .toolbar {
@@ -78,6 +76,7 @@ struct RootView: View {
                 }
                 .buttonStyle(.plain)
                 .help(sidebarVisible ? "Hide Sidebar" : "Show Sidebar")
+                .accessibilityLabel(sidebarVisible ? Text("Hide Sidebar") : Text("Show Sidebar"))
             }
         }
     }
@@ -104,6 +103,8 @@ struct RootView: View {
                 systemImage: "server.rack",
                 description: Text("Set your server address and API key to start finding duplicates.")
             )
+            .emptyStatePanel()
+            .padding(24)
             .frame(minWidth: 700, minHeight: 520)
         }
     }
@@ -115,47 +116,61 @@ struct RootView: View {
                 .ignoresSafeArea()
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 2) {
+                    sidebarSectionHeader("Browse", topPadding: 0)
                     sidebarButton(title: "Library", systemImage: "books.vertical", section: .library)
                     if showStatisticsPage {
                         sidebarButton(title: "Statistics", systemImage: "chart.bar.xaxis", section: .statistics)
                     }
 
-                    Divider().padding(.vertical, 8)
-
+                    sidebarSectionHeader("Tools")
                     sidebarButton(title: "Duplicates", systemImage: "doc.on.doc", section: .duplicates)
                     sidebarButton(title: "Activity", systemImage: "list.bullet.rectangle", section: .activity)
                     sidebarButton(title: "Batch", systemImage: "square.stack.3d.forward.dottedline", section: .batch)
 
-                    Divider().padding(.vertical, 8)
+                    sidebarSectionHeader("App")
                     sidebarButton(title: "Settings", systemImage: "gearshape", section: .settings)
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 12)
             }
+            .scrollBounceBehavior(.basedOnSize)
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text("Sections"))
+    }
+
+    private func sidebarSectionHeader(_ title: String, topPadding: CGFloat = 14) -> some View {
+        Text(title)
+            .font(.caption2.weight(.semibold))
+            .textCase(.uppercase)
+            .kerning(0.6)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.top, topPadding)
+            .padding(.bottom, 4)
+            .accessibilityAddTraits(.isHeader)
     }
 
     private func sidebarButton(title: String, systemImage: String, section target: Section) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: systemImage)
-                .font(.system(size: 14, weight: .regular))
-                .frame(width: 18)
-                .foregroundStyle(section == target ? Color.accentColor : Color.primary.opacity(0.88))
-            Text(title)
-                .font(.body.weight(.medium))
-            Spacer(minLength: 0)
-        }
-        .foregroundStyle(section == target ? Color.primary : Color.primary.opacity(0.88))
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .onTapGesture {
+        let isSelected = section == target
+        return Button {
             section = target
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 13, weight: .medium))
+                    .frame(width: 18)
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                Text(title)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(isSelected ? Color.primary : Color.primary.opacity(0.85))
+                Spacer(minLength: 0)
+            }
         }
-        .accessibilityElement(children: .combine)
+        .buttonStyle(SidebarNavButtonStyle(isSelected: isSelected))
         .accessibilityLabel(Text(title))
-        .accessibilityAddTraits(section == target ? .isSelected : [])
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private func detail(profile: Profile) -> some View {
@@ -217,17 +232,19 @@ struct RootView: View {
                 reviewTab(profile: profile)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ContentUnavailableView(
-                    "No Results Yet",
-                    systemImage: "square.stack.3d.up.slash",
-                    description: Text("Run a scan to see duplicate groups here.")
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(.thinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                noResultsPlaceholder
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var noResultsPlaceholder: some View {
+        ContentUnavailableView(
+            "No Results Yet",
+            systemImage: "square.stack.3d.up.slash",
+            description: Text("Run a scan to see duplicate groups here.")
+        )
+        .emptyStatePanel()
     }
 
     @ViewBuilder
@@ -246,94 +263,70 @@ struct RootView: View {
                 }
             )
         } else {
-            ContentUnavailableView(
-                "No Results Yet",
-                systemImage: "square.stack.3d.up.slash",
-                description: Text("Run a scan to see duplicate groups here.")
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(.thinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            noResultsPlaceholder
         }
     }
 
     private func runCard(profile: Profile) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text("Find Duplicate Archives")
-                        .font(.title2)
-                        .bold()
+                        .font(.headline)
 
-                    if !collapseRunCard {
-                        Text("Click Find Duplicates. The app will update its local index if needed, then show you likely duplicates to review and delete manually.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
+                    Text("Click Find Duplicates. The app will update its local index if needed, then show you likely duplicates to review and delete manually.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
 
-                Spacer()
+                Spacer(minLength: 16)
 
-                if appModel.duplicates.result != nil {
-                    Button(collapseRunCard ? "Expand" : "Collapse") {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            collapseRunCard.toggle()
-                        }
-                    }
-                    .buttonStyle(.bordered)
+                Button {
+                    section = .duplicates
+                    appModel.duplicates.start(profile: profile)
+                } label: {
+                    Label("Find Duplicates", systemImage: "magnifyingglass")
                 }
+                .buttonStyle(.borderedProminent)
+                .disabled(isDuplicateScanRunning)
+
+                Button("Cancel", role: .destructive) {
+                    appModel.duplicates.cancel()
+                }
+                .buttonStyle(.bordered)
+                .disabled(!isDuplicateScanRunning)
             }
 
-            if !collapseRunCard {
-                Divider()
-
-                HStack(spacing: 12) {
-                    Button {
-                        section = .duplicates
-                        collapseRunCard = false
-                        appModel.duplicates.start(profile: profile)
-                    } label: {
-                        Text("Find Duplicates")
-                            .frame(minWidth: 180)
-                    }
-                    .buttonStyle(.borderedProminent)
-
-                    Button("Cancel", role: .destructive) { appModel.duplicates.cancel() }
-
-                    Spacer()
-                }
-
+            HStack(alignment: .top, spacing: 12) {
                 statusBlock(profile: profile)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.16)) {
-                            advancedExpanded.toggle()
-                        }
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: advancedExpanded ? "chevron.down" : "chevron.right")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            Text("Advanced")
-                                .font(.callout)
-                                .foregroundStyle(.primary)
-                            Spacer()
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
+                Spacer(minLength: 12)
 
-                    if advancedExpanded {
-                        advancedOptions(profile: profile)
-                            .padding(.top, 4)
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        advancedExpanded.toggle()
                     }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: advancedExpanded ? "chevron.down" : "chevron.right")
+                            .font(.caption.weight(.semibold))
+                        Text("Advanced")
+                    }
+                    .font(.callout)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel(advancedExpanded ? "Hide Advanced Options" : "Show Advanced Options")
+            }
+
+            if advancedExpanded {
+                Divider()
+                advancedOptions(profile: profile)
             }
         }
-        .padding(18)
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .cardSurface(padding: 14)
         .debugFrameNumber(1)
         .sheet(isPresented: $showNotMatchesPanel) {
             NotMatchesView(profile: profile)
@@ -341,6 +334,13 @@ struct RootView: View {
                 .frame(minWidth: 760, minHeight: 520)
                 .padding(18)
         }
+    }
+
+    private var isDuplicateScanRunning: Bool {
+        if case .running = appModel.duplicates.status {
+            return true
+        }
+        return false
     }
 
     @ViewBuilder
@@ -353,40 +353,47 @@ struct RootView: View {
         case .running(let msg):
             HStack(spacing: 10) {
                 ProgressView()
+                    .controlSize(.small)
                 Text(msg)
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
-            case .completed(let stats):
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Found \(appModel.duplicates.result?.groups.count ?? 0) duplicate groups.")
-                        .font(.callout)
-                    Text("Scanned \(stats.archives) archives in \(String(format: "%.1fs", stats.durationSeconds)).")
+            .accessibilityElement(children: .combine)
+        case .completed(let stats):
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Found \(appModel.duplicates.result?.groups.count ?? 0) duplicate groups.")
+                    .font(.callout.weight(.medium))
+                Text("Scanned \(stats.archives) archives in \(String(format: "%.1fs", stats.durationSeconds)).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if stats.excludedSameTankoubon > 0 {
+                    Text("Ignored \(stats.excludedSameTankoubon) candidate \(stats.excludedSameTankoubon == 1 ? "pair" : "pairs") from the same Tankoubon.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-            case .failed(let msg):
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Duplicate scan failed.")
-                        .font(.callout.weight(.semibold))
-                        .foregroundStyle(.red)
-                    Text(msg)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                    HStack(spacing: 10) {
-                        Button("Retry") {
-                            appModel.duplicates.start(profile: profile)
-                        }
-                        .buttonStyle(.borderedProminent)
-
-                        Button("Copy Error") {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(msg, forType: .string)
-                        }
-                        .buttonStyle(.bordered)
+            }
+        case .failed(let msg):
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Duplicate scan failed.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.red)
+                Text(msg)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                HStack(spacing: 10) {
+                    Button("Retry") {
+                        appModel.duplicates.start(profile: profile)
                     }
+                    .buttonStyle(.borderedProminent)
+
+                    Button("Copy Error") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(msg, forType: .string)
+                    }
+                    .buttonStyle(.bordered)
                 }
+            }
         }
     }
 
@@ -415,6 +422,10 @@ struct RootView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            Text("Archives in the same Tankoubon are always ignored as duplicate candidates.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             Button("Show “Not a match” list") {
                 showNotMatchesPanel = true
             }
@@ -438,7 +449,6 @@ struct RootView: View {
 
             Button("Rebuild index and scan") {
                 section = .duplicates
-                collapseRunCard = false
                 appModel.duplicates.start(profile: profile, rebuildIndex: true)
             }
             .font(.callout)
