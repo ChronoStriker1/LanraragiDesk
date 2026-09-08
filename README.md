@@ -1,175 +1,98 @@
 # LanraragiDesk
 
-macOS (Apple Silicon-first) LANraragi desktop client for managing a LANraragi server, with a deduplication workbench inspired by LRReader.
+A native macOS client for browsing, reading, and managing a LANraragi library. It includes duplicate review, metadata editing, and resumable batch operations. A separate LANraragi server stores and serves the archives.
 
 ![LanraragiDesk app icon](docs/images/app-icon.png)
 
 ## Features
 
-- **Library**
-  - Grid or list layout
-  - Grid cards use a fixed frame size (cover/title/artist/group region) for a consistent tile layout
-  - Tighter grid spacing for denser cover browsing
-  - Grid content is centered within the library panel
-  - Library frame containers (header/results/cards) are centered in their parent frames
-  - Library cover previews are shown without a thumbnail border frame
-  - Header toggle next to `Grid|List` to crop covers to fill the fixed preview area (centered, off by default)
-  - Server-side paging (scales to large libraries)
-  - Default sort: **Newest added first** (`date_added desc`) with automatic fallback to Title when unsupported
-  - Cover overlays: **NEW**, **Date added**, **Page count**
-  - Hover a cover to show the selection checkbox (top-left); selected archives keep a persistent visible checkmark
-  - Shows **Artist** and **Group** (when present) under the title (on separate lines)
-  - Hover details only activate while the cursor is inside the archive results panel
-  - Hover a cover to see full **Title**, **Summary**, and grouped **Tags** (click tags to add them to search)
-  - Hover details popover is taller to reduce scrolling
-  - Hover details keep title fixed while summary and tags scroll together in one shared body area
-  - Search + tag suggestions (debounced + cached, with prefix/namespace/contains matching)
-  - Search follows LANraragi tokenization (comma-separated tokens; spaces preserved inside a term; wildcard tokens pass through)
-  - Search bar includes inline query tips (negation and wildcard examples)
-  - List view uses a table with columns: Select, Title, New, Date, Artist, Group, Tags (sortable and re-orderable)
-  - Filters: New only, Untagged only, Category (server-backed)
-  - One-click **Select All Results** across the full current query (not just currently loaded cards)
-  - Right-click: open Reader, open in browser, edit metadata, copy archive id
-  - Open in browser opens LANraragi reader URLs (`/reader?id=<arcid>`)
-  - Adaptive grid layout that fits constrained panel widths
-  - Library page state persists while switching sidebar sections
-  - A collapsed **Request timings** disclosure shows recent search, archive-page, and metadata request durations and outcomes without including search text or credentials; only the first page of a non-empty text query is labeled Search, while empty-query loads and later pages are Archive page requests
-- **Duplicates**
-  - Local cover fingerprint index (rebuilt at the start of every scan)
-  - Finds **exact** and **similar** cover matches
-  - Review as **pairs** with side-by-side comparison
-  - Actions: delete left/right, mark “Not a match” (persisted locally and excluded from future scans)
-  - Inline per-side metadata editing directly in the compare workspace (no modal required)
-  - Duplicates editor supports the same metadata workflow as Library (title/tags/summary/plugins/cover page/delete)
-  - Page preview tiles support direct `Set as cover` actions during pair review
-  - Duplicates workflow events are logged to Activity (scan start/complete/fail/cancel, exclusions, removals, deletes)
-  - Synced page preview scrolling for visual verification
-  - Integrated review workspace directly in the Duplicates page
-  - Collapsible Find Duplicates panel to prioritize review space
-- **Reader**
-  - Keyboard navigation
-  - Left/Right arrow key page navigation (in addition to click zones and move commands)
-  - Optional auto-advance timer (off by default)
-  - Open current archive directly in LANraragi (`/reader?id=<arcid>`)
-  - Two-page spread, fit modes, zoom controls
-  - View zoom controls include Increase, Decrease, and Reset (`Cmd+=`, `Cmd+-`, `Cmd+0`)
-  - Left-to-right / right-to-left “Next page” behavior (configured in Settings)
-  - Reader toolbar adapts for narrow windows to keep page-turn and auto-advance controls accessible
-- **Metadata editor**
-  - Edit title/tags/summary
-  - Save skips no-op metadata updates when nothing changed
-  - Save uses LANraragi-compatible metadata update payloads (title/tags/summary are always sent)
-  - Supports cover override by setting thumbnail from a selected archive page
-  - Supports deleting the current archive with confirmation
-  - Queue selected metadata plugins against the current archive
-  - Delete flow handles already-removed archives safely across Library and Duplicates
-  - Tags are shown grouped/sorted like Library hover tags (chip-based editor; raw CSV field hidden)
-  - `source`/URL tags open in the browser directly (supports `http://`, `https://`, and host-only values)
-  - Date tags are rendered in human-readable form
-  - Click-to-remove tag chips plus tag autocomplete from server database stats (configurable cache)
-  - Summary editor is positioned under the title and auto-collapses when empty
-  - Title and summary inputs use full-width editor sections for stable text placement while typing/editing
-- **Batch**
-  - Bulk add/remove tags for selected archives
-  - Queue selected metadata plugins for selected archives
-  - Find-archives query builder with saved queries (load/save/delete) and server-backed filters
-  - Selected archive staging list (filename-first) with per-item remove controls
-  - Plugin queue includes:
-    - Plugin picker + optional URL/arg input
-    - Plugin settings disclosure (boolean options rendered as switches)
-    - Save mode selector: **Combine plugin data with existing** or **Replace current data**
-    - Configurable per-archive delay (defaults to 4 seconds when no plugin-specific value is available)
-    - **Preview Before Queue** (enabled by default) to preview metadata changes on a sample without saving
-  - Tag and plugin queues support pause/resume and recoverable checkpoints after app restart
-  - Pause waits for the current archive to finish safely before stopping
-  - Resume re-runs the last in-progress archive before continuing
-  - Live log panel shows timestamped per-archive progress and metadata before/after deltas
-- **Activity**
-  - Local activity log with filtering (All / Errors / Actions) and full-text search
-  - Human-readable event cards with structured metadata chips
-  - Click an error row (or use context menu) to copy the full entry to clipboard
-  - **Export JSON / Export CSV** — save the filtered events to a file via a save panel
-  - **Copy Diagnostic Bundle** — copies a JSON bundle to the clipboard containing the filtered events, app version, macOS version, and selected profile endpoint; useful for filing bug reports without manual copy-paste
-- **Window chrome**
-  - Sidebar toggle in the titlebar next to macOS traffic-light controls
-  - App title text is hidden from the titlebar (no extra `LanraragiDesk` title label in the window header)
-  - Compact native toolbar/titlebar styling with sidebar safe-area spacing
-- **Statistics** (optional; enable in Settings)
-  - Sidebar page that mirrors LANraragi’s `/stats` behavior
-  - Tag cloud from `/api/database/stats?minweight=<n>` rendered with a WebKit/jQCloud view
-  - Cloud rendering is capped to the top 1000 tags by weight for responsiveness
-  - Detailed stats list sorted by weight (excluding `source` and `date_added`, matching LANraragi)
-  - Header counters from server info (`total_archives`, `total_pages_read`, and distinct tag count)
-  - Clicking a tag in cloud/details jumps to **Library** and runs a search for that tag
-  - Local filter field for quickly finding tags in the cloud and detailed list
+- Browse a paginated library in grid or list view, with search, tag suggestions, categories, and new or untagged filters.
+- Read archives with keyboard navigation, two-page spreads, zoom, reading-direction controls, and an optional auto-advance timer.
+- Edit titles, tags, summaries, and cover pages; run the server's metadata plugins.
+- Find exact or similar covers, compare pages side by side, and review duplicates before deleting an archive.
+- Add or remove tags and queue metadata plugins across selected archives. Queues support previews, pause/resume, and recovery after relaunch.
+- Review activity and errors, export filtered logs, or copy diagnostic information. An optional Statistics page shows library totals and tag usage.
 
-## Setup
+## Requirements
 
-1. Open **Settings** and set:
-   - Base URL (example: `http://127.0.0.1:3000`)
-   - API key (stored in Keychain)
-2. Click **Test Connection**.
-3. Use **Library** for browsing/reading and **Duplicates** for scanning.
+- macOS 14 or later. Development targets Apple Silicon first.
+- A LANraragi server reachable from your Mac, with its base URL and API key.
+- To build: Xcode with Swift 6 support and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
-## Security / Privacy
+## Build and run
 
-- API keys are stored in **Keychain**.
-- Profiles are stored on disk **without secrets**.
-- The app stores local caches and an index database in your user Library directories (see below).
-
-## Data Locations
-
-The app writes local data under your user Library directories:
-
-- Fingerprint index DB: `~/Library/Application Support/LanraragiDesk/index.sqlite`
-- Tag suggestion cache: `~/Library/Application Support/LanraragiDesk/Cache/tagstats-<hash>.json`
-- Activity log: `~/Library/Application Support/LanraragiDesk/activity.json`
-- Saved batch queries: `~/Library/Application Support/LanraragiDesk/saved-batch-queries.json`
-
-## Build (Developer)
-
-Requirements:
-
-- macOS 14+
-- Xcode 15+
-- Swift 6
-- [XcodeGen](https://github.com/yonaskolb/XcodeGen)
-
-Build steps:
+Install Xcode and select its developer tools, then:
 
 ```sh
+brew install xcodegen
+git clone https://github.com/ChronoStriker1/LanraragiDesk.git
 cd LanraragiDesk
 xcodegen generate
 open LanraragiDesk.xcodeproj
 ```
 
-Then build/run the `LanraragiDesk` scheme.
+In Xcode, select the `LanraragiDesk` scheme and your Mac as the destination, then choose Run. To build from the command line:
 
-## Notes
+```sh
+xcodebuild -project LanraragiDesk.xcodeproj -scheme LanraragiDesk -configuration Debug build
+```
 
-- “Not a match” decisions are stored locally and are not written back to LANraragi.
-- Network concurrency is configurable in **Settings → Performance** so scans don’t monopolize your Mac.
-- Thumbnail crop/fill is configurable in **Settings → Thumbnails** (off by default).
+## Connect to LANraragi
 
-## Dev
+1. Open Settings and create or edit a server profile.
+2. Enter the server's base URL, such as `http://lanraragi.local:3000`, and its API key.
+3. Click **Test Connection**, then open Library.
 
-Requirements:
-- Xcode 15+ (you have Xcode 26.2)
-- Swift 6+
+Use the server's base address, not a reader or archive URL. `localhost` only works when LANraragi runs on the same Mac.
 
-Project layout:
-- `Packages/LanraragiKit`: LANraragi API client + dedup/index core (SwiftPM)
-- `Sources/LanraragiDeskApp`: macOS app (SwiftUI)
+Search uses LANraragi's comma-separated query syntax. Spaces remain part of a term, and negation and wildcard queries pass to the server. The default sort is newest added first, with a title-sort fallback for servers that do not support it.
 
-## Contributing
+## Review duplicates
 
-See `CONTRIBUTING.md` (includes a rule to keep Markdown docs updated alongside code changes).
+Open Duplicates and start a scan. The app compares cover fingerprints and presents candidate pairs with synchronized page previews. Review the pages and metadata before deleting either archive; a similar cover does not prove that the contents are identical.
 
-## Stability Checklist
+Normal scans reuse the local fingerprint index and remove stale entries after a full library enumeration. Use **Rebuild index and scan** for a full refresh. **Not a match** decisions persist locally and exclude those pairs from later scans.
 
-Use `/Users/chronostriker1/git/LanraragiDesk/docs/REGRESSION_CHECKLIST.md` for manual verification before releases or large merges.
+Metadata edits, cover changes, and archive deletions affect the connected server. Duplicate exclusions stay local.
 
-## Roadmap (vNext)
+## Batch operations
 
-- [x] Batch: persist and restore in-progress queue UI state across full app relaunch (including visible resume/cancel context)
-- [x] Activity: add one-click "Copy full diagnostic bundle" (selected rows + environment + profile endpoint) for faster bug reporting
+Select archives in Library or use the saved-query builder in Batch. **Select All Results** selects the whole current query, including results outside the visible page.
+
+For metadata plugins, select a plugin, configure its options and any URL argument, and choose whether to combine or replace metadata. Keep **Preview Before Queue** enabled to inspect a sample. Pause lets the current archive finish; resuming a recovered queue retries the last in-progress archive.
+
+## How it works
+
+The SwiftUI app calls LANraragi's HTTP API for library search, pages, thumbnails, and metadata operations. The local `LanraragiKit` Swift package contains the API client and duplicate-indexing code. A SQLite database stores cover fingerprints and duplicate-review state.
+
+Server paging keeps the full library out of memory. Request concurrency and tag-cache settings are configurable under Settings. Library request timings and Activity logs help diagnose slow or failed requests.
+
+## Local data and privacy
+
+API keys are stored in macOS Keychain. Profile files do not contain those keys.
+
+| Data | Location |
+| --- | --- |
+| Fingerprint index | `~/Library/Application Support/LanraragiDesk/index.sqlite` |
+| Tag cache | `~/Library/Application Support/LanraragiDesk/Cache/tagstats-<hash>.json` |
+| Activity log | `~/Library/Application Support/LanraragiDesk/activity.json` |
+| Saved batch queries | `~/Library/Application Support/LanraragiDesk/saved-batch-queries.json` |
+
+Diagnostic bundles include the selected profile endpoint and filtered activity. Review them before sharing.
+
+## Troubleshooting
+
+- Connection test fails: check the base URL, API key, and server reachability from your Mac.
+- Covers or scans are slow: lower network concurrency under Settings → Performance and inspect request timings or Activity errors.
+- Search behaves unexpectedly: use comma-separated LANraragi terms and check the query tips.
+- Duplicate results look stale: run **Rebuild index and scan** after confirming server availability.
+
+## Development
+
+`Sources/LanraragiDeskApp` contains the app. `Packages/LanraragiKit` contains the API client and indexing core. Regenerate the Xcode project after adding files or changing `project.yml`.
+
+```sh
+swift test --package-path Packages/LanraragiKit
+```
+
+See [contributing](CONTRIBUTING.md) and the [regression checklist](docs/REGRESSION_CHECKLIST.md) for development and manual testing.
